@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: risk-monitor
+  namespace: market-making
+  labels:
+    app: risk-monitor
+    version: v1
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: risk-monitor
+  template:
+    metadata:
+      labels:
+        app: risk-monitor
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8081"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: risk-monitor
+          image: ghcr.io/your-org/corp-risk-monitor:latest
+          imagePullPolicy: Always
+          command: ["python", "-m", "execution.risk_monitor"]
+          ports:
+            - containerPort: 8081
+              name: http
+          env:
+            - name: ENV
+              value: "production"
+            - name: LOG_LEVEL
+              value: "INFO"
+            - name: RISK_MONITOR_PORT
+              value: "8081"
+            - name: HEALTH_PORT
+              value: "8081"
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: mm-secrets
+                  key: redis-url
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: mm-secrets
+                  key: db-url
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8081
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8081
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: risk-monitor
+  namespace: market-making
+  labels:
+    app: risk-monitor
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8081
+      targetPort: 8081
+      name: http
+  selector:
+    app: risk-monitor
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: risk-monitor-hpa
+  namespace: market-making
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: risk-monitor
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

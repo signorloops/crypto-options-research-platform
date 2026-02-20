@@ -1,0 +1,119 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Market Making - Production",
+    "tags": ["market-making", "trading"],
+    "timezone": "UTC",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Circuit Breaker Status",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "circuit_breaker_state",
+            "legendFormat": "State"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "Current Regime",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "regime_detector_current_regime",
+            "legendFormat": "Regime"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "P&L (24h)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "portfolio_pnl_24h",
+            "legendFormat": "P&L"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+      },
+      {
+        "id": 4,
+        "title": "Quote Latency (P95)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(quote_generation_duration_seconds_bucket[5m]))",
+            "legendFormat": "P95 Latency"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+      },
+      {
+        "id": 5,
+        "title": "Risk Metrics",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "portfolio_delta",
+            "legendFormat": "Delta"
+          },
+          {
+            "expr": "portfolio_gamma",
+            "legendFormat": "Gamma"
+          },
+          {
+            "expr": "portfolio_vega",
+            "legendFormat": "Vega"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+      },
+      {
+        "id": 6,
+        "title": "Active Orders",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "active_orders_count",
+            "legendFormat": "Orders"
+          }
+        ],
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 16}
+      },
+      {
+        "id": 7,
+        "title": "Fill Rate",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "fill_rate_5m",
+            "legendFormat": "Fill %"
+          }
+        ],
+        "gridPos": {"h": 4, "w": 6, "x": 6, "y": 16}
+      },
+      {
+        "id": 8,
+        "title": "Hedging Activity",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(hedge_executions_total[5m])",
+            "legendFormat": "Hedges/sec"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16}
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "5s"
+  }
+}

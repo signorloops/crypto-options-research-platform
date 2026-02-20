@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: market-data-collector
+  namespace: market-making
+  labels:
+    app: market-data-collector
+    version: v1
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: market-data-collector
+  template:
+    metadata:
+      labels:
+        app: market-data-collector
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8082"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: market-data-collector
+          image: ghcr.io/your-org/corp-market-data:latest
+          imagePullPolicy: Always
+          command: ["python", "-m", "execution.market_data_collector"]
+          ports:
+            - containerPort: 8082
+              name: http
+          env:
+            - name: ENV
+              value: "production"
+            - name: LOG_LEVEL
+              value: "INFO"
+            - name: MARKET_DATA_COLLECTOR_PORT
+              value: "8082"
+            - name: HEALTH_PORT
+              value: "8082"
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: mm-secrets
+                  key: redis-url
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8082
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8082
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: market-data-collector
+  namespace: market-making
+  labels:
+    app: market-data-collector
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8082
+      targetPort: 8082
+      name: http
+  selector:
+    app: market-data-collector
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: market-data-collector-hpa
+  namespace: market-making
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: market-data-collector
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

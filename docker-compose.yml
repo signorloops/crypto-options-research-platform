@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  corp:
+    build: .
+    image: corp:latest
+    container_name: corp-platform
+    volumes:
+      - ${CORP_DATA_DIR:-./data}:/app/data
+      - ${CORP_LOGS_DIR:-./logs}:/app/logs
+      - ${CORP_NOTEBOOKS_DIR:-./notebooks}:/app/notebooks
+      - type: bind
+        source: ${CORP_ENV_FILE:-./.env}
+        target: /app/.env
+        read_only: true
+        bind:
+          create_host_path: false
+    environment:
+      - LOG_LEVEL=INFO
+      - LOG_FILE=logs/corp.log
+      - DATA_CACHE_DIR=data/cache
+    ports:
+      - "${JUPYTER_PORT:-8888}:${JUPYTER_PORT:-8888}"  # Jupyter Lab
+      - "${API_PORT:-8000}:${API_PORT:-8000}"  # API (if implemented)
+    command: jupyter lab --ip=0.0.0.0 --port=${JUPYTER_PORT:-8888} --no-browser --allow-root
+    restart: unless-stopped
+
+  # Optional: Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: corp-redis
+    ports:
+      - "${REDIS_PORT:-6379}:${REDIS_PORT:-6379}"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  # Optional: PostgreSQL for data storage
+  postgres:
+    image: postgres:15-alpine
+    container_name: corp-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-corp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: ${POSTGRES_DB:-corp_db}
+    ports:
+      - "${POSTGRES_PORT:-5432}:${POSTGRES_PORT:-5432}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+  postgres_data:

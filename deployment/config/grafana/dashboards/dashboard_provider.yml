@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: MarketMaking
+    orgId: 1
+    folder: Market Making
+    type: file
+    disableDeletion: false
+    editable: false
+    options:
+      path: /etc/grafana/provisioning/dashboards

@@ -1,0 +1,184 @@
+# Production deployment configuration for market making strategy.
+# 8-week roadmap implementation - Week 8 final deliverable.
+#
+# 重要: 部署前必须设置 DEPLOYMENT_ROOT 环境变量
+# 示例: export DEPLOYMENT_ROOT=/opt/corp
+#
+version: '3.8'
+
+services:
+  # Main trading engine
+  trading-engine:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.prod
+    container_name: mm-trading-engine
+    restart: unless-stopped
+    environment:
+      - ENV=production
+      - LOG_LEVEL=INFO
+      - CIRCUIT_BREAKER_ENABLED=true
+      - REGIME_DETECTOR_ENABLED=true
+      - HEDGE_ADAPTIVE_ENABLED=true
+    env_file:
+      - ${DEPLOYMENT_ROOT:?DEPLOYMENT_ROOT must be set}/.env.prod
+    volumes:
+      - ${DEPLOYMENT_ROOT}/logs:/app/logs
+      - ${DEPLOYMENT_ROOT}/data:/app/data
+      - ${DEPLOYMENT_ROOT}/config:/app/config:ro
+    networks:
+      - mm-network
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 8G
+        reservations:
+          cpus: '2.0'
+          memory: 4G
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:${HEALTH_PORT:-8080}/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # Risk monitoring service
+  risk-monitor:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.prod
+    container_name: mm-risk-monitor
+    restart: unless-stopped
+    command: python -m execution.risk_monitor
+    environment:
+      - ENV=production
+      - SERVICE_TYPE=risk
+      - RISK_MONITOR_PORT=${RISK_MONITOR_PORT:-8081}
+      - HEALTH_PORT=${RISK_MONITOR_PORT:-8081}
+    env_file:
+      - ${DEPLOYMENT_ROOT}/.env.prod
+    volumes:
+      - ${DEPLOYMENT_ROOT}/logs:/app/logs
+      - ${DEPLOYMENT_ROOT}/data:/app/data
+    networks:
+      - mm-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:${RISK_MONITOR_PORT:-8081}/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # Market data collector
+  market-data:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.prod
+    container_name: mm-market-data
+    restart: unless-stopped
+    command: python -m execution.market_data_collector
+    environment:
+      - ENV=production
+      - SERVICE_TYPE=market_data
+      - MARKET_DATA_COLLECTOR_PORT=${MARKET_DATA_COLLECTOR_PORT:-8082}
+      - HEALTH_PORT=${MARKET_DATA_COLLECTOR_PORT:-8082}
+    env_file:
+      - ${DEPLOYMENT_ROOT}/.env.prod
+    volumes:
+      - ${DEPLOYMENT_ROOT}/logs:/app/logs
+      - ${DEPLOYMENT_ROOT}/data/market_data:/app/data/market_data
+    networks:
+      - mm-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:${MARKET_DATA_COLLECTOR_PORT:-8082}/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # Prometheus metrics
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: mm-prometheus
+    restart: unless-stopped
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:${PROMETHEUS_PORT:-9090}"
+    volumes:
+      - ${DEPLOYMENT_ROOT}/config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - mm-network
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+
+  # Grafana dashboards
+  grafana:
+    image: grafana/grafana:latest
+    container_name: mm-grafana
+    restart: unless-stopped
+    ports:
+      - "${GRAFANA_PORT:-3000}:${GRAFANA_PORT:-3000}"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ${DEPLOYMENT_ROOT}/config/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ${DEPLOYMENT_ROOT}/config/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    networks:
+      - mm-network
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:?GRAFANA_ADMIN_USER must be set}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set}
+      - GF_USERS_ALLOW_SIGN_UP=false
+
+  # Redis cache for state management
+  redis:
+    image: redis:7-alpine
+    container_name: mm-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    networks:
+      - mm-network
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+
+  # PostgreSQL for trade logging
+  postgres:
+    image: postgres:15-alpine
+    container_name: mm-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${DB_USER:-mm_user}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:?DB_PASSWORD must be set}
+      - POSTGRES_DB=${DB_NAME:-market_making}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ${DEPLOYMENT_ROOT}/sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - mm-network
+    # 生产环境不暴露数据库端口，仅通过内部网络访问
+    # 如需外部访问，请使用 VPN 或跳板机
+
+networks:
+  mm-network:
+    driver: bridge
+
+volumes:
+  prometheus-data:
+  grafana-data:
+  redis-data:
+  postgres-data:

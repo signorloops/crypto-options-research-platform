@@ -1,0 +1,3 @@
+# Dependency source of truth: pyproject.toml
+# Install runtime + developer tooling consistently.
+-e .[dev]
