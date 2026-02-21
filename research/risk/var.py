@@ -2,6 +2,7 @@
 Value at Risk (VaR) and Expected Shortfall (CVaR) calculations.
 Includes parametric, historical, and Monte Carlo methods.
 """
+
 from dataclasses import dataclass
 from typing import Dict, Optional
 
@@ -13,6 +14,7 @@ from scipy import stats
 @dataclass
 class VaRResult:
     """Result of VaR calculation."""
+
     var_95: float  # 95% VaR
     var_99: float  # 99% VaR
     cvar_95: float  # Expected shortfall at 95%
@@ -22,11 +24,11 @@ class VaRResult:
     def to_dict(self) -> Dict[str, float]:
         """Convert to dictionary."""
         return {
-            'var_95': self.var_95,
-            'var_99': self.var_99,
-            'cvar_95': self.cvar_95,
-            'cvar_99': self.cvar_99,
-            'method': self.method
+            "var_95": self.var_95,
+            "var_99": self.var_99,
+            "cvar_95": self.cvar_95,
+            "cvar_99": self.cvar_99,
+            "method": self.method,
         }
 
 
@@ -44,12 +46,10 @@ class VaRCalculator:
         self.confidence_level = confidence_level
 
     def _prepare_portfolio_inputs(
-        self,
-        positions: pd.DataFrame,
-        returns: pd.DataFrame
+        self, positions: pd.DataFrame, returns: pd.DataFrame
     ) -> tuple[float, np.ndarray, pd.DataFrame]:
         """Validate inputs and align returns columns to positions index."""
-        if 'value' not in positions.columns:
+        if "value" not in positions.columns:
             raise ValueError("positions must contain 'value' column")
         if positions.empty:
             raise ValueError("positions must not be empty")
@@ -58,7 +58,7 @@ class VaRCalculator:
         if positions.index.has_duplicates:
             raise ValueError("positions index must be unique")
 
-        position_values = positions['value'].astype(float)
+        position_values = positions["value"].astype(float)
         if not np.all(np.isfinite(position_values.values)):
             raise ValueError("positions values must be finite")
 
@@ -98,10 +98,7 @@ class VaRCalculator:
         return None
 
     def parametric_var(
-        self,
-        positions: pd.DataFrame,
-        returns: pd.DataFrame,
-        holding_period: int = 1
+        self, positions: pd.DataFrame, returns: pd.DataFrame, holding_period: int = 1
     ) -> VaRResult:
         """
         Calculate parametric VaR assuming normal distribution.
@@ -149,18 +146,11 @@ class VaRCalculator:
         cvar_99 = total_value * (-mean_return * holding_period + adjusted_std * phi_99 / 0.01)
 
         return VaRResult(
-            var_95=var_95,
-            var_99=var_99,
-            cvar_95=cvar_95,
-            cvar_99=cvar_99,
-            method='parametric'
+            var_95=var_95, var_99=var_99, cvar_95=cvar_95, cvar_99=cvar_99, method="parametric"
         )
 
     def cornish_fisher_var(
-        self,
-        positions: pd.DataFrame,
-        returns: pd.DataFrame,
-        holding_period: int = 1
+        self, positions: pd.DataFrame, returns: pd.DataFrame, holding_period: int = 1
     ) -> VaRResult:
         """
         Cornish-Fisher VaR: 在正态 VaR 基础上加入偏度和峰度修正。
@@ -187,9 +177,9 @@ class VaRCalculator:
             z = stats.norm.ppf(alpha)
             z_cf = (
                 z
-                + (z ** 2 - 1) * skew / 6.0
-                + (z ** 3 - 3 * z) * (kurt - 3.0) / 24.0
-                - (2 * z ** 3 - 5 * z) * (skew ** 2) / 36.0
+                + (z**2 - 1) * skew / 6.0
+                + (z**3 - 3 * z) * (kurt - 3.0) / 24.0
+                - (2 * z**3 - 5 * z) * (skew**2) / 36.0
             )
             return z_cf
 
@@ -208,14 +198,11 @@ class VaRCalculator:
             var_99=float(var_99),
             cvar_95=float(cvar_95),
             cvar_99=float(cvar_99),
-            method="cornish_fisher"
+            method="cornish_fisher",
         )
 
     def historical_var(
-        self,
-        positions: pd.DataFrame,
-        returns: pd.DataFrame,
-        holding_period: int = 1
+        self, positions: pd.DataFrame, returns: pd.DataFrame, holding_period: int = 1
     ) -> VaRResult:
         """
         Calculate historical VaR using empirical distribution.
@@ -237,8 +224,7 @@ class VaRCalculator:
 
         # Calculate historical portfolio returns
         portfolio_returns = pd.Series(
-            aligned_returns.to_numpy() @ weights_arr,
-            index=aligned_returns.index
+            aligned_returns.to_numpy() @ weights_arr, index=aligned_returns.index
         )
 
         # Scale by holding period using non-overlapping windows to maintain independence
@@ -246,7 +232,9 @@ class VaRCalculator:
             n_periods = len(portfolio_returns) // holding_period
             if n_periods > 0:
                 # Reshape into non-overlapping periods
-                reshaped = portfolio_returns.iloc[:n_periods * holding_period].values.reshape(n_periods, holding_period)
+                reshaped = portfolio_returns.iloc[: n_periods * holding_period].values.reshape(
+                    n_periods, holding_period
+                )
                 portfolio_returns = pd.Series(reshaped.sum(axis=1))
             else:
                 # Not enough data, use simple scaling
@@ -257,15 +245,17 @@ class VaRCalculator:
         var_99 = -np.percentile(portfolio_returns, 1) * total_value
 
         # CVaR (average of returns beyond VaR threshold)
-        cvar_95 = -portfolio_returns[portfolio_returns <= np.percentile(portfolio_returns, 5)].mean() * total_value
-        cvar_99 = -portfolio_returns[portfolio_returns <= np.percentile(portfolio_returns, 1)].mean() * total_value
+        cvar_95 = (
+            -portfolio_returns[portfolio_returns <= np.percentile(portfolio_returns, 5)].mean()
+            * total_value
+        )
+        cvar_99 = (
+            -portfolio_returns[portfolio_returns <= np.percentile(portfolio_returns, 1)].mean()
+            * total_value
+        )
 
         return VaRResult(
-            var_95=var_95,
-            var_99=var_99,
-            cvar_95=cvar_95,
-            cvar_99=cvar_99,
-            method='historical'
+            var_95=var_95, var_99=var_99, cvar_95=cvar_95, cvar_99=cvar_99, method="historical"
         )
 
     def filtered_historical_var(
@@ -273,7 +263,7 @@ class VaRCalculator:
         positions: pd.DataFrame,
         returns: pd.DataFrame,
         holding_period: int = 1,
-        lambda_param: float = 0.94
+        lambda_param: float = 0.94,
     ) -> VaRResult:
         """
         Filtered Historical Simulation (FHS):
@@ -295,7 +285,9 @@ class VaRCalculator:
         ewma_var = np.zeros_like(portfolio_returns, dtype=float)
         ewma_var[0] = np.var(portfolio_returns)
         for i in range(1, len(portfolio_returns)):
-            ewma_var[i] = lambda_param * ewma_var[i - 1] + (1 - lambda_param) * portfolio_returns[i - 1] ** 2
+            ewma_var[i] = (
+                lambda_param * ewma_var[i - 1] + (1 - lambda_param) * portfolio_returns[i - 1] ** 2
+            )
 
         cond_vol = np.sqrt(np.maximum(ewma_var, eps))
         standardized = portfolio_returns / cond_vol
@@ -317,7 +309,7 @@ class VaRCalculator:
             var_99=float(var_99),
             cvar_95=float(cvar_95),
             cvar_99=float(cvar_99),
-            method="fhs"
+            method="fhs",
         )
 
     def evt_var(
@@ -325,7 +317,7 @@ class VaRCalculator:
         positions: pd.DataFrame,
         returns: pd.DataFrame,
         holding_period: int = 1,
-        threshold_quantile: float = 0.9
+        threshold_quantile: float = 0.9,
     ) -> VaRResult:
         """
         Peaks-over-threshold EVT VaR (GPD tail fit on losses).
@@ -336,7 +328,9 @@ class VaRCalculator:
         total_value, weights_arr, aligned_returns = self._prepare_portfolio_inputs(
             positions, returns
         )
-        portfolio_returns = self._portfolio_return_series(aligned_returns, weights_arr) * np.sqrt(holding_period)
+        portfolio_returns = self._portfolio_return_series(aligned_returns, weights_arr) * np.sqrt(
+            holding_period
+        )
         losses = -portfolio_returns
         if len(losses) < 50:
             return self.historical_var(positions, returns, holding_period)
@@ -368,7 +362,7 @@ class VaRCalculator:
         def evt_es(q_alpha: float, alpha: float) -> float:
             if shape >= 1:
                 return float(q_alpha * total_value)
-            es_loss = (q_alpha + (scale - shape * threshold) / (1 - shape))
+            es_loss = q_alpha + (scale - shape * threshold) / (1 - shape)
             return float(max(es_loss, q_alpha) * total_value)
 
         cvar_95 = evt_es(q95, 0.95)
@@ -379,7 +373,7 @@ class VaRCalculator:
             var_99=float(var_99),
             cvar_95=float(cvar_95),
             cvar_99=float(cvar_99),
-            method="evt"
+            method="evt",
         )
 
     def monte_carlo_var(
@@ -389,7 +383,7 @@ class VaRCalculator:
         greeks: Optional[pd.DataFrame] = None,
         n_simulations: int = 10000,
         holding_period: int = 1,
-        leverage_correlation: float = -0.35
+        leverage_correlation: float = -0.35,
     ) -> VaRResult:
         """
         Calculate VaR using Monte Carlo simulation.
@@ -411,14 +405,13 @@ class VaRCalculator:
         if holding_period <= 0:
             raise ValueError("holding_period must be positive")
 
-        total_value, weights, aligned_returns = self._prepare_portfolio_inputs(
-            positions, returns
-        )
+        total_value, weights, aligned_returns = self._prepare_portfolio_inputs(positions, returns)
         aligned_positions = positions.loc[aligned_returns.columns]
 
         # Estimate parameters from historical returns
         mean = aligned_returns.mean().values
-        cov = aligned_returns.cov().values
+        # Use a writable copy because pandas/numpy may return a read-only view.
+        cov = aligned_returns.cov().to_numpy(copy=True)
 
         # Check and fix covariance matrix positive definiteness
         # Add small regularization if needed to handle numerical issues
@@ -431,9 +424,7 @@ class VaRCalculator:
 
         # Generate correlated random returns
         simulated_returns = np.random.multivariate_normal(
-            mean * holding_period,
-            cov * holding_period,
-            n_simulations
+            mean * holding_period, cov * holding_period, n_simulations
         )
 
         # Leverage effect: negative return shocks tend to coincide with higher volatility.
@@ -462,12 +453,18 @@ class VaRCalculator:
                     # Non-option fallback path.
                     if greeks is not None and idx in greeks.index:
                         g = greeks.loc[idx]
-                        delta_pnl = g['delta'] * simulated_returns[:, i] * row['value']
-                        gamma_pnl = 0.5 * g.get('gamma', 0) * (simulated_returns[:, i] ** 2) * row['value']
-                        vega_pnl = g.get('vega', 0) * np.random.normal(0, 0.05, n_simulations) * row['value']
+                        delta_pnl = g["delta"] * simulated_returns[:, i] * row["value"]
+                        gamma_pnl = (
+                            0.5 * g.get("gamma", 0) * (simulated_returns[:, i] ** 2) * row["value"]
+                        )
+                        vega_pnl = (
+                            g.get("vega", 0)
+                            * np.random.normal(0, 0.05, n_simulations)
+                            * row["value"]
+                        )
                         pnl += delta_pnl + gamma_pnl + vega_pnl
                     else:
-                        pnl += simulated_returns[:, i] * row['value']
+                        pnl += simulated_returns[:, i] * row["value"]
                     continue
 
                 underlying_asset = row.get("underlying_asset", idx)
@@ -484,11 +481,11 @@ class VaRCalculator:
                     risk_free_rate = float(row.get("risk_free_rate", 0.0))
                     vol_of_vol = float(row.get("vol_of_vol", 0.20))
                 except (TypeError, ValueError):
-                    pnl += simulated_returns[:, i] * row['value']
+                    pnl += simulated_returns[:, i] * row["value"]
                     continue
 
                 if spot_0 <= 0 or strike <= 0 or implied_vol <= 0:
-                    pnl += simulated_returns[:, i] * row['value']
+                    pnl += simulated_returns[:, i] * row["value"]
                     continue
 
                 # Build shocked spot/vol paths for full revaluation.
@@ -509,15 +506,15 @@ class VaRCalculator:
                         T=max(time_to_expiry, 1e-8),
                         r=risk_free_rate,
                         sigma=implied_vol,
-                        option_type=option_type
+                        option_type=option_type,
                     )
                 except Exception:
-                    pnl += simulated_returns[:, i] * row['value']
+                    pnl += simulated_returns[:, i] * row["value"]
                     continue
 
                 base_price_usd = base_price_btc * spot_0
                 if base_price_usd <= 1e-12:
-                    pnl += simulated_returns[:, i] * row['value']
+                    pnl += simulated_returns[:, i] * row["value"]
                     continue
 
                 quantity = float(row["value"]) / base_price_usd
@@ -546,13 +543,17 @@ class VaRCalculator:
                     g = greeks.loc[idx]
 
                     # Delta-gamma-vega approximation
-                    delta_pnl = g['delta'] * simulated_returns[:, i] * row['value']
-                    gamma_pnl = 0.5 * g.get('gamma', 0) * (simulated_returns[:, i] ** 2) * row['value']
-                    vega_pnl = g.get('vega', 0) * np.random.normal(0, 0.05, n_simulations) * row['value']
+                    delta_pnl = g["delta"] * simulated_returns[:, i] * row["value"]
+                    gamma_pnl = (
+                        0.5 * g.get("gamma", 0) * (simulated_returns[:, i] ** 2) * row["value"]
+                    )
+                    vega_pnl = (
+                        g.get("vega", 0) * np.random.normal(0, 0.05, n_simulations) * row["value"]
+                    )
 
                     pnl += delta_pnl + gamma_pnl + vega_pnl
                 else:
-                    pnl += simulated_returns[:, i] * row['value']
+                    pnl += simulated_returns[:, i] * row["value"]
         else:
             # Linear approximation
             pnl = simulated_returns @ weights * total_value
@@ -564,11 +565,7 @@ class VaRCalculator:
         cvar_99 = -pnl[pnl <= np.percentile(pnl, 1)].mean()
 
         return VaRResult(
-            var_95=var_95,
-            var_99=var_99,
-            cvar_95=cvar_95,
-            cvar_99=cvar_99,
-            method='monte_carlo'
+            var_95=var_95, var_99=var_99, cvar_95=cvar_95, cvar_99=cvar_99, method="monte_carlo"
         )
 
 
@@ -579,37 +576,34 @@ class StressTest:
 
     # Predefined stress scenarios
     SCENARIOS = {
-        'market_crash': {
-            'description': '1987-style market crash',
-            'spot_shock': -0.20,
-            'vol_shock': 0.50,
-            'correlation_spike': True
+        "market_crash": {
+            "description": "1987-style market crash",
+            "spot_shock": -0.20,
+            "vol_shock": 0.50,
+            "correlation_spike": True,
         },
-        'vol_spike': {
-            'description': 'Sudden volatility explosion',
-            'spot_shock': -0.05,
-            'vol_shock': 1.00,
-            'correlation_spike': False
+        "vol_spike": {
+            "description": "Sudden volatility explosion",
+            "spot_shock": -0.05,
+            "vol_shock": 1.00,
+            "correlation_spike": False,
         },
-        'liquidity_crisis': {
-            'description': 'Liquidity drought',
-            'spot_shock': -0.10,
-            'vol_shock': 0.30,
-            'bid_ask_widening': 3.0
+        "liquidity_crisis": {
+            "description": "Liquidity drought",
+            "spot_shock": -0.10,
+            "vol_shock": 0.30,
+            "bid_ask_widening": 3.0,
         },
-        'flash_crash': {
-            'description': '2010-style flash crash',
-            'spot_shock': -0.10,
-            'recovery': 0.08,
-            'duration_minutes': 15
-        }
+        "flash_crash": {
+            "description": "2010-style flash crash",
+            "spot_shock": -0.10,
+            "recovery": 0.08,
+            "duration_minutes": 15,
+        },
     }
 
     def run_stress_test(
-        self,
-        positions: pd.DataFrame,
-        greeks: pd.DataFrame,
-        scenario: str
+        self, positions: pd.DataFrame, greeks: pd.DataFrame, scenario: str
     ) -> Dict[str, float]:
         """
         Run stress test for a given scenario.
@@ -625,8 +619,8 @@ class StressTest:
         if isinstance(scenario, str):
             scenario = self.SCENARIOS.get(scenario, {})
 
-        spot_shock = scenario.get('spot_shock', 0)
-        vol_shock = scenario.get('vol_shock', 0)
+        spot_shock = scenario.get("spot_shock", 0)
+        vol_shock = scenario.get("vol_shock", 0)
 
         total_pnl = 0
 
@@ -635,35 +629,31 @@ class StressTest:
                 g = greeks.loc[idx]
 
                 # Delta PnL
-                delta_pnl = g['delta'] * spot_shock * pos['value']
+                delta_pnl = g["delta"] * spot_shock * pos["value"]
 
                 # Gamma PnL
-                gamma_pnl = 0.5 * g.get('gamma', 0) * (spot_shock ** 2) * pos['value']
+                gamma_pnl = 0.5 * g.get("gamma", 0) * (spot_shock**2) * pos["value"]
 
                 # Vega PnL
-                vega_pnl = g.get('vega', 0) * vol_shock * 100 * pos['value']
+                vega_pnl = g.get("vega", 0) * vol_shock * 100 * pos["value"]
 
                 total_pnl += delta_pnl + gamma_pnl + vega_pnl
 
         return {
-            'scenario_name': scenario.get('description', 'Custom'),
-            'spot_shock': spot_shock,
-            'vol_shock': vol_shock,
-            'estimated_pnl': total_pnl,
-            'pct_of_portfolio': total_pnl / positions['value'].sum() * 100
+            "scenario_name": scenario.get("description", "Custom"),
+            "spot_shock": spot_shock,
+            "vol_shock": vol_shock,
+            "estimated_pnl": total_pnl,
+            "pct_of_portfolio": total_pnl / positions["value"].sum() * 100,
         }
 
-    def run_all_scenarios(
-        self,
-        positions: pd.DataFrame,
-        greeks: pd.DataFrame
-    ) -> pd.DataFrame:
+    def run_all_scenarios(self, positions: pd.DataFrame, greeks: pd.DataFrame) -> pd.DataFrame:
         """Run all predefined stress scenarios."""
         results = []
 
         for scenario_name in self.SCENARIOS.keys():
             result = self.run_stress_test(positions, greeks, scenario_name)
-            result['scenario'] = scenario_name
+            result["scenario"] = scenario_name
             results.append(result)
 
         return pd.DataFrame(results)

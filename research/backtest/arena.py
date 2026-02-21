@@ -2,6 +2,7 @@
 Strategy Arena - Comprehensive backtesting and comparison framework.
 Compare multiple strategies head-to-head on the same data with fair metrics.
 """
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
@@ -21,6 +22,7 @@ logger = get_logger(__name__)
 @dataclass
 class StrategyScorecard:
     """Comprehensive performance metrics for a strategy."""
+
     strategy_name: str
 
     # Return metrics
@@ -107,7 +109,7 @@ class StrategyArena:
         self,
         market_data: pd.DataFrame,
         initial_capital: float = 100000.0,
-        transaction_cost_bps: float = 2.0
+        transaction_cost_bps: float = 2.0,
     ):
         self.market_data = market_data.copy()
         self.initial_capital = initial_capital
@@ -117,9 +119,7 @@ class StrategyArena:
         self.scorecards: Dict[str, StrategyScorecard] = {}
 
     def run_tournament(
-        self,
-        strategies: List[MarketMakingStrategy],
-        verbose: bool = True
+        self, strategies: List[MarketMakingStrategy], verbose: bool = True
     ) -> pd.DataFrame:
         """
         Run all strategies and compare results.
@@ -162,8 +162,8 @@ class StrategyArena:
                         strategy=strategy.name,
                         pnl=result.total_pnl_usd,
                         trades=result.trade_count,
-                        sharpe=result.sharpe_ratio
-                    )
+                        sharpe=result.sharpe_ratio,
+                    ),
                 )
 
         # Multi-strategy correction: deflate Sharpe by number of tested strategies.
@@ -192,11 +192,27 @@ class StrategyArena:
         if len(pnl_series) == 0:
             return StrategyScorecard(
                 strategy_name=result.strategy_name,
-                total_pnl=0, total_return_pct=0, annualized_return=0,
-                sharpe_ratio=0, deflated_sharpe_ratio=0, sortino_ratio=0, max_drawdown=0, calmar_ratio=0,
-                total_trades=0, win_rate=0, avg_trade_pnl=0, avg_win=0, avg_loss=0, profit_factor=0,
-                spread_capture=0, adverse_selection_cost=0, inventory_cost=0, fill_rate=0,
-                daily_pnl_std=0, worst_day=0, best_day=0
+                total_pnl=0,
+                total_return_pct=0,
+                annualized_return=0,
+                sharpe_ratio=0,
+                deflated_sharpe_ratio=0,
+                sortino_ratio=0,
+                max_drawdown=0,
+                calmar_ratio=0,
+                total_trades=0,
+                win_rate=0,
+                avg_trade_pnl=0,
+                avg_win=0,
+                avg_loss=0,
+                profit_factor=0,
+                spread_capture=0,
+                adverse_selection_cost=0,
+                inventory_cost=0,
+                fill_rate=0,
+                daily_pnl_std=0,
+                worst_day=0,
+                best_day=0,
             )
 
         # Return metrics
@@ -254,7 +270,7 @@ class StrategyArena:
             # Calculate profit factor
             total_gains = wins_pnl.sum() if len(wins_pnl) > 0 else 0
             total_losses = abs(losses_pnl.sum()) if len(losses_pnl) > 0 else 0
-            profit_factor = total_gains / total_losses if total_losses > 0 else float('inf')
+            profit_factor = total_gains / total_losses if total_losses > 0 else float("inf")
         else:
             win_rate = 0.0
             avg_win = 0.0
@@ -295,27 +311,29 @@ class StrategyArena:
             best_day=best_day,
             pnl_series=pnl_series,
             drawdown_series=drawdown_series,
-            inventory_series=result.inventory_series
+            inventory_series=result.inventory_series,
         )
 
     def _create_comparison_df(self) -> pd.DataFrame:
         """Create comparison DataFrame from scorecards."""
         rows = []
         for name, sc in self.scorecards.items():
-            rows.append({
-                'Strategy': name,
-                'Total PnL ($)': sc.total_pnl,
-                'Return (%)': sc.total_return_pct * 100,
-                'Annual Return (%)': sc.annualized_return * 100,
-                'Sharpe': sc.sharpe_ratio,
-                'Deflated Sharpe': sc.deflated_sharpe_ratio,
-                'Sortino': sc.sortino_ratio,
-                'Max DD (%)': sc.max_drawdown * 100,
-                'Calmar': sc.calmar_ratio,
-                'Trades': sc.total_trades,
-                'Avg Trade ($)': sc.avg_trade_pnl,
-                'Daily Std ($)': sc.daily_pnl_std,
-            })
+            rows.append(
+                {
+                    "Strategy": name,
+                    "Total PnL ($)": sc.total_pnl,
+                    "Return (%)": sc.total_return_pct * 100,
+                    "Annual Return (%)": sc.annualized_return * 100,
+                    "Sharpe": sc.sharpe_ratio,
+                    "Deflated Sharpe": sc.deflated_sharpe_ratio,
+                    "Sortino": sc.sortino_ratio,
+                    "Max DD (%)": sc.max_drawdown * 100,
+                    "Calmar": sc.calmar_ratio,
+                    "Trades": sc.total_trades,
+                    "Avg Trade ($)": sc.avg_trade_pnl,
+                    "Daily Std ($)": sc.daily_pnl_std,
+                }
+            )
 
         return pd.DataFrame(rows)
 
@@ -333,8 +351,8 @@ class StrategyArena:
         for name, sc in self.scorecards.items():
             if len(sc.pnl_series) > 0:
                 ax.plot(sc.pnl_series.index, sc.pnl_series.values, label=name)
-        ax.set_title('Cumulative PnL')
-        ax.set_ylabel('PnL ($)')
+        ax.set_title("Cumulative PnL")
+        ax.set_ylabel("PnL ($)")
         ax.legend()
         ax.grid(True, alpha=0.3)
 
@@ -342,9 +360,11 @@ class StrategyArena:
         ax = axes[0, 1]
         for name, sc in self.scorecards.items():
             if len(sc.drawdown_series) > 0:
-                ax.fill_between(sc.drawdown_series.index, sc.drawdown_series.values, 0, alpha=0.3, label=name)
-        ax.set_title('Drawdown')
-        ax.set_ylabel('Drawdown (%)')
+                ax.fill_between(
+                    sc.drawdown_series.index, sc.drawdown_series.values, 0, alpha=0.3, label=name
+                )
+        ax.set_title("Drawdown")
+        ax.set_ylabel("Drawdown (%)")
         ax.legend()
         ax.grid(True, alpha=0.3)
 
@@ -352,10 +372,12 @@ class StrategyArena:
         ax = axes[0, 2]
         for name, sc in self.scorecards.items():
             if len(sc.inventory_series) > 0:
-                ax.plot(sc.inventory_series.index, sc.inventory_series.values, label=name, alpha=0.7)
-        ax.axhline(y=0, color='k', linestyle='--', alpha=0.3)
-        ax.set_title('Inventory Position')
-        ax.set_ylabel('Position')
+                ax.plot(
+                    sc.inventory_series.index, sc.inventory_series.values, label=name, alpha=0.7
+                )
+        ax.axhline(y=0, color="k", linestyle="--", alpha=0.3)
+        ax.set_title("Inventory Position")
+        ax.set_ylabel("Position")
         ax.legend()
         ax.grid(True, alpha=0.3)
 
@@ -363,43 +385,60 @@ class StrategyArena:
         ax = axes[1, 0]
         strategies = list(self.scorecards.keys())
         returns = [self.scorecards[s].total_return_pct * 100 for s in strategies]
-        colors = ['green' if r > 0 else 'red' for r in returns]
+        colors = ["green" if r > 0 else "red" for r in returns]
         ax.bar(strategies, returns, color=colors, alpha=0.7)
-        ax.set_title('Total Return (%)')
-        ax.set_ylabel('Return (%)')
-        ax.axhline(y=0, color='k', linestyle='-', linewidth=0.5)
-        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+        ax.set_title("Total Return (%)")
+        ax.set_ylabel("Return (%)")
+        ax.axhline(y=0, color="k", linestyle="-", linewidth=0.5)
+        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
 
         # 5. Risk-Return scatter
         ax = axes[1, 1]
         for name, sc in self.scorecards.items():
-            ax.scatter(sc.max_drawdown * 100, sc.annualized_return * 100, s=200, alpha=0.6, label=name)
-        ax.set_xlabel('Max Drawdown (%)')
-        ax.set_ylabel('Annualized Return (%)')
-        ax.set_title('Risk-Return Profile')
-        ax.axhline(y=0, color='k', linestyle='--', alpha=0.3)
-        ax.axvline(x=0, color='k', linestyle='--', alpha=0.3)
+            ax.scatter(
+                sc.max_drawdown * 100, sc.annualized_return * 100, s=200, alpha=0.6, label=name
+            )
+        ax.set_xlabel("Max Drawdown (%)")
+        ax.set_ylabel("Annualized Return (%)")
+        ax.set_title("Risk-Return Profile")
+        ax.axhline(y=0, color="k", linestyle="--", alpha=0.3)
+        ax.axvline(x=0, color="k", linestyle="--", alpha=0.3)
         ax.legend()
         ax.grid(True, alpha=0.3)
 
         # 6. Sharpe comparison
         ax = axes[1, 2]
         sharpes = [self.scorecards[s].sharpe_ratio for s in strategies]
-        colors = ['green' if s > 1 else 'orange' if s > 0 else 'red' for s in sharpes]
+        colors = ["green" if s > 1 else "orange" if s > 0 else "red" for s in sharpes]
         ax.bar(strategies, sharpes, color=colors, alpha=0.7)
-        ax.axhline(y=1, color='g', linestyle='--', alpha=0.5, label='Good (>1)')
-        ax.axhline(y=0, color='r', linestyle='--', alpha=0.5)
-        ax.set_title('Sharpe Ratio')
-        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+        ax.axhline(y=1, color="g", linestyle="--", alpha=0.5, label="Good (>1)")
+        ax.axhline(y=0, color="r", linestyle="--", alpha=0.5)
+        ax.set_title("Sharpe Ratio")
+        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
 
         # 7. PnL distribution
         ax = axes[2, 0]
         for name, sc in self.scorecards.items():
             if len(sc.pnl_series) > 1:
                 daily_pnls = sc.pnl_series.diff().dropna()
-                ax.hist(daily_pnls, bins=30, alpha=0.5, label=name, density=True)
-        ax.set_title('Daily PnL Distribution')
-        ax.set_xlabel('Daily PnL ($)')
+                values = daily_pnls.to_numpy(dtype=float)
+                values = values[np.isfinite(values)]
+                if len(values) == 0:
+                    continue
+                try:
+                    ax.hist(values, bins=30, alpha=0.5, label=name, density=True)
+                except ValueError:
+                    center = float(np.mean(values))
+                    span = max(1e-6, abs(center) * 0.01)
+                    ax.hist(
+                        values,
+                        bins=[center - span, center + span],
+                        alpha=0.5,
+                        label=name,
+                        density=True,
+                    )
+        ax.set_title("Daily PnL Distribution")
+        ax.set_xlabel("Daily PnL ($)")
         ax.legend()
 
         # 8. Rolling Sharpe
@@ -408,35 +447,40 @@ class StrategyArena:
         for name, sc in self.scorecards.items():
             if len(sc.pnl_series) > window:
                 daily_returns = sc.pnl_series.diff()
-                rolling_sharpe = (daily_returns.rolling(window).mean() /
-                                 daily_returns.rolling(window).std() * np.sqrt(365))
+                rolling_sharpe = (
+                    daily_returns.rolling(window).mean()
+                    / daily_returns.rolling(window).std()
+                    * np.sqrt(365)
+                )
                 ax.plot(rolling_sharpe.index, rolling_sharpe.values, label=name, alpha=0.7)
-        ax.set_title(f'Rolling Sharpe ({window} periods)')
-        ax.axhline(y=1, color='g', linestyle='--', alpha=0.5)
+        ax.set_title(f"Rolling Sharpe ({window} periods)")
+        ax.axhline(y=1, color="g", linestyle="--", alpha=0.5)
         ax.legend()
         ax.grid(True, alpha=0.3)
 
         # 9. Metrics table
         ax = axes[2, 2]
-        ax.axis('off')
+        ax.axis("off")
 
         comparison = self._create_comparison_df()
         table_data = []
         for _, row in comparison.iterrows():
-            table_data.append([
-                row['Strategy'][:15],
-                f"${row['Total PnL ($)']:,.0f}",
-                f"{row['Return (%)']:.1f}%",
-                f"{row['Sharpe']:.2f}",
-                f"{row['Max DD (%)']:.1f}%"
-            ])
+            table_data.append(
+                [
+                    row["Strategy"][:15],
+                    f"${row['Total PnL ($)']:,.0f}",
+                    f"{row['Return (%)']:.1f}%",
+                    f"{row['Sharpe']:.2f}",
+                    f"{row['Max DD (%)']:.1f}%",
+                ]
+            )
 
         table = ax.table(
             cellText=table_data,
-            colLabels=['Strategy', 'PnL', 'Return', 'Sharpe', 'Max DD'],
-            cellLoc='center',
-            loc='center',
-            bbox=[0, 0, 1, 1]
+            colLabels=["Strategy", "PnL", "Return", "Sharpe", "Max DD"],
+            cellLoc="center",
+            loc="center",
+            bbox=[0, 0, 1, 1],
         )
         table.auto_set_font_size(False)
         table.set_fontsize(9)
@@ -445,7 +489,7 @@ class StrategyArena:
         plt.tight_layout()
         return fig
 
-    def get_winner(self, metric: str = 'sharpe_ratio') -> str:
+    def get_winner(self, metric: str = "sharpe_ratio") -> str:
         """
         Get the best performing strategy by a given metric.
 
@@ -460,13 +504,13 @@ class StrategyArena:
 
         rankings = sorted(
             self.scorecards.items(),
-            key=lambda x: getattr(x[1], metric, float('-inf')),
-            reverse=True
+            key=lambda x: getattr(x[1], metric, float("-inf")),
+            reverse=True,
         )
 
         return rankings[0][0]
 
-    def statistical_comparison(self, correction: str = 'bonferroni') -> pd.DataFrame:
+    def statistical_comparison(self, correction: str = "bonferroni") -> pd.DataFrame:
         """
         Perform statistical tests between strategies with multiple comparison correction.
 
@@ -489,7 +533,7 @@ class StrategyArena:
         indices = []
 
         for i in range(n):
-            for j in range(i+1, n):
+            for j in range(i + 1, n):
                 sc1 = self.scorecards[names[i]]
                 sc2 = self.scorecards[names[j]]
 
@@ -506,7 +550,7 @@ class StrategyArena:
 
         # Apply multiple comparison correction
         n_tests = len(raw_p_values)
-        if n_tests > 1 and correction == 'bonferroni':
+        if n_tests > 1 and correction == "bonferroni":
             # Bonferroni correction: multiply by number of tests
             for (i, j), p in zip(indices, raw_p_values):
                 corrected_p = min(p * n_tests, 1.0)  # Cap at 1.0
@@ -526,9 +570,9 @@ class StrategyArena:
             Report string
         """
         lines = []
-        lines.append("="*70)
+        lines.append("=" * 70)
         lines.append("STRATEGY ARENA - BACKTEST REPORT")
-        lines.append("="*70)
+        lines.append("=" * 70)
         lines.append(f"\nBacktest Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         lines.append(f"Initial Capital: ${self.initial_capital:,.2f}")
         lines.append(f"Transaction Cost: {self.transaction_cost_bps} bps")
@@ -541,18 +585,18 @@ class StrategyArena:
             lines.append("Data Period: No data")
         lines.append(f"Number of Strategies: {len(self.scorecards)}")
 
-        lines.append("\n" + "="*70)
+        lines.append("\n" + "=" * 70)
         lines.append("INDIVIDUAL STRATEGY RESULTS")
-        lines.append("="*70)
+        lines.append("=" * 70)
 
         for name, sc in self.scorecards.items():
             lines.append(sc.summary())
 
-        lines.append("\n" + "="*70)
+        lines.append("\n" + "=" * 70)
         lines.append("STRATEGY RANKINGS")
-        lines.append("="*70)
+        lines.append("=" * 70)
 
-        metrics = ['total_pnl', 'sharpe_ratio', 'sortino_ratio', 'calmar_ratio']
+        metrics = ["total_pnl", "sharpe_ratio", "sortino_ratio", "calmar_ratio"]
         for metric in metrics:
             winner = self.get_winner(metric)
             value = getattr(self.scorecards[winner], metric)
@@ -561,7 +605,7 @@ class StrategyArena:
         report = "\n".join(lines)
 
         if output_file:
-            with open(output_file, 'w') as f:
+            with open(output_file, "w") as f:
                 f.write(report)
 
         return report
