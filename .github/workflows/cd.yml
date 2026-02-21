@@ -47,25 +47,42 @@ jobs:
   deploy-staging:
     runs-on: ubuntu-latest
     needs: build-and-push
-    if: ${{ (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') && secrets.KUBE_CONFIG != '' }}
+    if: ${{ github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' }}
     environment: staging
+    env:
+      KUBE_CONFIG_B64: ${{ secrets.KUBE_CONFIG }}
 
     steps:
+      - name: Check deployment prerequisites
+        id: prereq
+        run: |
+          if [ -z "$KUBE_CONFIG_B64" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "KUBE_CONFIG is not configured; skipping staging deployment."
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.prereq.outputs.enabled == 'true'
 
       - name: Install kubectl
+        if: steps.prereq.outputs.enabled == 'true'
         uses: azure/setup-kubectl@v4
 
       - name: Configure kubeconfig
+        if: steps.prereq.outputs.enabled == 'true'
         run: |
           mkdir -p ~/.kube
-          echo "${{ secrets.KUBE_CONFIG }}" | base64 --decode > ~/.kube/config
+          echo "$KUBE_CONFIG_B64" | base64 --decode > ~/.kube/config
 
       - name: Apply manifests
+        if: steps.prereq.outputs.enabled == 'true'
         run: |
           kubectl apply -k deployment/k8s
 
       - name: Update deployment images
+        if: steps.prereq.outputs.enabled == 'true'
         run: |
           kubectl -n market-making set image deployment/trading-engine \
             trading-engine=ghcr.io/${{ github.repository_owner }}/corp-trading-engine:${{ github.sha }}
@@ -75,6 +92,7 @@ jobs:
             market-data-collector=ghcr.io/${{ github.repository_owner }}/corp-market-data:${{ github.sha }}
 
       - name: Verify rollout
+        if: steps.prereq.outputs.enabled == 'true'
         run: |
           kubectl -n market-making rollout status deployment/trading-engine --timeout=180s
           kubectl -n market-making rollout status deployment/risk-monitor --timeout=180s

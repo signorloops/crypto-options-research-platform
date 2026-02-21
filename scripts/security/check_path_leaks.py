@@ -12,7 +12,7 @@ from pathlib import Path
 PATTERNS = {
     "unix_user_home": re.compile(r"(?<![A-Za-z0-9_])/(?:Users|home)/[^\s'\"`]+"),
     "windows_user_home": re.compile(r"(?<![A-Za-z0-9_])[A-Za-z]:\\Users\\[^\s'\"`]+"),
-    "file_uri": re.compile(r"file:///[^\s'\"`]+"),
+    "file_uri": re.compile(r"file:///[A-Za-z0-9._~/%+-][^\s'\"`]*"),
 }
 
 
@@ -80,9 +80,7 @@ def scan_file(path: Path, root: Path) -> list[str]:
         for name, pattern in PATTERNS.items():
             for match in pattern.finditer(line):
                 col = match.start() + 1
-                findings.append(
-                    f"{rel}:{line_no}:{col}: [{name}] {match.group(0)}"
-                )
+                findings.append(f"{rel}:{line_no}:{col}: [{name}] {match.group(0)}")
     return findings
 
 
