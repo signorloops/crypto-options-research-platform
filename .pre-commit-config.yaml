@@ -3,6 +3,15 @@
 # Run manually: pre-commit run --all-files
 
 repos:
+  - repo: local
+    hooks:
+      - id: no-absolute-path-leaks
+        name: no absolute path leaks
+        entry: python scripts/security/check_path_leaks.py
+        language: system
+        pass_filenames: true
+        types: [text]
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0
     hooks:
