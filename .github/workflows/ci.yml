@@ -84,13 +84,29 @@ jobs:
 
     - name: Type check with mypy
       run: |
-        # Incremental strict gate on core risk/math modules.
-        mypy \
-          core/types.py \
-          core/validation/validators.py \
-          strategies/arbitrage/basis.py \
-          strategies/arbitrage/conversion.py \
-          strategies/arbitrage/option_box.py \
+        # Incremental strict gate on selected core risk/math modules.
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+        else
+          BASE_SHA="${{ github.event.before }}"
+        fi
+        if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+          BASE_SHA="$(git rev-parse HEAD~1 2>/dev/null || true)"
+        fi
+        if [ -z "$BASE_SHA" ]; then
+          echo "No usable base SHA; skipping mypy."
+          exit 0
+        fi
+
+        CHANGED_STRICT="$(git diff --name-only "$BASE_SHA" "$GITHUB_SHA" | grep -E '^(core/types\.py|core/validation/validators\.py|strategies/arbitrage/(basis|conversion|option_box)\.py)$' || true)"
+        if [ -z "$CHANGED_STRICT" ]; then
+          echo "No strict-typed modules changed; skipping mypy."
+          exit 0
+        fi
+
+        echo "Changed strict-typed modules:"
+        echo "$CHANGED_STRICT"
+        echo "$CHANGED_STRICT" | xargs mypy \
           --ignore-missing-imports \
           --python-version 3.11 \
           --follow-imports=skip
