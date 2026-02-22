@@ -384,6 +384,7 @@ class VaRCalculator:
         n_simulations: int = 10000,
         holding_period: int = 1,
         leverage_correlation: float = -0.35,
+        random_seed: Optional[int] = None,
     ) -> VaRResult:
         """
         Calculate VaR using Monte Carlo simulation.
@@ -396,6 +397,7 @@ class VaRCalculator:
             greeks: Optional DataFrame with 'delta', 'gamma', 'vega' columns
             n_simulations: Number of Monte Carlo paths
             holding_period: Days to hold
+            random_seed: Optional local RNG seed for reproducible simulation
 
         Returns:
             VaRResult
@@ -422,8 +424,11 @@ class VaRCalculator:
             regularization = max(1e-6, -min_eigenvalue + 1e-6)
             cov += np.eye(len(cov)) * regularization
 
+        # Optional local RNG improves reproducibility without mutating global RNG state.
+        rng = np.random.default_rng(random_seed) if random_seed is not None else np.random
+
         # Generate correlated random returns
-        simulated_returns = np.random.multivariate_normal(
+        simulated_returns = rng.multivariate_normal(
             mean * holding_period, cov * holding_period, n_simulations
         )
 
@@ -458,9 +463,7 @@ class VaRCalculator:
                             0.5 * g.get("gamma", 0) * (simulated_returns[:, i] ** 2) * row["value"]
                         )
                         vega_pnl = (
-                            g.get("vega", 0)
-                            * np.random.normal(0, 0.05, n_simulations)
-                            * row["value"]
+                            g.get("vega", 0) * rng.normal(0, 0.05, n_simulations) * row["value"]
                         )
                         pnl += delta_pnl + gamma_pnl + vega_pnl
                     else:
@@ -493,7 +496,7 @@ class VaRCalculator:
                 shocked_spot = np.clip(spot_0 * np.exp(underlying_returns), 1e-8, None)
 
                 vol_shock_scale = max(vol_of_vol, 1e-6) * np.sqrt(holding_period / 365.25)
-                vol_shock = np.random.normal(0.0, vol_shock_scale, n_simulations)
+                vol_shock = rng.normal(0.0, vol_shock_scale, n_simulations)
                 if abs(leverage_correlation) > 1e-8:
                     vol_shock += -leverage_correlation * underlying_returns
                 shocked_vol = np.clip(implied_vol * (1.0 + vol_shock), 0.01, 5.0)
@@ -547,9 +550,7 @@ class VaRCalculator:
                     gamma_pnl = (
                         0.5 * g.get("gamma", 0) * (simulated_returns[:, i] ** 2) * row["value"]
                     )
-                    vega_pnl = (
-                        g.get("vega", 0) * np.random.normal(0, 0.05, n_simulations) * row["value"]
-                    )
+                    vega_pnl = g.get("vega", 0) * rng.normal(0, 0.05, n_simulations) * row["value"]
 
                     pnl += delta_pnl + gamma_pnl + vega_pnl
                 else:

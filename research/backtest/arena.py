@@ -425,18 +425,13 @@ class StrategyArena:
                 values = values[np.isfinite(values)]
                 if len(values) == 0:
                     continue
-                try:
-                    ax.hist(values, bins=30, alpha=0.5, label=name, density=True)
-                except ValueError:
-                    center = float(np.mean(values))
+                if np.ptp(values) <= 1e-12:
+                    center = float(values[0])
                     span = max(1e-6, abs(center) * 0.01)
-                    ax.hist(
-                        values,
-                        bins=[center - span, center + span],
-                        alpha=0.5,
-                        label=name,
-                        density=True,
-                    )
+                    bins = [center - span, center + span]
+                else:
+                    bins = 30
+                ax.hist(values, bins=bins, alpha=0.5, label=name, density=True)
         ax.set_title("Daily PnL Distribution")
         ax.set_xlabel("Daily PnL ($)")
         ax.legend()
