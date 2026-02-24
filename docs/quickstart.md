@@ -209,6 +209,7 @@ python validation_scripts/pricing_model_zoo_benchmark.py --seed 42 --n-per-bucke
 
 GitHub Actions:
 - `Research Audit` workflow 每周一 UTC 自动运行，并可手动触发。
+- 手动触发时可调 `seed`、`n_per_bucket`、`fail_on_arbitrage`、`min_short_max_jump_reduction`。
 - 运行后可在 artifact 下载 `iv-surface-stability`、`rough-jump`、`model-zoo` 报告。
 
 ### 数据管理

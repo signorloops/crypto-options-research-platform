@@ -13,6 +13,15 @@ on:
         description: "Quotes per strike/maturity bucket for model-zoo benchmark"
         required: false
         default: "1"
+      fail_on_arbitrage:
+        description: "Fail workflow when no-arbitrage checks do not pass"
+        required: false
+        type: boolean
+        default: true
+      min_short_max_jump_reduction:
+        description: "Minimum avg max-jump reduction required on short maturities"
+        required: false
+        default: "0.005"
 
 concurrency:
   group: research-audit-${{ github.ref }}
@@ -27,6 +36,8 @@ jobs:
     env:
       SEED: ${{ github.event_name == 'workflow_dispatch' && inputs.seed || '42' }}
       N_PER_BUCKET: ${{ github.event_name == 'workflow_dispatch' && inputs.n_per_bucket || '1' }}
+      FAIL_ON_ARBITRAGE: ${{ github.event_name == 'workflow_dispatch' && inputs.fail_on_arbitrage || 'true' }}
+      MIN_SHORT_MAX_JUMP_REDUCTION: ${{ github.event_name == 'workflow_dispatch' && inputs.min_short_max_jump_reduction || '0.005' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -43,10 +54,14 @@ jobs:
 
       - name: Run IV surface stability audit
         run: |
+          EXTRA_FLAGS=""
+          if [ "$FAIL_ON_ARBITRAGE" = "true" ]; then
+            EXTRA_FLAGS="--fail-on-arbitrage"
+          fi
           python validation_scripts/iv_surface_stability_report.py \
             --seed "$SEED" \
-            --fail-on-arbitrage \
-            --min-short-max-jump-reduction 0.005 \
+            --min-short-max-jump-reduction "$MIN_SHORT_MAX_JUMP_REDUCTION" \
+            $EXTRA_FLAGS \
             --output-md artifacts/iv-surface-stability-report.md \
             --output-json artifacts/iv-surface-stability-report.json
 
