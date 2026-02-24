@@ -302,6 +302,25 @@ base_spread ∈ [min_spread, max_spread]
 - `estimate_parameters_online(use_mle=True)` 支持在线 MLE，失败回退矩估计
 - quote metadata 增加 `control_signals`（intensity、flow_imbalance、spread/skew 控制量）
 
+### 5.7 Quanto-Inverse 定价与对冲扩展
+
+- 文件：`research/pricing/quanto_inverse.py`
+- 文件：`research/hedging/quanto_inverse.py`
+- 机制：先计算 inverse 基础价格，再叠加 quanto 调整
+  \[
+  Q = e^{-\rho \sigma_S \sigma_{FX} T}
+  \]
+  并做结算币种换算（`/fx_rate`）。
+- 输出：价格、spot/fx/corr 敏感度（`fx_delta`、`corr_sensitivity`）
+- 对冲：`QuantoInverseHedger.build_hedge_plan(...)` 同时给出 spot 与 FX 两腿目标仓位。
+
+### 5.8 CEX/DeFi 偏离监控（数据接入态）
+
+- 文件：`data/quote_integration.py`
+- 文件：`execution/research_dashboard.py`
+- 新接口：`GET /api/deviation/live`
+- 能力：从 CEX 与 DeFi 两路行情文件做 schema 归一化、分钟级对齐与偏离告警。
+
 ---
 
 ## 第6章 核心代码位置速查
@@ -311,6 +330,8 @@ base_spread ∈ [min_spread, max_spread]
 | **定价** | | |
 | Inverse PnL | `research/pricing/inverse_options.py` | calculate_pnl() |
 | Inverse Greeks | `research/pricing/inverse_options.py` | _calculate_greeks_from_d() |
+| Quanto-Inverse | `research/pricing/quanto_inverse.py` | calculate_price_and_greeks() |
+| Model Zoo | `research/pricing/model_zoo.py` | benchmark() |
 | **策略** | | |
 | AS 模型 | `strategies/market_making/avellaneda_stoikov.py` | `AvellanedaStoikov.quote` |
 | AS Adaptive | `strategies/market_making/avellaneda_stoikov.py` | `ASWithVolatilityAdaptation.quote` |
@@ -321,12 +342,14 @@ base_spread ∈ [min_spread, max_spread]
 | **回测** | | |
 | 引擎 | `research/backtest/engine.py` | run() |
 | 对比 | `research/backtest/hawkes_comparison.py` | ComprehensiveHawkesComparison |
+| 跳跃溢价信号 | `research/signals/jump_risk_premia.py` | estimate_series_from_prices() |
 | **风控** | | |
 | 熔断 | `research/risk/circuit_breaker.py` | check_risk_limits() |
 | VaR | `research/risk/var.py` | parametric_var() |
 | **数据** | | |
 | Deribit | `data/downloaders/deribit.py` | DeribitClient |
 | 缓存 | `data/cache.py` | DataCache |
+| CEX/DeFi 对齐 | `data/quote_integration.py` | build_cex_defi_deviation_dataset() |
 
 ---
 
