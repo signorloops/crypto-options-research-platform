@@ -1,0 +1,162 @@
+[
+  {
+    "spot": 50000.0,
+    "strike": 40000.0,
+    "maturity": 0.01917808,
+    "rate": 0.02,
+    "market_price": 10071.15042821,
+    "is_call": true
+  },
+  {
+    "spot": 50000.0,
+    "strike": 45000.0,
+    "maturity": 0.01917808,
+    "rate": 0.02,
+    "market_price": 5253.84329441,
+    "is_call": true
+  },
+  {
+    "spot": 50000.0,
+    "strike": 50000.0,
+    "maturity": 0.01917808,
+    "rate": 0.02,
+    "market_price": 1851.73524908,
+    "is_call": true
+  },
+  {
+    "spot": 50000.0,
+    "strike": 55000.0,
+    "maturity": 0.01917808,
+    "rate": 0.02,
+    "market_price": 392.24624349,
+    "is_call": true
+  },
+  {
+    "spot": 50000.0,
+    "strike": 60000.0,
+    "maturity": 0.01917808,
+    "rate": 0.02,
+    "market_price": 73.71349983,
+    "is_call": true
+  },
+  {
+    "spot": 50000.0,
+    "strike": 40000.0,
+    "maturity": 0.08219178,
+    "rate": 0.02,
+    "market_price": 10444.16998254,
+    "is_call": true
+  },
+  {
+    "spot": 50000.0,
+    "strike": 45000.0,
+    "maturity": 0.08219178,
+    "rate": 0.02,
+    "market_price": 6734.43146639,
+    "is_call": true
+  },
+  {
+    "spot": 50000.0,
+    "strike": 50000.0,
+    "maturity": 0.08219178,
+    "rate": 0.02,
+    "market_price": 3852.90241233,
+    "is_call": true
+  },
+  {
+    "spot": 50000.0,
+    "strike": 55000.0,
+    "maturity": 0.08219178,
+    "rate": 0.02,
+    "market_price": 2028.29296551,
+    "is_call": true
+  },
+  {
+    "spot": 50000.0,
+    "strike": 60000.0,
+    "maturity": 0.08219178,
+    "rate": 0.02,
+    "market_price": 987.48042506,
+    "is_call": true
+  },
+  {
+    "spot": 50000.0,
+    "strike": 40000.0,
+    "maturity": 0.16438356,
+    "rate": 0.02,
+    "market_price": 11569.51849338,
+    "is_call": true
+  },
+  {
+    "spot": 50000.0,
+    "strike": 45000.0,
+    "maturity": 0.16438356,
+    "rate": 0.02,
+    "market_price": 8148.63599887,
+    "is_call": true
+  },
+  {
+    "spot": 50000.0,
+    "strike": 50000.0,
+    "maturity": 0.16438356,
+    "rate": 0.02,
+    "market_price": 5468.99152354,
+    "is_call": true
+  },
+  {
+    "spot": 50000.0,
+    "strike": 55000.0,
+    "maturity": 0.16438356,
+    "rate": 0.02,
+    "market_price": 3605.15063755,
+    "is_call": true
+  },
+  {
+    "spot": 50000.0,
+    "strike": 60000.0,
+    "maturity": 0.16438356,
+    "rate": 0.02,
+    "market_price": 2272.91717733,
+    "is_call": true
+  },
+  {
+    "spot": 50000.0,
+    "strike": 40000.0,
+    "maturity": 0.32876712,
+    "rate": 0.02,
+    "market_price": 12889.93198797,
+    "is_call": true
+  },
+  {
+    "spot": 50000.0,
+    "strike": 45000.0,
+    "maturity": 0.32876712,
+    "rate": 0.02,
+    "market_price": 10087.014937,
+    "is_call": true
+  },
+  {
+    "spot": 50000.0,
+    "strike": 50000.0,
+    "maturity": 0.32876712,
+    "rate": 0.02,
+    "market_price": 7583.40749188,
+    "is_call": true
+  },
+  {
+    "spot": 50000.0,
+    "strike": 55000.0,
+    "maturity": 0.32876712,
+    "rate": 0.02,
+    "market_price": 5817.87780565,
+    "is_call": true
+  },
+  {
+    "spot": 50000.0,
+    "strike": 60000.0,
+    "maturity": 0.32876712,
+    "rate": 0.02,
+    "market_price": 4304.64183092,
+    "is_call": true
+  }
+]

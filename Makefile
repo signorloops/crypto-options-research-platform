@@ -79,7 +79,9 @@ research-audit:
 		--output-md artifacts/iv-surface-stability-report.md \
 		--output-json artifacts/iv-surface-stability-report.json
 	$(PYTHON) validation_scripts/rough_jump_experiment.py --seed 42 > artifacts/rough-jump-experiment.txt
-	$(PYTHON) validation_scripts/pricing_model_zoo_benchmark.py --seed 42 --n-per-bucket 1 > artifacts/pricing-model-zoo-benchmark.txt
+	$(PYTHON) validation_scripts/pricing_model_zoo_benchmark.py \
+		--quotes-json validation_scripts/fixtures/model_zoo_quotes_seed42.json \
+		> artifacts/pricing-model-zoo-benchmark.txt
 	@echo "Research audit artifacts generated under artifacts/"
 
 clean:

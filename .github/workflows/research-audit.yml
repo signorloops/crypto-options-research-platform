@@ -22,6 +22,10 @@ on:
         description: "Minimum avg max-jump reduction required on short maturities"
         required: false
         default: "0.005"
+      quotes_json:
+        description: "Optional fixed quote fixture path for model-zoo benchmark"
+        required: false
+        default: "validation_scripts/fixtures/model_zoo_quotes_seed42.json"
 
 concurrency:
   group: research-audit-${{ github.ref }}
@@ -38,6 +42,7 @@ jobs:
       N_PER_BUCKET: ${{ github.event_name == 'workflow_dispatch' && inputs.n_per_bucket || '1' }}
       FAIL_ON_ARBITRAGE: ${{ github.event_name == 'workflow_dispatch' && inputs.fail_on_arbitrage || 'true' }}
       MIN_SHORT_MAX_JUMP_REDUCTION: ${{ github.event_name == 'workflow_dispatch' && inputs.min_short_max_jump_reduction || '0.005' }}
+      QUOTES_JSON: ${{ github.event_name == 'workflow_dispatch' && inputs.quotes_json || 'validation_scripts/fixtures/model_zoo_quotes_seed42.json' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -72,9 +77,12 @@ jobs:
 
       - name: Run model-zoo benchmark
         run: |
+          CMD_ARGS=(--seed "$SEED" --n-per-bucket "$N_PER_BUCKET")
+          if [ -n "$QUOTES_JSON" ]; then
+            CMD_ARGS=(--quotes-json "$QUOTES_JSON")
+          fi
           python validation_scripts/pricing_model_zoo_benchmark.py \
-            --seed "$SEED" \
-            --n-per-bucket "$N_PER_BUCKET" \
+            "${CMD_ARGS[@]}" \
             > artifacts/pricing-model-zoo-benchmark.txt
 
       - name: Publish report summary

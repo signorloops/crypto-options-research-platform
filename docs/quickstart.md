@@ -203,13 +203,16 @@ python validation_scripts/iv_surface_stability_report.py --fail-on-arbitrage --m
 # Rough volatility + jumps 实验对比
 python validation_scripts/rough_jump_experiment.py --seed 42
 
-# 定价模型 zoo 基准（RMSE/MAE/IV 误差）
+# 定价模型 zoo 基准（固定样本，适合跨提交漂移比较）
+python validation_scripts/pricing_model_zoo_benchmark.py --quotes-json validation_scripts/fixtures/model_zoo_quotes_seed42.json
+
+# 若需要动态生成样本，也可使用 seed + bucket
 python validation_scripts/pricing_model_zoo_benchmark.py --seed 42 --n-per-bucket 1
 ```
 
 GitHub Actions:
 - `Research Audit` workflow 每周一 UTC 自动运行，并可手动触发。
-- 手动触发时可调 `seed`、`n_per_bucket`、`fail_on_arbitrage`、`min_short_max_jump_reduction`。
+- 手动触发时可调 `seed`、`n_per_bucket`、`quotes_json`、`fail_on_arbitrage`、`min_short_max_jump_reduction`。
 - 运行后可在 artifact 下载 `iv-surface-stability`、`rough-jump`、`model-zoo` 报告。
 
 ### 数据管理
