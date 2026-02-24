@@ -1,0 +1,68 @@
+name: Complexity Governance
+
+on:
+  pull_request:
+    paths:
+      - "core/**/*.py"
+      - "data/**/*.py"
+      - "research/**/*.py"
+      - "strategies/**/*.py"
+      - "execution/**/*.py"
+      - "utils/**/*.py"
+      - "config/complexity_budget.json"
+      - "scripts/governance/complexity_guard.py"
+      - ".github/workflows/complexity-governance.yml"
+  push:
+    paths:
+      - "core/**/*.py"
+      - "data/**/*.py"
+      - "research/**/*.py"
+      - "strategies/**/*.py"
+      - "execution/**/*.py"
+      - "utils/**/*.py"
+      - "config/complexity_budget.json"
+      - "scripts/governance/complexity_guard.py"
+      - ".github/workflows/complexity-governance.yml"
+  schedule:
+    - cron: "0 14 * * 1" # Every Monday 14:00 UTC
+  workflow_dispatch:
+
+jobs:
+  complexity-audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run complexity guard (strict)
+        run: |
+          python scripts/governance/complexity_guard.py \
+            --config config/complexity_budget.json \
+            --report-md artifacts/complexity-governance-report.md \
+            --report-json artifacts/complexity-governance-report.json \
+            --strict
+
+      - name: Publish report to job summary
+        if: always()
+        run: |
+          if [ -f artifacts/complexity-governance-report.md ]; then
+            cat artifacts/complexity-governance-report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Complexity report not generated." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload complexity report artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: complexity-governance-report
+          path: |
+            artifacts/complexity-governance-report.md
+            artifacts/complexity-governance-report.json
