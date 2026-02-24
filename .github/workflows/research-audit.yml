@@ -98,6 +98,14 @@ jobs:
             --output-json artifacts/pricing-model-zoo-benchmark.json \
             > artifacts/pricing-model-zoo-benchmark.txt
 
+      - name: Build research audit snapshot
+        run: |
+          python validation_scripts/research_audit_snapshot.py \
+            --iv-report-json artifacts/iv-surface-stability-report.json \
+            --model-zoo-json artifacts/pricing-model-zoo-benchmark.json \
+            --rough-jump-txt artifacts/rough-jump-experiment.txt \
+            --output-json artifacts/research-audit-snapshot.json
+
       - name: Publish report summary
         if: always()
         run: |
@@ -116,3 +124,4 @@ jobs:
             artifacts/rough-jump-experiment.txt
             artifacts/pricing-model-zoo-benchmark.txt
             artifacts/pricing-model-zoo-benchmark.json
+            artifacts/research-audit-snapshot.json

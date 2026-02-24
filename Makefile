@@ -85,6 +85,11 @@ research-audit:
 		--max-best-rmse 120.0 \
 		--output-json artifacts/pricing-model-zoo-benchmark.json \
 		> artifacts/pricing-model-zoo-benchmark.txt
+	$(PYTHON) validation_scripts/research_audit_snapshot.py \
+		--iv-report-json artifacts/iv-surface-stability-report.json \
+		--model-zoo-json artifacts/pricing-model-zoo-benchmark.json \
+		--rough-jump-txt artifacts/rough-jump-experiment.txt \
+		--output-json artifacts/research-audit-snapshot.json
 	@echo "Research audit artifacts generated under artifacts/"
 
 clean:
