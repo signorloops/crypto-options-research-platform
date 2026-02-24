@@ -1,0 +1,37 @@
+{
+  "scope": {
+    "include_dirs": [
+      "core",
+      "data",
+      "research",
+      "strategies",
+      "execution",
+      "utils"
+    ],
+    "exclude_dirs": [
+      ".git",
+      ".github",
+      "venv",
+      "__pycache__",
+      "tests",
+      "notebooks",
+      "validation_scripts",
+      "docs"
+    ]
+  },
+  "thresholds": {
+    "max_python_files": 82,
+    "max_total_loc": 25000,
+    "max_avg_loc_per_file": 330,
+    "max_file_loc": 1150,
+    "soft_file_loc": 700,
+    "max_files_over_soft_loc": 7,
+    "max_function_loc": 210,
+    "soft_function_loc": 80,
+    "max_functions_over_soft_loc": 27,
+    "max_function_args": 13,
+    "max_methods_per_class": 32,
+    "max_classes_over_method_soft_limit": 3,
+    "soft_method_count_per_class": 20
+  }
+}
