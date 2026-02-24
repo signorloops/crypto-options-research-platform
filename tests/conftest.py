@@ -2,6 +2,7 @@
 Pytest fixtures and configuration.
 """
 from datetime import datetime, timedelta, timezone
+import os
 from pathlib import Path
 import sys
 
@@ -30,6 +31,25 @@ from core.types import (
     Trade,
 )
 from data.generators.synthetic import CompleteMarketSimulator
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip integration-marked tests unless explicitly enabled."""
+    run_integration = os.getenv("RUN_INTEGRATION_TESTS", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if run_integration:
+        return
+
+    skip_marker = pytest.mark.skip(
+        reason="integration test disabled; set RUN_INTEGRATION_TESTS=1 to enable",
+    )
+    for item in items:
+        if "integration" in item.keywords:
+            item.add_marker(skip_marker)
 
 
 @pytest.fixture

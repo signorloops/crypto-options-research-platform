@@ -40,13 +40,13 @@ install-dev:
 	$(PYTHON) -m pre_commit install
 
 test:
-	$(PYTEST) -v
+	$(PYTEST) -v -m "not integration"
 
 test-unit:
 	$(PYTEST) -v -m "not integration"
 
 test-integration:
-	$(PYTEST) -v -m "integration"
+	RUN_INTEGRATION_TESTS=1 $(PYTEST) -v -m "integration"
 
 test-cov:
 	$(PYTEST) --cov=core --cov=data --cov=research --cov=strategies --cov=utils --cov=config --cov=execution --cov-report=term-missing --cov-report=html
@@ -83,4 +83,3 @@ clean:
 docs:
 	@echo "Building documentation..."
 	@echo "Docs would be built here"
-

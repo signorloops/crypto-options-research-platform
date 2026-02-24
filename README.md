@@ -130,7 +130,10 @@ corp/
 
 ```bash
 # 全量测试
-pytest -q
+pytest -q -m "not integration"
+
+# 显式运行集成测试（访问交易所 API）
+RUN_INTEGRATION_TESTS=1 pytest -q -m "integration"
 
 # 覆盖率
 pytest tests/ --cov=core --cov=data --cov=research --cov=strategies
@@ -155,7 +158,7 @@ uvicorn execution.research_dashboard:app --host 0.0.0.0 --port 8501
 2. 开发与测试
 3. 提交 PR
 
-建议在提交前至少运行 `pytest -q`。
+建议在提交前至少运行 `pytest -q -m "not integration"`。
 
 ## 许可证
 

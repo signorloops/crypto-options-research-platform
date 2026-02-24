@@ -60,7 +60,8 @@ def _normalize_quotes(df: pd.DataFrame, fallback_venue: str) -> pd.DataFrame:
     if out.empty:
         raise ValueError("Quote data has no valid rows after normalization")
 
-    out["timestamp"] = out["timestamp"].fillna(method="ffill").fillna(method="bfill")
+    # Pandas 3 compatibility: use explicit forward/backward fill accessors.
+    out["timestamp"] = out["timestamp"].ffill().bfill()
     out = out.dropna(subset=["timestamp"])
     if out.empty:
         raise ValueError("Quote data requires at least one valid timestamp")
