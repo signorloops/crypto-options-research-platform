@@ -206,6 +206,9 @@ python validation_scripts/rough_jump_experiment.py --seed 42
 # 定价模型 zoo 基准（固定样本，适合跨提交漂移比较）
 python validation_scripts/pricing_model_zoo_benchmark.py --quotes-json validation_scripts/fixtures/model_zoo_quotes_seed42.json
 
+# 同时输出机器可读 JSON
+python validation_scripts/pricing_model_zoo_benchmark.py --quotes-json validation_scripts/fixtures/model_zoo_quotes_seed42.json --output-json artifacts/pricing-model-zoo-benchmark.json
+
 # 若需要动态生成样本，也可使用 seed + bucket
 python validation_scripts/pricing_model_zoo_benchmark.py --seed 42 --n-per-bucket 1
 ```

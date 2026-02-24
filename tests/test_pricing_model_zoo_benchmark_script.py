@@ -10,6 +10,7 @@ from validation_scripts.pricing_model_zoo_benchmark import (
     _build_synthetic_quotes,
     load_quotes_json,
     run_benchmark,
+    save_benchmark_json,
     save_quotes_json,
 )
 
@@ -61,3 +62,22 @@ def test_tracked_fixture_file_runs_benchmark():
     assert len(quotes) == 20
     assert not table.empty
     assert table.iloc[0]["model"] == "bates"
+
+
+def test_save_benchmark_json_writes_metadata_and_results(tmp_path):
+    fixture_path = Path("validation_scripts/fixtures/model_zoo_quotes_seed42.json")
+    quotes = load_quotes_json(str(fixture_path))
+    table = run_benchmark(quotes=quotes)
+    output_path = tmp_path / "benchmark.json"
+
+    save_benchmark_json(
+        path=str(output_path),
+        source="json:fixture",
+        quotes=quotes,
+        table=table,
+    )
+
+    payload = output_path.read_text(encoding="utf-8")
+    assert '"quotes_source": "json:fixture"' in payload
+    assert '"n_quotes": 20' in payload
+    assert '"results"' in payload

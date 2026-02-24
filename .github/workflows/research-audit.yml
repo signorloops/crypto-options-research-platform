@@ -83,6 +83,7 @@ jobs:
           fi
           python validation_scripts/pricing_model_zoo_benchmark.py \
             "${CMD_ARGS[@]}" \
+            --output-json artifacts/pricing-model-zoo-benchmark.json \
             > artifacts/pricing-model-zoo-benchmark.txt
 
       - name: Publish report summary
@@ -102,3 +103,4 @@ jobs:
             artifacts/iv-surface-stability-report.json
             artifacts/rough-jump-experiment.txt
             artifacts/pricing-model-zoo-benchmark.txt
+            artifacts/pricing-model-zoo-benchmark.json

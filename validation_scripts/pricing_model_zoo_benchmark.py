@@ -113,6 +113,26 @@ def save_quotes_json(path: str, quotes: list[OptionQuote]) -> None:
         file_obj.write("\n")
 
 
+def save_benchmark_json(
+    path: str,
+    source: str,
+    quotes: list[OptionQuote],
+    table: pd.DataFrame,
+) -> None:
+    """Persist benchmark table + metadata to JSON."""
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    payload = {
+        "quotes_source": source,
+        "n_quotes": len(quotes),
+        "results": table.to_dict(orient="records"),
+    }
+    with open(path, "w", encoding="utf-8") as file_obj:
+        json.dump(payload, file_obj, indent=2, ensure_ascii=False)
+        file_obj.write("\n")
+
+
 def run_benchmark(
     seed: int = 42,
     n_per_bucket: int = 1,
@@ -188,6 +208,12 @@ def main() -> None:
         default="",
         help="Optional path to export generated quotes JSON.",
     )
+    parser.add_argument(
+        "--output-json",
+        type=str,
+        default="",
+        help="Optional path to write benchmark results JSON.",
+    )
     args = parser.parse_args()
 
     source = "synthetic"
@@ -208,6 +234,13 @@ def main() -> None:
         save_quotes_json(args.export_quotes_json, quotes)
 
     result = run_benchmark(seed=args.seed, n_per_bucket=args.n_per_bucket, quotes=quotes)
+    if args.output_json:
+        save_benchmark_json(
+            path=args.output_json,
+            source=source,
+            quotes=quotes,
+            table=result,
+        )
     print(f"# quotes_source={source} n_quotes={len(quotes)}")
     print(result.to_string(index=False))
 
