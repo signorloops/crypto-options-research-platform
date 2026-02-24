@@ -34,6 +34,19 @@ on:
         description: "Maximum allowed RMSE for top-ranked model"
         required: false
         default: "120.0"
+      max_best_rmse_increase_pct:
+        description: "Max allowed best-model RMSE increase vs snapshot baseline (%)"
+        required: false
+        default: "25.0"
+      max_iv_reduction_drop_pct:
+        description: "Max allowed drop in short-maturity jump-reduction vs baseline (%)"
+        required: false
+        default: "30.0"
+      allow_best_model_change:
+        description: "Allow best model to change in drift guard"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: research-audit-${{ github.ref }}
@@ -53,6 +66,9 @@ jobs:
       QUOTES_JSON: ${{ github.event_name == 'workflow_dispatch' && inputs.quotes_json || 'validation_scripts/fixtures/model_zoo_quotes_seed42.json' }}
       EXPECTED_BEST_MODEL: ${{ github.event_name == 'workflow_dispatch' && inputs.expected_best_model || 'bates' }}
       MAX_BEST_RMSE: ${{ github.event_name == 'workflow_dispatch' && inputs.max_best_rmse || '120.0' }}
+      MAX_BEST_RMSE_INCREASE_PCT: ${{ github.event_name == 'workflow_dispatch' && inputs.max_best_rmse_increase_pct || '25.0' }}
+      MAX_IV_REDUCTION_DROP_PCT: ${{ github.event_name == 'workflow_dispatch' && inputs.max_iv_reduction_drop_pct || '30.0' }}
+      ALLOW_BEST_MODEL_CHANGE: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_best_model_change || 'false' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -106,11 +122,30 @@ jobs:
             --rough-jump-txt artifacts/rough-jump-experiment.txt \
             --output-json artifacts/research-audit-snapshot.json
 
+      - name: Run drift guard against baseline snapshot
+        run: |
+          DRIFT_FLAGS=""
+          if [ "$ALLOW_BEST_MODEL_CHANGE" = "true" ]; then
+            DRIFT_FLAGS="--allow-best-model-change"
+          fi
+          python validation_scripts/research_audit_compare.py \
+            --baseline-json validation_scripts/fixtures/research_audit_snapshot_baseline.json \
+            --current-json artifacts/research-audit-snapshot.json \
+            --max-best-rmse-increase-pct "$MAX_BEST_RMSE_INCREASE_PCT" \
+            --max-iv-reduction-drop-pct "$MAX_IV_REDUCTION_DROP_PCT" \
+            $DRIFT_FLAGS \
+            --output-json artifacts/research-audit-drift-report.json \
+            --output-md artifacts/research-audit-drift-report.md
+
       - name: Publish report summary
         if: always()
         run: |
           if [ -f artifacts/iv-surface-stability-report.md ]; then
             cat artifacts/iv-surface-stability-report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -f artifacts/research-audit-drift-report.md ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            cat artifacts/research-audit-drift-report.md >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Upload research audit artifacts
@@ -125,3 +160,5 @@ jobs:
             artifacts/pricing-model-zoo-benchmark.txt
             artifacts/pricing-model-zoo-benchmark.json
             artifacts/research-audit-snapshot.json
+            artifacts/research-audit-drift-report.json
+            artifacts/research-audit-drift-report.md
