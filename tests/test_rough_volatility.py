@@ -1,6 +1,7 @@
 """
 Tests for rough-volatility pricer with jump extensions.
 """
+
 import numpy as np
 
 from research.pricing.rough_volatility import RoughVolConfig, RoughVolatilityPricer
@@ -70,7 +71,9 @@ class TestRoughVolatilityWithJumps:
                 jump_std=0.05,
             )
         )
-        out = pricer.price_with_confidence_interval(strike=100.0, option_type="call", confidence=0.9)
+        out = pricer.price_with_confidence_interval(
+            strike=100.0, option_type="call", confidence=0.9
+        )
 
         assert out["ci_low"] <= out["price"] <= out["ci_high"]
         assert out["simulation_time_sec"] >= 0.0

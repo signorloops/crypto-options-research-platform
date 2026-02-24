@@ -1,6 +1,7 @@
 """
 Rough-volatility Monte Carlo pricer.
 """
+
 import time
 from dataclasses import dataclass
 from typing import Dict, Literal, Optional, Tuple
@@ -12,6 +13,7 @@ from scipy.stats import norm
 @dataclass
 class RoughVolConfig:
     """Configuration for rough-vol path simulation."""
+
     spot: float = 100.0
     rate: float = 0.0
     maturity: float = 1.0
@@ -84,7 +86,7 @@ class RoughVolatilityPricer:
         idx = np.arange(1, self.config.n_steps + 1, dtype=float)
         weights = (idx * dt) ** (h - 0.5)
         # Keep scale bounded for finite-step simulation.
-        weights /= np.sqrt(np.sum(weights ** 2) + 1e-12)
+        weights /= np.sqrt(np.sum(weights**2) + 1e-12)
         return weights
 
     def _draw_correlated_brownians(
@@ -111,7 +113,7 @@ class RoughVolatilityPricer:
             z1 = rng.normal(size=(n_paths, n_steps))
             z2 = rng.normal(size=(n_paths, n_steps))
         dW1 = z1 * sqrt_dt
-        dW2 = (cfg.correlation * z1 + np.sqrt(1.0 - cfg.correlation ** 2) * z2) * sqrt_dt
+        dW2 = (cfg.correlation * z1 + np.sqrt(1.0 - cfg.correlation**2) * z2) * sqrt_dt
         return dW1, dW2
 
     def _simulate_jump_components(
@@ -127,12 +129,16 @@ class RoughVolatilityPricer:
         var_multipliers = np.ones((n_paths, n_steps), dtype=float)
 
         if cfg.jump_mode == "none" or cfg.jump_intensity <= 0.0 or cfg.jump_std <= 0.0:
-            return jump_returns, var_multipliers, {
-                "avg_jump_events_per_path": 0.0,
-                "total_jump_events": 0.0,
-                "avg_jump_intensity": float(max(cfg.jump_intensity, 0.0)),
-                "jump_intensity_std": 0.0,
-            }
+            return (
+                jump_returns,
+                var_multipliers,
+                {
+                    "avg_jump_events_per_path": 0.0,
+                    "total_jump_events": 0.0,
+                    "avg_jump_intensity": float(max(cfg.jump_intensity, 0.0)),
+                    "jump_intensity_std": 0.0,
+                },
+            )
 
         if cfg.jump_mode == "cojump":
             lam_dt = cfg.jump_intensity * dt
@@ -143,12 +149,16 @@ class RoughVolatilityPricer:
 
             total_events = float(np.sum(counts))
             avg_events = float(np.mean(np.sum(counts, axis=1)))
-            return jump_returns, var_multipliers, {
-                "avg_jump_events_per_path": avg_events,
-                "total_jump_events": total_events,
-                "avg_jump_intensity": float(cfg.jump_intensity),
-                "jump_intensity_std": 0.0,
-            }
+            return (
+                jump_returns,
+                var_multipliers,
+                {
+                    "avg_jump_events_per_path": avg_events,
+                    "total_jump_events": total_events,
+                    "avg_jump_intensity": float(cfg.jump_intensity),
+                    "jump_intensity_std": 0.0,
+                },
+            )
 
         # clustered mode: pathwise self-exciting intensity proxy
         intensity = np.full(n_paths, cfg.jump_intensity, dtype=float)
@@ -172,12 +182,16 @@ class RoughVolatilityPricer:
 
         total_events = float(np.sum(counts))
         avg_events = float(np.mean(np.sum(counts, axis=1)))
-        return jump_returns, var_multipliers, {
-            "avg_jump_events_per_path": avg_events,
-            "total_jump_events": total_events,
-            "avg_jump_intensity": float(np.mean(intensity_history)),
-            "jump_intensity_std": float(np.std(intensity_history)),
-        }
+        return (
+            jump_returns,
+            var_multipliers,
+            {
+                "avg_jump_events_per_path": avg_events,
+                "total_jump_events": total_events,
+                "avg_jump_intensity": float(np.mean(intensity_history)),
+                "jump_intensity_std": float(np.std(intensity_history)),
+            },
+        )
 
     def simulate_paths(
         self,
@@ -217,7 +231,7 @@ class RoughVolatilityPricer:
 
         times = np.arange(1, n_steps + 1, dtype=float) * dt
         var_t = cfg.initial_variance * np.exp(
-            cfg.vol_of_vol * volterra - 0.5 * (cfg.vol_of_vol ** 2) * (times ** (2.0 * cfg.hurst))
+            cfg.vol_of_vol * volterra - 0.5 * (cfg.vol_of_vol**2) * (times ** (2.0 * cfg.hurst))
         )
         # Co-jumps: variance shocks tied to jump sizes.
         var_t = var_t * jump_var_mult

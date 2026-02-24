@@ -1,6 +1,7 @@
 """
 Quick benchmark for crypto option pricing model zoo.
 """
+
 from __future__ import annotations
 
 import argparse
