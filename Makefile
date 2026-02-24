@@ -1,4 +1,4 @@
-.PHONY: help install install-dev test test-unit test-integration test-cov lint lint-fix format format-check type-check quality clean docs research-audit research-audit-compare
+.PHONY: help install install-dev test test-unit test-integration test-cov lint lint-fix format format-check type-check quality clean docs research-audit research-audit-compare research-audit-refresh-baseline
 
 # Detect virtual environment or use system Python
 VENV_PYTHON := $(wildcard ./venv/bin/python) $(wildcard ./.venv/bin/python) $(wildcard ./.venv311/bin/python) $(wildcard ./env/bin/python)
@@ -31,6 +31,7 @@ help:
 	@echo "  quality          Run format-check + lint + type-check"
 	@echo "  research-audit   Generate IV stability/model-zoo/rough-jump research reports"
 	@echo "  research-audit-compare Compare current audit snapshot against tracked baseline"
+	@echo "  research-audit-refresh-baseline Refresh tracked baseline with current snapshot"
 	@echo "  clean            Clean build artifacts"
 	@echo "  docs             Build documentation"
 
@@ -108,6 +109,11 @@ research-audit-compare:
 		--max-iv-reduction-drop-pct 30.0 \
 		--output-json artifacts/research-audit-drift-report.json \
 		--output-md artifacts/research-audit-drift-report.md
+
+research-audit-refresh-baseline:
+	$(MAKE) research-audit
+	cp artifacts/research-audit-snapshot.json validation_scripts/fixtures/research_audit_snapshot_baseline.json
+	@echo "Baseline refreshed: validation_scripts/fixtures/research_audit_snapshot_baseline.json"
 
 clean:
 	rm -rf build/
