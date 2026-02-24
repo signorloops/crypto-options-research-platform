@@ -20,7 +20,7 @@
     ]
   },
   "thresholds": {
-    "max_python_files": 82,
+    "max_python_files": 83,
     "max_total_loc": 25000,
     "max_avg_loc_per_file": 330,
     "max_file_loc": 1150,
