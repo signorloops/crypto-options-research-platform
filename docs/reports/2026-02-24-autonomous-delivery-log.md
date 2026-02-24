@@ -39,6 +39,11 @@
   - `tests/test_research_audit_snapshot.py`
   - `tests/test_research_audit_compare.py`
 
+5. Complexity hotspot reduction:
+- Refactored `VaRCalculator.monte_carlo_var` into helper-based structure without behavior change.
+- `monte_carlo_var` LOC reduced from `192` to `129` (per complexity guard report).
+- Verified by full `tests/test_risk.py` pass.
+
 ## In-Flight Remote Checks
 
 1. `CI` / `CD` / `Complexity Governance` runs are active on the latest `master` pushes.
@@ -46,7 +51,6 @@
 
 ## Recommended Next Tasks (Sequential)
 
-1. Refactor one top complexity hotspot (`research/risk/var.py::monte_carlo_var`) into smaller pure helpers with behavior-preserving tests.
-2. Add a lightweight dashboard card for weekly research-audit trend deltas (short-jump-reduction, no-arb flag, best model RMSE).
-3. Add branch-protection docs screenshot/checklist for required checks to reduce operational ambiguity.
-4. Add auto-baseline refresh workflow (manual approval) for intentional model upgrades.
+1. Add a lightweight dashboard card for weekly research-audit trend deltas (short-jump-reduction, no-arb flag, best model RMSE).
+2. Add branch-protection docs screenshot/checklist for required checks to reduce operational ambiguity.
+3. Add auto-baseline refresh workflow (manual approval) for intentional model upgrades.

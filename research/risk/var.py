@@ -376,6 +376,148 @@ class VaRCalculator:
             method="evt",
         )
 
+    @staticmethod
+    def _regularize_covariance_matrix(cov: np.ndarray) -> np.ndarray:
+        """Ensure covariance matrix is positive definite for simulation."""
+        eigenvalues = np.linalg.eigvalsh(cov)
+        if np.any(eigenvalues <= 1e-10):
+            min_eigenvalue = np.min(eigenvalues)
+            regularization = max(1e-6, -min_eigenvalue + 1e-6)
+            cov = cov + np.eye(len(cov)) * regularization
+        return cov
+
+    @staticmethod
+    def _apply_leverage_effect(
+        simulated_returns: np.ndarray, weights: np.ndarray, leverage_correlation: float
+    ) -> np.ndarray:
+        """Apply return-volatility leverage effect to simulated paths."""
+        if abs(leverage_correlation) <= 1e-8:
+            return simulated_returns
+
+        portfolio_shock = simulated_returns @ weights
+        shock_std = np.std(portfolio_shock) + 1e-12
+        normalized_shock = portfolio_shock / shock_std
+        vol_multiplier = np.exp(-leverage_correlation * normalized_shock)
+        vol_multiplier = np.clip(vol_multiplier, 0.5, 3.0)
+        return simulated_returns * vol_multiplier[:, None]
+
+    @staticmethod
+    def _greeks_approx_pnl(
+        greeks_row: pd.Series,
+        asset_returns: np.ndarray,
+        position_value: float,
+        rng,
+        n_simulations: int,
+    ) -> np.ndarray:
+        """Delta-gamma-vega approximation for non-linear position PnL."""
+        delta_pnl = greeks_row["delta"] * asset_returns * position_value
+        gamma_pnl = 0.5 * greeks_row.get("gamma", 0) * (asset_returns**2) * position_value
+        vega_pnl = greeks_row.get("vega", 0) * rng.normal(0, 0.05, n_simulations) * position_value
+        return delta_pnl + gamma_pnl + vega_pnl
+
+    def _fallback_position_pnl(
+        self,
+        position_id: object,
+        position_row: pd.Series,
+        simulated_returns: np.ndarray,
+        position_idx: int,
+        greeks: Optional[pd.DataFrame],
+        rng,
+        n_simulations: int,
+    ) -> np.ndarray:
+        """Fallback PnL path for non-option positions or option parse failures."""
+        position_value = float(position_row["value"])
+        if greeks is not None and position_id in greeks.index:
+            greeks_row = greeks.loc[position_id]
+            return self._greeks_approx_pnl(
+                greeks_row=greeks_row,
+                asset_returns=simulated_returns[:, position_idx],
+                position_value=position_value,
+                rng=rng,
+                n_simulations=n_simulations,
+            )
+        return simulated_returns[:, position_idx] * position_value
+
+    @staticmethod
+    def _option_underlying_index(
+        option_row: pd.Series, columns: list[str], fallback_idx: int
+    ) -> int:
+        """Resolve underlying return series index for option full revaluation."""
+        underlying_asset = option_row.get("underlying_asset", columns[fallback_idx])
+        if underlying_asset in columns:
+            return columns.index(underlying_asset)
+        return fallback_idx
+
+    def _option_full_revaluation_pnl(
+        self,
+        option_pricer_cls,
+        option_row: pd.Series,
+        option_type: str,
+        simulated_returns: np.ndarray,
+        underlying_idx: int,
+        holding_period: int,
+        leverage_correlation: float,
+        rng,
+        n_simulations: int,
+    ) -> Optional[np.ndarray]:
+        """Return option full-revaluation PnL vector, or None on invalid inputs."""
+        try:
+            spot_0 = float(option_row["spot"])
+            strike = float(option_row["strike"])
+            time_to_expiry = float(option_row["time_to_expiry"])
+            implied_vol = float(option_row["implied_vol"])
+            risk_free_rate = float(option_row.get("risk_free_rate", 0.0))
+            vol_of_vol = float(option_row.get("vol_of_vol", 0.20))
+        except (TypeError, ValueError):
+            return None
+
+        if spot_0 <= 0 or strike <= 0 or implied_vol <= 0:
+            return None
+
+        underlying_returns = simulated_returns[:, underlying_idx]
+        shocked_spot = np.clip(spot_0 * np.exp(underlying_returns), 1e-8, None)
+
+        vol_shock_scale = max(vol_of_vol, 1e-6) * np.sqrt(holding_period / 365.25)
+        vol_shock = rng.normal(0.0, vol_shock_scale, n_simulations)
+        if abs(leverage_correlation) > 1e-8:
+            vol_shock += -leverage_correlation * underlying_returns
+        shocked_vol = np.clip(implied_vol * (1.0 + vol_shock), 0.01, 5.0)
+        shocked_tte = max(1e-8, time_to_expiry - holding_period / 365.25)
+
+        try:
+            base_price_btc = option_pricer_cls.calculate_price(
+                S=spot_0,
+                K=strike,
+                T=max(time_to_expiry, 1e-8),
+                r=risk_free_rate,
+                sigma=implied_vol,
+                option_type=option_type,
+            )
+        except Exception:
+            return None
+
+        base_price_usd = base_price_btc * spot_0
+        if base_price_usd <= 1e-12:
+            return None
+
+        quantity = float(option_row["value"]) / base_price_usd
+        revalued_price_btc = np.array(
+            [
+                option_pricer_cls.calculate_price(
+                    S=float(spot),
+                    K=strike,
+                    T=shocked_tte,
+                    r=risk_free_rate,
+                    sigma=float(vol),
+                    option_type=option_type,
+                )
+                for spot, vol in zip(shocked_spot, shocked_vol)
+            ],
+            dtype=float,
+        )
+        revalued_price_usd = revalued_price_btc * shocked_spot
+        return quantity * (revalued_price_usd - base_price_usd)
+
     def monte_carlo_var(
         self,
         positions: pd.DataFrame,
@@ -412,17 +554,7 @@ class VaRCalculator:
 
         # Estimate parameters from historical returns
         mean = aligned_returns.mean().values
-        # Use a writable copy because pandas/numpy may return a read-only view.
-        cov = aligned_returns.cov().to_numpy(copy=True)
-
-        # Check and fix covariance matrix positive definiteness
-        # Add small regularization if needed to handle numerical issues
-        eigenvalues = np.linalg.eigvalsh(cov)
-        if np.any(eigenvalues <= 1e-10):
-            # Matrix is not positive definite, add regularization
-            min_eigenvalue = np.min(eigenvalues)
-            regularization = max(1e-6, -min_eigenvalue + 1e-6)
-            cov += np.eye(len(cov)) * regularization
+        cov = self._regularize_covariance_matrix(aligned_returns.cov().to_numpy(copy=True))
 
         # Optional local RNG improves reproducibility without mutating global RNG state.
         rng = np.random.default_rng(random_seed) if random_seed is not None else np.random
@@ -434,13 +566,11 @@ class VaRCalculator:
 
         # Leverage effect: negative return shocks tend to coincide with higher volatility.
         # We modulate path volatility with a return-dependent exponential factor.
-        if abs(leverage_correlation) > 1e-8:
-            portfolio_shock = simulated_returns @ weights
-            shock_std = np.std(portfolio_shock) + 1e-12
-            normalized_shock = portfolio_shock / shock_std
-            vol_multiplier = np.exp(-leverage_correlation * normalized_shock)
-            vol_multiplier = np.clip(vol_multiplier, 0.5, 3.0)
-            simulated_returns = simulated_returns * vol_multiplier[:, None]
+        simulated_returns = self._apply_leverage_effect(
+            simulated_returns=simulated_returns,
+            weights=weights,
+            leverage_correlation=leverage_correlation,
+        )
 
         # Calculate PnL for each simulation.
         option_fields = {"spot", "strike", "time_to_expiry", "option_type", "implied_vol"}
@@ -455,106 +585,55 @@ class VaRCalculator:
             for i, (idx, row) in enumerate(aligned_positions.iterrows()):
                 option_type = self._normalize_option_type(row.get("option_type"))
                 if option_type is None:
-                    # Non-option fallback path.
-                    if greeks is not None and idx in greeks.index:
-                        g = greeks.loc[idx]
-                        delta_pnl = g["delta"] * simulated_returns[:, i] * row["value"]
-                        gamma_pnl = (
-                            0.5 * g.get("gamma", 0) * (simulated_returns[:, i] ** 2) * row["value"]
-                        )
-                        vega_pnl = (
-                            g.get("vega", 0) * rng.normal(0, 0.05, n_simulations) * row["value"]
-                        )
-                        pnl += delta_pnl + gamma_pnl + vega_pnl
-                    else:
-                        pnl += simulated_returns[:, i] * row["value"]
-                    continue
-
-                underlying_asset = row.get("underlying_asset", idx)
-                if underlying_asset in columns:
-                    underlying_idx = columns.index(underlying_asset)
-                else:
-                    underlying_idx = i
-
-                try:
-                    spot_0 = float(row["spot"])
-                    strike = float(row["strike"])
-                    time_to_expiry = float(row["time_to_expiry"])
-                    implied_vol = float(row["implied_vol"])
-                    risk_free_rate = float(row.get("risk_free_rate", 0.0))
-                    vol_of_vol = float(row.get("vol_of_vol", 0.20))
-                except (TypeError, ValueError):
-                    pnl += simulated_returns[:, i] * row["value"]
-                    continue
-
-                if spot_0 <= 0 or strike <= 0 or implied_vol <= 0:
-                    pnl += simulated_returns[:, i] * row["value"]
-                    continue
-
-                # Build shocked spot/vol paths for full revaluation.
-                underlying_returns = simulated_returns[:, underlying_idx]
-                shocked_spot = np.clip(spot_0 * np.exp(underlying_returns), 1e-8, None)
-
-                vol_shock_scale = max(vol_of_vol, 1e-6) * np.sqrt(holding_period / 365.25)
-                vol_shock = rng.normal(0.0, vol_shock_scale, n_simulations)
-                if abs(leverage_correlation) > 1e-8:
-                    vol_shock += -leverage_correlation * underlying_returns
-                shocked_vol = np.clip(implied_vol * (1.0 + vol_shock), 0.01, 5.0)
-                shocked_tte = max(1e-8, time_to_expiry - holding_period / 365.25)
-
-                try:
-                    base_price_btc = InverseOptionPricer.calculate_price(
-                        S=spot_0,
-                        K=strike,
-                        T=max(time_to_expiry, 1e-8),
-                        r=risk_free_rate,
-                        sigma=implied_vol,
-                        option_type=option_type,
+                    pnl += self._fallback_position_pnl(
+                        position_id=idx,
+                        position_row=row,
+                        simulated_returns=simulated_returns,
+                        position_idx=i,
+                        greeks=greeks,
+                        rng=rng,
+                        n_simulations=n_simulations,
                     )
-                except Exception:
-                    pnl += simulated_returns[:, i] * row["value"]
                     continue
 
-                base_price_usd = base_price_btc * spot_0
-                if base_price_usd <= 1e-12:
-                    pnl += simulated_returns[:, i] * row["value"]
-                    continue
-
-                quantity = float(row["value"]) / base_price_usd
-                revalued_price_btc = np.array(
-                    [
-                        InverseOptionPricer.calculate_price(
-                            S=float(s),
-                            K=strike,
-                            T=shocked_tte,
-                            r=risk_free_rate,
-                            sigma=float(v),
-                            option_type=option_type,
-                        )
-                        for s, v in zip(shocked_spot, shocked_vol)
-                    ],
-                    dtype=float,
+                underlying_idx = self._option_underlying_index(row, columns, i)
+                option_pnl = self._option_full_revaluation_pnl(
+                    option_pricer_cls=InverseOptionPricer,
+                    option_row=row,
+                    option_type=option_type,
+                    simulated_returns=simulated_returns,
+                    underlying_idx=underlying_idx,
+                    holding_period=holding_period,
+                    leverage_correlation=leverage_correlation,
+                    rng=rng,
+                    n_simulations=n_simulations,
                 )
-                revalued_price_usd = revalued_price_btc * shocked_spot
-                pnl += quantity * (revalued_price_usd - base_price_usd)
+                if option_pnl is None:
+                    pnl += self._fallback_position_pnl(
+                        position_id=idx,
+                        position_row=row,
+                        simulated_returns=simulated_returns,
+                        position_idx=i,
+                        greeks=greeks,
+                        rng=rng,
+                        n_simulations=n_simulations,
+                    )
+                else:
+                    pnl += option_pnl
         elif greeks is not None:
             # Include non-linear effects from options via Greeks approximation.
             pnl = np.zeros(n_simulations, dtype=float)
 
             for i, (idx, row) in enumerate(aligned_positions.iterrows()):
-                if idx in greeks.index:
-                    g = greeks.loc[idx]
-
-                    # Delta-gamma-vega approximation
-                    delta_pnl = g["delta"] * simulated_returns[:, i] * row["value"]
-                    gamma_pnl = (
-                        0.5 * g.get("gamma", 0) * (simulated_returns[:, i] ** 2) * row["value"]
-                    )
-                    vega_pnl = g.get("vega", 0) * rng.normal(0, 0.05, n_simulations) * row["value"]
-
-                    pnl += delta_pnl + gamma_pnl + vega_pnl
-                else:
-                    pnl += simulated_returns[:, i] * row["value"]
+                pnl += self._fallback_position_pnl(
+                    position_id=idx,
+                    position_row=row,
+                    simulated_returns=simulated_returns,
+                    position_idx=i,
+                    greeks=greeks,
+                    rng=rng,
+                    n_simulations=n_simulations,
+                )
         else:
             # Linear approximation
             pnl = simulated_returns @ weights * total_value
