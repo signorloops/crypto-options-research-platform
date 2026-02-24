@@ -133,6 +133,31 @@ def save_benchmark_json(
         file_obj.write("\n")
 
 
+def evaluate_benchmark_quality_gates(
+    table: pd.DataFrame,
+    expected_best_model: str = "",
+    max_best_rmse: float = -1.0,
+) -> list[str]:
+    """Return model-zoo benchmark quality-gate violations."""
+    violations: list[str] = []
+    if table.empty:
+        return ["Benchmark table is empty."]
+
+    best_model = str(table.iloc[0]["model"])
+    best_rmse = float(table.iloc[0]["rmse"])
+
+    expected = expected_best_model.strip().lower()
+    if expected and best_model.lower() != expected:
+        violations.append(
+            f"Unexpected best model: observed={best_model}, expected={expected_best_model}"
+        )
+    if max_best_rmse >= 0.0 and best_rmse > max_best_rmse:
+        violations.append(
+            f"Best RMSE above threshold: observed={best_rmse:.6f}, required<={max_best_rmse:.6f}"
+        )
+    return violations
+
+
 def run_benchmark(
     seed: int = 42,
     n_per_bucket: int = 1,
@@ -214,6 +239,18 @@ def main() -> None:
         default="",
         help="Optional path to write benchmark results JSON.",
     )
+    parser.add_argument(
+        "--expected-best-model",
+        type=str,
+        default="",
+        help="Optional expected best model id (quality gate).",
+    )
+    parser.add_argument(
+        "--max-best-rmse",
+        type=float,
+        default=-1.0,
+        help="Optional max allowed RMSE for top-ranked model (quality gate).",
+    )
     args = parser.parse_args()
 
     source = "synthetic"
@@ -241,8 +278,17 @@ def main() -> None:
             quotes=quotes,
             table=result,
         )
+    violations = evaluate_benchmark_quality_gates(
+        table=result,
+        expected_best_model=args.expected_best_model,
+        max_best_rmse=float(args.max_best_rmse),
+    )
     print(f"# quotes_source={source} n_quotes={len(quotes)}")
     print(result.to_string(index=False))
+    if violations:
+        for violation in violations:
+            print(f"QUALITY GATE FAILED: {violation}", file=sys.stderr)
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":

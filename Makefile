@@ -81,6 +81,8 @@ research-audit:
 	$(PYTHON) validation_scripts/rough_jump_experiment.py --seed 42 > artifacts/rough-jump-experiment.txt
 	$(PYTHON) validation_scripts/pricing_model_zoo_benchmark.py \
 		--quotes-json validation_scripts/fixtures/model_zoo_quotes_seed42.json \
+		--expected-best-model bates \
+		--max-best-rmse 120.0 \
 		--output-json artifacts/pricing-model-zoo-benchmark.json \
 		> artifacts/pricing-model-zoo-benchmark.txt
 	@echo "Research audit artifacts generated under artifacts/"

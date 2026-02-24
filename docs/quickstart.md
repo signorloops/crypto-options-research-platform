@@ -209,13 +209,16 @@ python validation_scripts/pricing_model_zoo_benchmark.py --quotes-json validatio
 # 同时输出机器可读 JSON
 python validation_scripts/pricing_model_zoo_benchmark.py --quotes-json validation_scripts/fixtures/model_zoo_quotes_seed42.json --output-json artifacts/pricing-model-zoo-benchmark.json
 
+# 加质量门槛（期望最优模型 + RMSE 上限）
+python validation_scripts/pricing_model_zoo_benchmark.py --quotes-json validation_scripts/fixtures/model_zoo_quotes_seed42.json --expected-best-model bates --max-best-rmse 120.0
+
 # 若需要动态生成样本，也可使用 seed + bucket
 python validation_scripts/pricing_model_zoo_benchmark.py --seed 42 --n-per-bucket 1
 ```
 
 GitHub Actions:
 - `Research Audit` workflow 每周一 UTC 自动运行，并可手动触发。
-- 手动触发时可调 `seed`、`n_per_bucket`、`quotes_json`、`fail_on_arbitrage`、`min_short_max_jump_reduction`。
+- 手动触发时可调 `seed`、`n_per_bucket`、`quotes_json`、`expected_best_model`、`max_best_rmse`、`fail_on_arbitrage`、`min_short_max_jump_reduction`。
 - 运行后可在 artifact 下载 `iv-surface-stability`、`rough-jump`、`model-zoo` 报告。
 
 ### 数据管理

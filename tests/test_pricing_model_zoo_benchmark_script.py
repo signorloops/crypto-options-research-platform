@@ -8,6 +8,7 @@ import numpy as np
 
 from validation_scripts.pricing_model_zoo_benchmark import (
     _build_synthetic_quotes,
+    evaluate_benchmark_quality_gates,
     load_quotes_json,
     run_benchmark,
     save_benchmark_json,
@@ -81,3 +82,27 @@ def test_save_benchmark_json_writes_metadata_and_results(tmp_path):
     assert '"quotes_source": "json:fixture"' in payload
     assert '"n_quotes": 20' in payload
     assert '"results"' in payload
+
+
+def test_benchmark_quality_gates_pass_with_expected_best_model():
+    fixture_path = Path("validation_scripts/fixtures/model_zoo_quotes_seed42.json")
+    quotes = load_quotes_json(str(fixture_path))
+    table = run_benchmark(quotes=quotes)
+    violations = evaluate_benchmark_quality_gates(
+        table=table,
+        expected_best_model="bates",
+        max_best_rmse=120.0,
+    )
+    assert violations == []
+
+
+def test_benchmark_quality_gates_fail_on_unexpected_model():
+    fixture_path = Path("validation_scripts/fixtures/model_zoo_quotes_seed42.json")
+    quotes = load_quotes_json(str(fixture_path))
+    table = run_benchmark(quotes=quotes)
+    violations = evaluate_benchmark_quality_gates(
+        table=table,
+        expected_best_model="heston",
+        max_best_rmse=120.0,
+    )
+    assert any("Unexpected best model" in violation for violation in violations)

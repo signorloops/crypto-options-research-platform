@@ -26,6 +26,14 @@ on:
         description: "Optional fixed quote fixture path for model-zoo benchmark"
         required: false
         default: "validation_scripts/fixtures/model_zoo_quotes_seed42.json"
+      expected_best_model:
+        description: "Expected top-ranked model for benchmark quality gate"
+        required: false
+        default: "bates"
+      max_best_rmse:
+        description: "Maximum allowed RMSE for top-ranked model"
+        required: false
+        default: "120.0"
 
 concurrency:
   group: research-audit-${{ github.ref }}
@@ -43,6 +51,8 @@ jobs:
       FAIL_ON_ARBITRAGE: ${{ github.event_name == 'workflow_dispatch' && inputs.fail_on_arbitrage || 'true' }}
       MIN_SHORT_MAX_JUMP_REDUCTION: ${{ github.event_name == 'workflow_dispatch' && inputs.min_short_max_jump_reduction || '0.005' }}
       QUOTES_JSON: ${{ github.event_name == 'workflow_dispatch' && inputs.quotes_json || 'validation_scripts/fixtures/model_zoo_quotes_seed42.json' }}
+      EXPECTED_BEST_MODEL: ${{ github.event_name == 'workflow_dispatch' && inputs.expected_best_model || 'bates' }}
+      MAX_BEST_RMSE: ${{ github.event_name == 'workflow_dispatch' && inputs.max_best_rmse || '120.0' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -83,6 +93,8 @@ jobs:
           fi
           python validation_scripts/pricing_model_zoo_benchmark.py \
             "${CMD_ARGS[@]}" \
+            --expected-best-model "$EXPECTED_BEST_MODEL" \
+            --max-best-rmse "$MAX_BEST_RMSE" \
             --output-json artifacts/pricing-model-zoo-benchmark.json \
             > artifacts/pricing-model-zoo-benchmark.txt
 
