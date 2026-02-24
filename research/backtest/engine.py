@@ -24,6 +24,45 @@ from research.pricing.inverse_options import InverseOptionPricer
 from strategies.base import MarketMakingStrategy
 
 
+def _build_market_state_snapshot(timestamp: datetime, price: float, order_book: OrderBook) -> MarketState:
+    """Create a market state snapshot for current tick."""
+    return MarketState(
+        timestamp=timestamp,
+        instrument="SYNTHETIC",
+        spot_price=price,
+        order_book=order_book,
+        recent_trades=[],
+    )
+
+
+def _history_to_series(history: List[Tuple[datetime, float]]) -> pd.Series:
+    """Convert internal (timestamp, value) history to Series."""
+    if not history:
+        return pd.Series(dtype=float)
+    return pd.Series([x[1] for x in history], index=[x[0] for x in history], dtype=float)
+
+
+def _calculate_max_drawdown(pnl_series: pd.Series) -> float:
+    """Calculate max drawdown using running peak denominator."""
+    if len(pnl_series) == 0:
+        return 0.0
+
+    running_max = pnl_series.expanding().max()
+    running_max_safe = running_max.replace(0, np.nan)
+    drawdown = (running_max_safe - pnl_series) / running_max_safe
+    max_dd = drawdown.max()
+    if np.isnan(max_dd):
+        return 0.0
+    return float(max_dd)
+
+
+def _trade_side_counts(trades: List[Fill]) -> Tuple[int, int]:
+    """Count buy/sell fills."""
+    buys = len([t for t in trades if t.side == OrderSide.BUY])
+    sells = len([t for t in trades if t.side == OrderSide.SELL])
+    return buys, sells
+
+
 @dataclass
 class FillSimulatorConfig:
     """Configuration for fill simulation."""
@@ -471,6 +510,76 @@ class BacktestEngine:
         self._max_history_points: int = 1_000_000  # Limit to prevent memory exhaustion
         self._tick_counter: int = 0  # Counter for sampling
 
+    def _reset_run_state(self) -> None:
+        """Reset runtime state before each backtest run."""
+        self.crypto_balance = self.initial_crypto_balance
+        self.positions = {}
+        self.trades = []
+        self.quotes = []
+        self._pnl_history = []
+        self._inventory_history = []
+        self._crypto_balance_history = []
+        self._tick_counter = 0
+        self.strategy.reset()
+
+        # Reset isolated RNG for reproducible runs without touching global state.
+        self.rng = np.random.default_rng(self.random_seed)
+        if self.fill_simulator is not None:
+            self.fill_simulator.rng = self.rng
+            self.fill_simulator.reset_metrics()
+
+    def _maybe_process_previous_quote(
+        self,
+        previous_quote: Optional[QuoteAction],
+        market_state: MarketState,
+        position: Position,
+        event_volume: float,
+        current_price: float,
+    ) -> Position:
+        """Try to fill previous quote against synthetic trades and update position."""
+        if previous_quote is None or self.fill_simulator is None:
+            return position
+
+        synthetic_trades = self._generate_synthetic_trades(
+            market_state,
+            volume=event_volume,
+        )
+        if not synthetic_trades:
+            return position
+
+        fill = self.fill_simulator.simulate_fill(
+            previous_quote,
+            market_state,
+            synthetic_trades,
+            transaction_cost_bps=self.transaction_cost_bps,
+        )
+        if fill is None:
+            return position
+
+        self._process_fill(fill, position, current_price)
+        updated_position = self.positions.get("SYNTHETIC", position)
+        self.strategy.on_fill(fill, updated_position)
+        return updated_position
+
+    def _quote_with_lagged_price(
+        self,
+        prices: np.ndarray,
+        idx: int,
+        market_state: MarketState,
+        position: Position,
+    ) -> QuoteAction:
+        """Query strategy quote on lagged price to avoid look-ahead bias."""
+        current_price = float(prices[idx])
+        lagged_price = float(prices[idx - 1]) if idx > 0 else current_price
+        lagged_market_state = MarketState(
+            timestamp=market_state.timestamp,
+            instrument=market_state.instrument,
+            spot_price=lagged_price,
+            order_book=market_state.order_book,
+            recent_trades=market_state.recent_trades,
+        )
+        return self.strategy.quote(lagged_market_state, position)
+
     def run(
         self,
         market_data: pd.DataFrame,
@@ -488,22 +597,7 @@ class BacktestEngine:
         Returns:
             BacktestResult with performance metrics
         """
-        # Reset state
-        self.crypto_balance = self.initial_crypto_balance
-        self.positions = {}
-        self.trades = []
-        self.quotes = []
-        self._pnl_history = []
-        self._inventory_history = []
-        self._crypto_balance_history = []
-        self._tick_counter = 0
-        self.strategy.reset()
-
-        # Reset isolated RNG for reproducible runs without touching global state.
-        self.rng = np.random.default_rng(self.random_seed)
-        if self.fill_simulator is not None:
-            self.fill_simulator.rng = self.rng
-            self.fill_simulator.reset_metrics()
+        self._reset_run_state()
 
         # Pre-extract arrays to avoid per-row dict allocation (PERF-6)
         prices = market_data[price_column].to_numpy(dtype=np.float64)
@@ -524,41 +618,17 @@ class BacktestEngine:
             timestamp = timestamps_arr[i]
 
             current_ob = self._update_order_book(current_ob, price)
-
-            market_state = MarketState(
-                timestamp=timestamp,
-                instrument="SYNTHETIC",
-                spot_price=price,
-                order_book=current_ob,
-                recent_trades=[]
-            )
+            market_state = _build_market_state_snapshot(timestamp=timestamp, price=price, order_book=current_ob)
 
             position = self.positions.get("SYNTHETIC", Position("SYNTHETIC", 0, 0))
-
-            if previous_quote is not None and self.fill_simulator:
-                synthetic_trades = self._generate_synthetic_trades(
-                    market_state,
-                    volume=float(event_volumes[i]),
-                )
-                if synthetic_trades:
-                    fill = self.fill_simulator.simulate_fill(
-                        previous_quote, market_state, synthetic_trades,
-                        transaction_cost_bps=self.transaction_cost_bps,
-                    )
-                    if fill:
-                        self._process_fill(fill, position, price)
-                        self.strategy.on_fill(fill, self.positions.get("SYNTHETIC", position))
-                        position = self.positions.get("SYNTHETIC", position)
-
-            lagged_price = float(prices[i - 1]) if i > 0 else price
-            lagged_market_state = MarketState(
-                timestamp=market_state.timestamp,
-                instrument=market_state.instrument,
-                spot_price=lagged_price,
-                order_book=market_state.order_book,
-                recent_trades=market_state.recent_trades
+            position = self._maybe_process_previous_quote(
+                previous_quote=previous_quote,
+                market_state=market_state,
+                position=position,
+                event_volume=float(event_volumes[i]),
+                current_price=price,
             )
-            new_quote = self.strategy.quote(lagged_market_state, position)
+            new_quote = self._quote_with_lagged_price(prices=prices, idx=i, market_state=market_state, position=position)
             self.quotes.append(new_quote)
             previous_quote = new_quote
 
@@ -954,90 +1024,56 @@ class BacktestEngine:
         z = (sharpe - expected_max_sr) / denom
         return float(norm.cdf(z))
 
+    def _calculate_sharpe_ratio(self, pnl_series: pd.Series) -> float:
+        """Calculate annualized Sharpe ratio from coin PnL series."""
+        if len(pnl_series) <= 1:
+            return 0.0
+
+        pnl_changes = pnl_series.diff().dropna()
+        returns = pnl_changes / self.initial_crypto_balance
+        if returns.std() <= 0:
+            return 0.0
+
+        if len(returns) > 1:
+            time_span = (pnl_series.index[-1] - pnl_series.index[0]).total_seconds()
+            periods_per_year = len(returns) * (365.0 * 24 * 3600) / max(time_span, 1)
+            annualization = np.sqrt(periods_per_year)
+        else:
+            annualization = np.sqrt(365.0 * 24)
+
+        risk_free_rate = 0.0
+        excess_returns = returns - risk_free_rate / (365.0 * 24)
+        return float((excess_returns.mean() / returns.std()) * annualization)
+
+    def _execution_costs(self) -> Tuple[float, float]:
+        """Return execution and adverse selection costs from fill simulator."""
+        if self.fill_simulator is None:
+            return 0.0, 0.0
+        execution_cost = float(
+            self.fill_simulator.transaction_cost_paid + self.fill_simulator.slippage_cost
+        )
+        adverse_selection_cost = float(self.fill_simulator.adverse_selection_cost)
+        return execution_cost, adverse_selection_cost
+
     def _compute_result(self, current_price: Optional[float] = None) -> BacktestResult:
         """Compute final backtest metrics (coin-margined)."""
-        # Convert histories to series
-        if self._pnl_history:
-            pnl_series = pd.Series(
-                [x[1] for x in self._pnl_history],
-                index=[x[0] for x in self._pnl_history]
-            )
-        else:
-            pnl_series = pd.Series()
-
-        if self._inventory_history:
-            inventory_series = pd.Series(
-                [x[1] for x in self._inventory_history],
-                index=[x[0] for x in self._inventory_history]
-            )
-        else:
-            inventory_series = pd.Series()
-
-        if self._crypto_balance_history:
-            crypto_balance_series = pd.Series(
-                [x[1] for x in self._crypto_balance_history],
-                index=[x[0] for x in self._crypto_balance_history]
-            )
-        else:
-            crypto_balance_series = pd.Series()
+        pnl_series = _history_to_series(self._pnl_history)
+        inventory_series = _history_to_series(self._inventory_history)
+        crypto_balance_series = _history_to_series(self._crypto_balance_history)
 
         # Calculate metrics (PnL in crypto units)
         total_pnl_crypto = float(pnl_series.iloc[-1]) if len(pnl_series) > 0 else 0.0
         total_pnl_usd = total_pnl_crypto * current_price  # Convert to USD for reference
 
-        # Sharpe ratio calculation using crypto PnL returns
-        if len(pnl_series) > 1:
-            # Calculate returns based on PnL changes (not balance)
-            # Use log returns for better statistical properties
-            pnl_changes = pnl_series.diff().dropna()
-            returns = pnl_changes / self.initial_crypto_balance  # Normalized by initial capital
+        sharpe = self._calculate_sharpe_ratio(pnl_series)
+        max_dd = _calculate_max_drawdown(pnl_series)
 
-            if returns.std() > 0:
-                # Calculate annualization factor based on data frequency
-                if len(returns) > 1:
-                    # Estimate periods per year from data timestamps
-                    time_span = (pnl_series.index[-1] - pnl_series.index[0]).total_seconds()
-                    periods_per_year = len(returns) * (365.0 * 24 * 3600) / max(time_span, 1)
-                    annualization = np.sqrt(periods_per_year)
-                else:
-                    annualization = np.sqrt(365.0 * 24)  # Default hourly
-
-                # Risk-free rate (crypto can use 0 or small positive rate)
-                risk_free_rate = 0.0
-                excess_returns = returns - risk_free_rate / (365.0 * 24)  # Convert to period rate
-                sharpe = (excess_returns.mean() / returns.std()) * annualization
-            else:
-                sharpe = 0.0
-        else:
-            sharpe = 0.0
-
-        # Max drawdown calculation
-        # Correct formula: Drawdown = (Peak - Current) / Peak
-        if len(pnl_series) > 0:
-            running_max = pnl_series.expanding().max()
-            # Avoid division by zero
-            running_max_safe = running_max.replace(0, np.nan)
-            drawdown = (running_max_safe - pnl_series) / running_max_safe
-            max_dd = drawdown.max()
-            if np.isnan(max_dd):
-                max_dd = 0.0
-        else:
-            max_dd = 0.0
-
-        # Trade statistics
-        buys = len([t for t in self.trades if t.side == OrderSide.BUY])
-        sells = len([t for t in self.trades if t.side == OrderSide.SELL])
+        buys, sells = _trade_side_counts(self.trades)
         avg_size = np.mean([t.size for t in self.trades]) if self.trades else 0
         returns_for_ci = pnl_series.diff().dropna() / max(self.initial_crypto_balance, 1e-12) if len(pnl_series) > 1 else pd.Series(dtype=float)
         sharpe_ci, drawdown_ci = self._bootstrap_risk_ci(returns_for_ci)
         deflated_sharpe = self._deflated_sharpe_ratio(float(sharpe), n_obs=len(returns_for_ci), n_trials=1)
-        execution_cost = 0.0
-        adverse_selection_cost = 0.0
-        if self.fill_simulator is not None:
-            execution_cost = float(
-                self.fill_simulator.transaction_cost_paid + self.fill_simulator.slippage_cost
-            )
-            adverse_selection_cost = float(self.fill_simulator.adverse_selection_cost)
+        execution_cost, adverse_selection_cost = self._execution_costs()
 
         return BacktestResult(
             strategy_name=self.strategy.name,

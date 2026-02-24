@@ -22,6 +22,7 @@ from scipy import stats
 from data.generators.hawkes import HawkesProcess, HawkesParameters
 from research.backtest.engine import BacktestEngine, BacktestResult
 from research.backtest.arena import StrategyArena, StrategyScorecard
+from research.signals.jump_risk_premia import JumpRiskPremiaEstimator
 from strategies.base import MarketMakingStrategy
 from utils.logging_config import get_logger, log_extra
 
@@ -489,6 +490,7 @@ class ComparisonResult:
     scenario_type: ScenarioType
     scorecards: Dict[str, StrategyScorecard]
     hawkes_metrics: Optional[Dict[str, HawkesSpecificMetrics]] = None
+    jump_risk_summary: Optional[Dict[str, float]] = None
     comparison_df: Optional[pd.DataFrame] = None
 
 
@@ -501,12 +503,22 @@ class ComprehensiveHawkesComparison:
     def __init__(
         self,
         initial_capital: float = 100000.0,
-        transaction_cost_bps: float = 2.0
+        transaction_cost_bps: float = 2.0,
+        enable_jump_risk_premia_signals: bool = False,
+        jump_risk_window: int = 96,
+        jump_risk_zscore: float = 2.5,
     ):
         self.initial_capital = initial_capital
         self.transaction_cost_bps = transaction_cost_bps
         self.scenario_generator = ScenarioGenerator()
         self.results: Dict[str, ComparisonResult] = {}
+        self.enable_jump_risk_premia_signals = bool(enable_jump_risk_premia_signals)
+        self._jump_risk_estimator: Optional[JumpRiskPremiaEstimator] = None
+        if self.enable_jump_risk_premia_signals:
+            self._jump_risk_estimator = JumpRiskPremiaEstimator(
+                window=jump_risk_window,
+                jump_zscore=jump_risk_zscore,
+            )
 
     def run_full_comparison(
         self,
@@ -563,8 +575,10 @@ class ComprehensiveHawkesComparison:
         verbose: bool
     ) -> ComparisonResult:
         """Run comparison for a single scenario."""
+        market_data_enriched = self._attach_jump_risk_premia_signals(market_data)
+
         arena = StrategyArena(
-            market_data=market_data,
+            market_data=market_data_enriched,
             initial_capital=self.initial_capital,
             transaction_cost_bps=self.transaction_cost_bps
         )
@@ -582,14 +596,63 @@ class ComprehensiveHawkesComparison:
 
         # Determine scenario type
         scenario_type = self._classify_scenario(scenario_name)
+        jump_risk_summary = self._build_jump_risk_summary(market_data_enriched)
 
         return ComparisonResult(
             scenario_name=scenario_name,
             scenario_type=scenario_type,
             scorecards=arena.scorecards,
             hawkes_metrics=hawkes_metrics if hawkes_metrics else None,
+            jump_risk_summary=jump_risk_summary,
             comparison_df=comparison_df
         )
+
+    def _attach_jump_risk_premia_signals(self, market_data: pd.DataFrame) -> pd.DataFrame:
+        """
+        Add jump risk premia columns to market data when enabled.
+
+        Output columns:
+        - positive_jump_premium
+        - negative_jump_premium
+        - net_jump_premium
+        - jump_cluster_imbalance
+        """
+        if not self.enable_jump_risk_premia_signals or self._jump_risk_estimator is None:
+            return market_data.copy()
+        if "price" not in market_data.columns:
+            return market_data.copy()
+
+        out = market_data.copy()
+        price_series = pd.Series(out["price"].astype(float), index=out.index)
+        signals = self._jump_risk_estimator.estimate_series_from_prices(price_series)
+        for col in [
+            "positive_jump_premium",
+            "negative_jump_premium",
+            "net_jump_premium",
+            "jump_cluster_imbalance",
+        ]:
+            out[col] = signals[col].astype(float)
+        return out
+
+    @staticmethod
+    def _build_jump_risk_summary(market_data: pd.DataFrame) -> Optional[Dict[str, float]]:
+        """Build lightweight scenario-level summary of jump risk signals."""
+        required = [
+            "positive_jump_premium",
+            "negative_jump_premium",
+            "net_jump_premium",
+            "jump_cluster_imbalance",
+        ]
+        if any(col not in market_data.columns for col in required):
+            return None
+
+        return {
+            "avg_positive_jump_premium": float(np.nanmean(market_data["positive_jump_premium"].values)),
+            "avg_negative_jump_premium": float(np.nanmean(market_data["negative_jump_premium"].values)),
+            "avg_net_jump_premium": float(np.nanmean(market_data["net_jump_premium"].values)),
+            "latest_net_jump_premium": float(market_data["net_jump_premium"].iloc[-1]),
+            "avg_jump_cluster_imbalance": float(np.nanmean(market_data["jump_cluster_imbalance"].values)),
+        }
 
     def _extract_hawkes_metrics(
         self,
@@ -622,16 +685,14 @@ class ComprehensiveHawkesComparison:
         else:
             return ScenarioType.REAL_HISTORICAL
 
-    def generate_summary_report(self) -> str:
-        """Generate comprehensive summary report."""
-        lines = []
+    def _append_report_header(self, lines: List[str]) -> None:
         lines.append("=" * 80)
         lines.append("HAWKES STRATEGY COMPREHENSIVE COMPARISON REPORT")
         lines.append("=" * 80)
         lines.append(f"\nGenerated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         lines.append(f"Scenarios Tested: {len(self.results)}")
 
-        # Overall rankings
+    def _append_overall_rankings(self, lines: List[str]) -> None:
         lines.append("\n" + "=" * 80)
         lines.append("OVERALL STRATEGY RANKINGS")
         lines.append("=" * 80)
@@ -642,7 +703,7 @@ class ComprehensiveHawkesComparison:
             for strategy, score in winners[:3]:
                 lines.append(f"  {strategy}: {score:.4f}")
 
-        # Scenario-specific results
+    def _append_scenario_results(self, lines: List[str]) -> None:
         lines.append("\n" + "=" * 80)
         lines.append("SCENARIO-SPECIFIC RESULTS")
         lines.append("=" * 80)
@@ -651,15 +712,16 @@ class ComprehensiveHawkesComparison:
             lines.append(f"\n{name.upper()} ({result.scenario_type.value})")
             lines.append("-" * 40)
 
-            if result.comparison_df is not None:
-                for _, row in result.comparison_df.iterrows():
-                    lines.append(
-                        f"  {row['Strategy']}: "
-                        f"PnL=${row['Total PnL ($)']:,.0f}, "
-                        f"Sharpe={row['Sharpe']:.2f}"
-                    )
+            if result.comparison_df is None:
+                continue
+            for _, row in result.comparison_df.iterrows():
+                lines.append(
+                    f"  {row['Strategy']}: "
+                    f"PnL=${row['Total PnL ($)']:,.0f}, "
+                    f"Sharpe={row['Sharpe']:.2f}"
+                )
 
-        # Hawkes-specific insights
+    def _append_hawkes_insights(self, lines: List[str]) -> None:
         lines.append("\n" + "=" * 80)
         lines.append("HAWKES-SPECIFIC INSIGHTS")
         lines.append("=" * 80)
@@ -672,6 +734,22 @@ class ComprehensiveHawkesComparison:
                     lines.append(f"    Avg Intensity: {metrics.avg_intensity:.4f}")
                     lines.append(f"    Intensity-Spread Corr: {metrics.intensity_spread_correlation:.4f}")
                     lines.append(f"    Adverse Selection Accuracy: {metrics.adverse_selection_accuracy:.2%}")
+            if result.jump_risk_summary:
+                lines.append("  Jump Premia:")
+                lines.append(
+                    f"    Avg Net Jump Premium: {result.jump_risk_summary['avg_net_jump_premium']:.6f}"
+                )
+                lines.append(
+                    f"    Latest Net Jump Premium: {result.jump_risk_summary['latest_net_jump_premium']:.6f}"
+                )
+
+    def generate_summary_report(self) -> str:
+        """Generate comprehensive summary report."""
+        lines: List[str] = []
+        self._append_report_header(lines)
+        self._append_overall_rankings(lines)
+        self._append_scenario_results(lines)
+        self._append_hawkes_insights(lines)
 
         return "\n".join(lines)
 
