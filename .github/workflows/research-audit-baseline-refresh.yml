@@ -1,0 +1,115 @@
+name: Research Audit Baseline Refresh
+
+on:
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: "Random seed for synthetic experiments"
+        required: false
+        default: "42"
+      n_per_bucket:
+        description: "Quotes per strike/maturity bucket when quotes_json is empty"
+        required: false
+        default: "1"
+      quotes_json:
+        description: "Optional fixed quote fixture path"
+        required: false
+        default: "validation_scripts/fixtures/model_zoo_quotes_seed42.json"
+
+concurrency:
+  group: research-audit-baseline-refresh-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  baseline-refresh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      SEED: ${{ inputs.seed }}
+      N_PER_BUCKET: ${{ inputs.n_per_bucket }}
+      QUOTES_JSON: ${{ inputs.quotes_json }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-research-audit-baseline-refresh-${{ hashFiles('**/requirements.txt', '**/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-research-audit-baseline-refresh-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Generate candidate research-audit artifacts
+        run: |
+          python validation_scripts/iv_surface_stability_report.py \
+            --seed "$SEED" \
+            --fail-on-arbitrage \
+            --min-short-max-jump-reduction 0.005 \
+            --output-md artifacts/iv-surface-stability-report.md \
+            --output-json artifacts/iv-surface-stability-report.json
+
+          python validation_scripts/rough_jump_experiment.py --seed "$SEED" \
+            > artifacts/rough-jump-experiment.txt
+
+          CMD_ARGS=(--seed "$SEED" --n-per-bucket "$N_PER_BUCKET")
+          if [ -n "$QUOTES_JSON" ]; then
+            CMD_ARGS=(--quotes-json "$QUOTES_JSON")
+          fi
+          python validation_scripts/pricing_model_zoo_benchmark.py \
+            "${CMD_ARGS[@]}" \
+            --expected-best-model bates \
+            --max-best-rmse 120.0 \
+            --output-json artifacts/pricing-model-zoo-benchmark.json \
+            > artifacts/pricing-model-zoo-benchmark.txt
+
+          python validation_scripts/research_audit_snapshot.py \
+            --iv-report-json artifacts/iv-surface-stability-report.json \
+            --model-zoo-json artifacts/pricing-model-zoo-benchmark.json \
+            --rough-jump-txt artifacts/rough-jump-experiment.txt \
+            --output-json artifacts/proposed-research-audit-snapshot-baseline.json
+
+      - name: Compare current baseline vs proposed baseline
+        run: |
+          python validation_scripts/research_audit_compare.py \
+            --baseline-json validation_scripts/fixtures/research_audit_snapshot_baseline.json \
+            --current-json artifacts/proposed-research-audit-snapshot-baseline.json \
+            --max-best-rmse-increase-pct 9999 \
+            --max-iv-reduction-drop-pct 9999 \
+            --allow-best-model-change \
+            --output-json artifacts/proposed-baseline-diff.json \
+            --output-md artifacts/proposed-baseline-diff.md
+
+      - name: Publish proposed baseline summary
+        if: always()
+        run: |
+          if [ -f artifacts/proposed-baseline-diff.md ]; then
+            cat artifacts/proposed-baseline-diff.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload proposed baseline artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: proposed-research-audit-baseline
+          path: |
+            artifacts/proposed-research-audit-snapshot-baseline.json
+            artifacts/proposed-baseline-diff.json
+            artifacts/proposed-baseline-diff.md
+            artifacts/iv-surface-stability-report.md
+            artifacts/iv-surface-stability-report.json
+            artifacts/rough-jump-experiment.txt
+            artifacts/pricing-model-zoo-benchmark.txt
+            artifacts/pricing-model-zoo-benchmark.json
+

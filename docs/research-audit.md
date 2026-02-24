@@ -58,6 +58,15 @@ make research-audit-refresh-baseline
 2. 研究审计基线快照：
 - `validation_scripts/fixtures/research_audit_snapshot_baseline.json`
 
+## 基线更新流程（建议）
+
+1. 手动触发 `Research Audit Baseline Refresh` workflow。
+2. 下载 artifact `proposed-research-audit-baseline`。
+3. 审阅：
+- `proposed-research-audit-snapshot-baseline.json`
+- `proposed-baseline-diff.md`
+4. 若确认变更是预期升级，再提交基线文件更新。
+
 ## 调参建议
 
 1. 若频繁误报：
@@ -71,4 +80,3 @@ make research-audit-refresh-baseline
 3. 若 CI 波动导致偶发失败：
 - 优先检查随机种子、输入样本是否固定。
 - 保持 `quotes_json` 固定输入，不建议切回纯随机样本守门。
-
