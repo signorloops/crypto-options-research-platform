@@ -21,21 +21,32 @@
 - Uploads artifacts for:
   - IV surface stability report (md/json)
   - rough-jump experiment
-  - model-zoo benchmark
+  - model-zoo benchmark (txt/json)
+  - consolidated snapshot (`research-audit-snapshot.json`)
+  - drift report (`research-audit-drift-report.md/json`)
 - Added quality gates:
   - `--fail-on-arbitrage`
   - `--min-short-max-jump-reduction`
-- Added tests: `tests/test_iv_surface_stability_report.py`.
+  - `--expected-best-model`
+  - `--max-best-rmse`
+  - baseline drift guard (`max_best_rmse_increase_pct`, `max_iv_reduction_drop_pct`)
+- Added deterministic fixtures:
+  - `validation_scripts/fixtures/model_zoo_quotes_seed42.json`
+  - `validation_scripts/fixtures/research_audit_snapshot_baseline.json`
+- Added tests:
+  - `tests/test_iv_surface_stability_report.py`
+  - `tests/test_pricing_model_zoo_benchmark_script.py`
+  - `tests/test_research_audit_snapshot.py`
+  - `tests/test_research_audit_compare.py`
 
 ## In-Flight Remote Checks
 
 1. `CI` / `CD` / `Complexity Governance` runs are active on the latest `master` pushes.
-2. `Research Audit` is actively re-run on latest `master` after introducing dispatch inputs.
+2. `Research Audit` is actively re-run on latest `master` after introducing drift guard.
 
 ## Recommended Next Tasks (Sequential)
 
 1. Refactor one top complexity hotspot (`research/risk/var.py::monte_carlo_var`) into smaller pure helpers with behavior-preserving tests.
-2. Add a deterministic fixture set for model-zoo benchmark to compare ranking drift across commits.
-3. Add a lightweight dashboard card for weekly research-audit trend deltas (short-jump-reduction, no-arb flag, best model RMSE).
-4. Add branch-protection docs screenshot/checklist for required checks to reduce operational ambiguity.
-
+2. Add a lightweight dashboard card for weekly research-audit trend deltas (short-jump-reduction, no-arb flag, best model RMSE).
+3. Add branch-protection docs screenshot/checklist for required checks to reduce operational ambiguity.
+4. Add auto-baseline refresh workflow (manual approval) for intentional model upgrades.
