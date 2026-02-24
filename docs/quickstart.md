@@ -189,6 +189,22 @@ ruff check . --fix
 mypy .
 ```
 
+### 研究审计与基准
+```bash
+# 近月 IV surface 稳定性 + 静态无套利报告
+python validation_scripts/iv_surface_stability_report.py
+
+# Rough volatility + jumps 实验对比
+python validation_scripts/rough_jump_experiment.py --seed 42
+
+# 定价模型 zoo 基准（RMSE/MAE/IV 误差）
+python validation_scripts/pricing_model_zoo_benchmark.py --seed 42 --n-per-bucket 1
+```
+
+GitHub Actions:
+- `Research Audit` workflow 每周一 UTC 自动运行，并可手动触发。
+- 运行后可在 artifact 下载 `iv-surface-stability`、`rough-jump`、`model-zoo` 报告。
+
 ### 数据管理
 ```bash
 # 查看缓存信息

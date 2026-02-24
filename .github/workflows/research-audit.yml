@@ -1,0 +1,76 @@
+name: Research Audit
+
+on:
+  schedule:
+    - cron: "0 15 * * 1" # Every Monday 15:00 UTC
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: "Random seed for synthetic benchmarks"
+        required: false
+        default: "42"
+      n_per_bucket:
+        description: "Quotes per strike/maturity bucket for model-zoo benchmark"
+        required: false
+        default: "1"
+
+jobs:
+  research-audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    env:
+      SEED: ${{ github.event_name == 'workflow_dispatch' && inputs.seed || '42' }}
+      N_PER_BUCKET: ${{ github.event_name == 'workflow_dispatch' && inputs.n_per_bucket || '1' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run IV surface stability audit
+        run: |
+          python validation_scripts/iv_surface_stability_report.py \
+            --seed "$SEED" \
+            --output-md artifacts/iv-surface-stability-report.md \
+            --output-json artifacts/iv-surface-stability-report.json
+
+      - name: Run rough-jump experiment
+        run: |
+          python validation_scripts/rough_jump_experiment.py --seed "$SEED" \
+            > artifacts/rough-jump-experiment.txt
+
+      - name: Run model-zoo benchmark
+        run: |
+          python validation_scripts/pricing_model_zoo_benchmark.py \
+            --seed "$SEED" \
+            --n-per-bucket "$N_PER_BUCKET" \
+            > artifacts/pricing-model-zoo-benchmark.txt
+
+      - name: Publish report summary
+        if: always()
+        run: |
+          if [ -f artifacts/iv-surface-stability-report.md ]; then
+            cat artifacts/iv-surface-stability-report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload research audit artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-audit-artifacts
+          path: |
+            artifacts/iv-surface-stability-report.md
+            artifacts/iv-surface-stability-report.json
+            artifacts/rough-jump-experiment.txt
+            artifacts/pricing-model-zoo-benchmark.txt
+

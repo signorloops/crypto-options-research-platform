@@ -53,7 +53,7 @@
   - `tests/test_pricing_inverse.py`
 - 交付：
   - 新增短期限正则/先验开关（默认兼容旧行为）
-  - 近月 IV surface 平滑度与静态无套利检查报告（研究脚本）
+  - 近月 IV surface 平滑度与静态无套利检查报告（`validation_scripts/iv_surface_stability_report.py`）
 
 2. **Day 3-4: P0-2 Jump Risk Premia 信号**
 - 代码：
@@ -126,4 +126,3 @@
 1. 若 clustered jump 参数不稳：先降级为“固定窗口估计 + 平滑”。  
 2. 若模型 zoo 计算过慢：先以日内抽样和到期分层跑 nightly。  
 3. 若 DeFi 数据质量不足：先仅保留 CEX 内部偏离监控框架，待数据源稳定后接入。
-
