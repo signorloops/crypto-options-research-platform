@@ -2,27 +2,7 @@ name: Complexity Governance
 
 on:
   pull_request:
-    paths:
-      - "core/**/*.py"
-      - "data/**/*.py"
-      - "research/**/*.py"
-      - "strategies/**/*.py"
-      - "execution/**/*.py"
-      - "utils/**/*.py"
-      - "config/complexity_budget.json"
-      - "scripts/governance/complexity_guard.py"
-      - ".github/workflows/complexity-governance.yml"
   push:
-    paths:
-      - "core/**/*.py"
-      - "data/**/*.py"
-      - "research/**/*.py"
-      - "strategies/**/*.py"
-      - "execution/**/*.py"
-      - "utils/**/*.py"
-      - "config/complexity_budget.json"
-      - "scripts/governance/complexity_guard.py"
-      - ".github/workflows/complexity-governance.yml"
   schedule:
     - cron: "0 14 * * 1" # Every Monday 14:00 UTC
   workflow_dispatch:
