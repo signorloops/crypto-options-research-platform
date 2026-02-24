@@ -191,6 +191,9 @@ mypy .
 
 ### 研究审计与基准
 ```bash
+# 一键生成所有研究审计工件（推荐）
+make research-audit
+
 # 近月 IV surface 稳定性 + 静态无套利报告
 python validation_scripts/iv_surface_stability_report.py
 

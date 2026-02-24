@@ -1,7 +1,7 @@
-.PHONY: help install install-dev test test-unit test-integration test-cov lint lint-fix format format-check type-check quality clean docs
+.PHONY: help install install-dev test test-unit test-integration test-cov lint lint-fix format format-check type-check quality clean docs research-audit
 
 # Detect virtual environment or use system Python
-VENV_PYTHON := $(wildcard ./venv/bin/python) $(wildcard ./.venv/bin/python) $(wildcard ./env/bin/python)
+VENV_PYTHON := $(wildcard ./venv/bin/python) $(wildcard ./.venv/bin/python) $(wildcard ./.venv311/bin/python) $(wildcard ./env/bin/python)
 ifeq ($(VENV_PYTHON),)
     PYTHON ?= $(shell which python3)
 else
@@ -29,6 +29,7 @@ help:
 	@echo "  format-check     Check code formatting"
 	@echo "  type-check       Run type checking (mypy)"
 	@echo "  quality          Run format-check + lint + type-check"
+	@echo "  research-audit   Generate IV stability/model-zoo/rough-jump research reports"
 	@echo "  clean            Clean build artifacts"
 	@echo "  docs             Build documentation"
 
@@ -68,6 +69,16 @@ type-check:
 
 quality: format-check lint type-check
 	@echo "All quality checks passed!"
+
+research-audit:
+	mkdir -p artifacts
+	$(PYTHON) validation_scripts/iv_surface_stability_report.py \
+		--seed 42 \
+		--output-md artifacts/iv-surface-stability-report.md \
+		--output-json artifacts/iv-surface-stability-report.json
+	$(PYTHON) validation_scripts/rough_jump_experiment.py --seed 42 > artifacts/rough-jump-experiment.txt
+	$(PYTHON) validation_scripts/pricing_model_zoo_benchmark.py --seed 42 --n-per-bucket 1 > artifacts/pricing-model-zoo-benchmark.txt
+	@echo "Research audit artifacts generated under artifacts/"
 
 clean:
 	rm -rf build/
