@@ -197,6 +197,9 @@ make research-audit
 # 近月 IV surface 稳定性 + 静态无套利报告
 python validation_scripts/iv_surface_stability_report.py
 
+# 加质量门槛（CI 模式）
+python validation_scripts/iv_surface_stability_report.py --fail-on-arbitrage --min-short-max-jump-reduction 0.005
+
 # Rough volatility + jumps 实验对比
 python validation_scripts/rough_jump_experiment.py --seed 42
 

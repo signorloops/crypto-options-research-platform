@@ -106,6 +106,27 @@ def _render_markdown(report: Dict[str, object]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def evaluate_quality_gates(
+    report: Dict[str, object],
+    fail_on_arbitrage: bool = False,
+    min_short_max_jump_reduction: float = 0.0,
+) -> List[str]:
+    """Return quality-gate violations for CI usage."""
+    summary = report.get("summary", {})
+    violations: List[str] = []
+
+    if fail_on_arbitrage and not bool(summary.get("no_arbitrage", False)):
+        violations.append("No-arbitrage check failed.")
+
+    observed = float(summary.get("avg_max_jump_reduction_short", 0.0))
+    if observed + 1e-12 < float(min_short_max_jump_reduction):
+        violations.append(
+            "Short-maturity stabilization below threshold: "
+            f"observed={observed:.6f}, required>={min_short_max_jump_reduction:.6f}"
+        )
+    return violations
+
+
 def _write_text(path: str, content: str) -> None:
     directory = os.path.dirname(path)
     if directory:
@@ -129,6 +150,17 @@ def main() -> None:
         default="artifacts/iv-surface-stability-report.json",
         help="JSON report output path.",
     )
+    parser.add_argument(
+        "--fail-on-arbitrage",
+        action="store_true",
+        help="Exit non-zero when no-arbitrage checks fail.",
+    )
+    parser.add_argument(
+        "--min-short-max-jump-reduction",
+        type=float,
+        default=0.0,
+        help="Minimum required avg max-jump reduction on short maturities.",
+    )
     args = parser.parse_args()
 
     surface = _build_synthetic_surface(seed=args.seed)
@@ -147,6 +179,16 @@ def main() -> None:
     print(f"Markdown report: {args.output_md}")
     print(f"JSON report: {args.output_json}")
     print(md)
+
+    violations = evaluate_quality_gates(
+        report=report,
+        fail_on_arbitrage=args.fail_on_arbitrage,
+        min_short_max_jump_reduction=args.min_short_max_jump_reduction,
+    )
+    if violations:
+        for violation in violations:
+            print(f"QUALITY GATE FAILED: {violation}", file=sys.stderr)
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":

@@ -74,6 +74,8 @@ research-audit:
 	mkdir -p artifacts
 	$(PYTHON) validation_scripts/iv_surface_stability_report.py \
 		--seed 42 \
+		--fail-on-arbitrage \
+		--min-short-max-jump-reduction 0.005 \
 		--output-md artifacts/iv-surface-stability-report.md \
 		--output-json artifacts/iv-surface-stability-report.json
 	$(PYTHON) validation_scripts/rough_jump_experiment.py --seed 42 > artifacts/rough-jump-experiment.txt
