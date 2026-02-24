@@ -7,6 +7,10 @@ on:
     - cron: "0 14 * * 1" # Every Monday 14:00 UTC
   workflow_dispatch:
 
+concurrency:
+  group: complexity-governance-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   complexity-audit:
     runs-on: ubuntu-latest

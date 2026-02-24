@@ -14,6 +14,10 @@ on:
         required: false
         default: "1"
 
+concurrency:
+  group: research-audit-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   research-audit:
     runs-on: ubuntu-latest
@@ -73,4 +77,3 @@ jobs:
             artifacts/iv-surface-stability-report.json
             artifacts/rough-jump-experiment.txt
             artifacts/pricing-model-zoo-benchmark.txt
-
