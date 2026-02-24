@@ -250,3 +250,4 @@ python -c "from data.cache import DataCache; print(DataCache().get_cache_info())
 - 查看 [API 文档](api.md) 了解所有接口
 - 探索 [示例 Notebook](../notebooks/)
 - 了解 [Hawkes 策略对比实验](hawkes_comparison_experiment.md) 详细设计
+- 按 [Branch Protection 清单](branch-protection-checklist.md) 配置主干合并守门
