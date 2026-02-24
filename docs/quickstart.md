@@ -169,14 +169,17 @@ jupyter notebook notebooks/06_hawkes_backtest_comparison.ipynb
 
 ### 运行测试
 ```bash
-# 全部测试
-pytest tests/ -v
+# 默认测试（不包含外部 API 集成测试）
+pytest tests/ -v -m "not integration"
 
 # 特定模块
 pytest tests/test_volatility.py -v
 
 # 覆盖率报告
-pytest tests/ --cov=core --cov=strategies --cov=research
+pytest tests/ -m "not integration" --cov=core --cov=strategies --cov=research
+
+# 显式运行集成测试（访问交易所 API）
+RUN_INTEGRATION_TESTS=1 pytest tests/ -v -m "integration"
 ```
 
 ### 代码格式化
