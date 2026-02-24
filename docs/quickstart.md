@@ -252,3 +252,4 @@ python -c "from data.cache import DataCache; print(DataCache().get_cache_info())
 - 探索 [示例 Notebook](../notebooks/)
 - 了解 [Hawkes 策略对比实验](hawkes_comparison_experiment.md) 详细设计
 - 按 [Branch Protection 清单](branch-protection-checklist.md) 配置主干合并守门
+- 阅读 [Research Audit 指南](research-audit.md) 了解研究守门产物与阈值
