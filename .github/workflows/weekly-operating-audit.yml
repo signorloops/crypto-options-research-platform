@@ -10,6 +10,7 @@ on:
       - "scripts/governance/weekly_operating_audit.py"
       - "scripts/governance/weekly_pnl_attribution.py"
       - "scripts/governance/weekly_canary_checklist.py"
+      - "scripts/governance/weekly_decision_log.py"
       - "config/weekly_operating_thresholds.json"
       - "config/consistency_thresholds.json"
       - "docs/plans/weekly-operating-checklist.md"
@@ -20,6 +21,7 @@ on:
       - "scripts/governance/weekly_operating_audit.py"
       - "scripts/governance/weekly_pnl_attribution.py"
       - "scripts/governance/weekly_canary_checklist.py"
+      - "scripts/governance/weekly_decision_log.py"
       - "config/weekly_operating_thresholds.json"
       - "config/consistency_thresholds.json"
       - "docs/plans/weekly-operating-checklist.md"
@@ -77,6 +79,14 @@ jobs:
             --output-md artifacts/weekly-adr-draft.md \
             --owner "weekly-ci"
 
+      - name: Generate decision log
+        run: |
+          python scripts/governance/weekly_decision_log.py \
+            --audit-json artifacts/weekly-operating-audit.json \
+            --canary-json artifacts/weekly-canary-checklist.json \
+            --output-md artifacts/weekly-decision-log.md \
+            --output-json artifacts/weekly-decision-log.json
+
       - name: Publish report to job summary
         if: always()
         run: |
@@ -99,3 +109,5 @@ jobs:
             artifacts/weekly-canary-checklist.md
             artifacts/weekly-canary-checklist.json
             artifacts/weekly-adr-draft.md
+            artifacts/weekly-decision-log.md
+            artifacts/weekly-decision-log.json
