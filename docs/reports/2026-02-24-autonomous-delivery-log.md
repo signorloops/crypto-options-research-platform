@@ -59,6 +59,10 @@
 - Added `docs/reports/2026-02-25-arxiv-frontier-inverse-options.md`.
 - Curated arXiv frontier papers and mapped each to concrete implementation paths in current codebase.
 
+9. Execution planning:
+- Added `docs/plans/2026-02-25-inverse-options-arxiv-implementation-plan.md`.
+- Split arXiv-driven upgrades into phased deliverables with acceptance criteria and risk controls.
+
 ## In-Flight Remote Checks
 
 1. `CI` / `CD` / `Complexity Governance` runs are active on the latest `master` pushes.

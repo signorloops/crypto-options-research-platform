@@ -258,3 +258,4 @@ python -c "from data.cache import DataCache; print(DataCache().get_cache_info())
 - 按 [Branch Protection 清单](branch-protection-checklist.md) 配置主干合并守门
 - 阅读 [Research Audit 指南](research-audit.md) 了解研究守门产物与阈值
 - 阅读 [arXiv 前沿清单（币本位期权）](reports/2026-02-25-arxiv-frontier-inverse-options.md) 获取可落地论文路线图
+- 参考 [arXiv 路线实施计划](plans/2026-02-25-inverse-options-arxiv-implementation-plan.md) 直接拆任务执行
