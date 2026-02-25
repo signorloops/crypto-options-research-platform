@@ -45,6 +45,8 @@ jobs:
             matplotlib \
             scikit-learn \
             aiohttp \
+            websockets \
+            requests \
             fastapi \
             starlette \
             httpx \
