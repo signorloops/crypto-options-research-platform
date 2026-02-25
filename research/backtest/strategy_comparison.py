@@ -1,7 +1,5 @@
 """Utility helpers for comparing multiple strategies on the same dataset."""
 
-from typing import Dict, List
-
 import pandas as pd
 
 from research.backtest.engine import BacktestEngine
@@ -11,9 +9,9 @@ from strategies.base import MarketMakingStrategy
 class StrategyComparison:
     """Run multiple strategies on shared market data and collect comparable metrics."""
 
-    def __init__(self, strategies: List[MarketMakingStrategy]):
+    def __init__(self, strategies: list[MarketMakingStrategy]):
         self.strategies = strategies
-        self.results: Dict[str, Dict] = {}
+        self.results: dict[str, dict] = {}
 
     def run_comparison(self, market_data: pd.DataFrame) -> pd.DataFrame:
         """Run each strategy in the same backtest environment and aggregate results."""

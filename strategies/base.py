@@ -3,7 +3,7 @@ Base strategy interface for market making and other trading strategies.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Optional
+from typing import Optional
 
 import pandas as pd
 
@@ -38,7 +38,7 @@ class MarketMakingStrategy(ABC):
         pass
 
     @abstractmethod
-    def get_internal_state(self) -> Dict:
+    def get_internal_state(self) -> dict:
         """
         Return current internal state for debugging and logging.
 
@@ -67,8 +67,8 @@ class MarketMakingStrategy(ABC):
             fill: Fill details
             position: Updated position after fill
         """
-        pass
+        return None
 
     def reset(self) -> None:
         """Reset strategy state for new episode/backtest."""
-        pass
+        return None
