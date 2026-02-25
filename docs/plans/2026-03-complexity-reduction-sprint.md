@@ -95,7 +95,7 @@ DoD:
 
 ### P2-6 CI 增加架构守门（中收益 / 低风险）
 
-- [ ] 新增 `tests/test_architecture_boundaries.py`（分层依赖断言）  
+- [x] 新增 `tests/test_architecture_boundaries.py`（分层依赖断言）  
 - [ ] 在 CI 中为 changed files 启用更严格 lint/type 检查（逐步收紧）  
 - [ ] 将该检查纳入周三审计基线
 
