@@ -2,7 +2,7 @@
 Event-driven backtest engine for market making strategies.
 Simulates realistic market conditions including latency, fill probability, and adverse selection.
 """
-import os
+
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
@@ -20,11 +20,21 @@ from core.types import (
     QuoteAction,
     Trade,
 )
+from research.backtest.fill_model import FillSimulatorConfig, RealisticFillSimulator
 from research.pricing.inverse_options import InverseOptionPricer
 from strategies.base import MarketMakingStrategy
 
+__all__ = [
+    "FillSimulatorConfig",
+    "RealisticFillSimulator",
+    "BacktestResult",
+    "BacktestEngine",
+]
 
-def _build_market_state_snapshot(timestamp: datetime, price: float, order_book: OrderBook) -> MarketState:
+
+def _build_market_state_snapshot(
+    timestamp: datetime, price: float, order_book: OrderBook
+) -> MarketState:
     """Create a market state snapshot for current tick."""
     return MarketState(
         timestamp=timestamp,
@@ -64,341 +74,9 @@ def _trade_side_counts(trades: List[Fill]) -> Tuple[int, int]:
 
 
 @dataclass
-class FillSimulatorConfig:
-    """Configuration for fill simulation."""
-    # Latency parameters (in milliseconds) - 从环境变量读取
-    base_latency_ms: float = field(default_factory=lambda: float(os.getenv("BT_BASE_LATENCY_MS", "50.0")))
-    latency_std_ms: float = field(default_factory=lambda: float(os.getenv("BT_LATENCY_STD_MS", "20.0")))
-
-    # Queue position model
-    queue_position_random: bool = field(default_factory=lambda: os.getenv("BT_QUEUE_POSITION_RANDOM", "true").lower() == "true")
-
-    # Adverse selection - 从环境变量读取
-    adverse_selection_factor: float = field(default_factory=lambda: float(os.getenv("BT_ADVERSE_SELECTION_FACTOR", "0.3")))
-
-    # Minimum profitability (avoid fills that would be instant losses) - 从环境变量读取
-    min_profit_bps: float = field(default_factory=lambda: float(os.getenv("BT_MIN_PROFIT_BPS", "0.5")))
-
-
-class RealisticFillSimulator:
-    """
-    Simulates realistic order fills based on market microstructure.
-
-    Key features:
-    1. Queue position model: Orders at front of queue fill faster
-    2. Latency simulation: Quote updates have delay
-    3. Adverse selection: Informed trades hit stale quotes
-    4. Size-based probability: Larger quotes less likely to fully fill
-    """
-
-    def __init__(self, config: FillSimulatorConfig = None, rng: Optional[np.random.Generator] = None):
-        self.config = config or FillSimulatorConfig()
-        self._quote_history: List[Dict] = []
-        self.rng = rng or np.random.default_rng()
-        self.reset_metrics()
-
-    def reset_metrics(self) -> None:
-        """Reset cumulative execution friction metrics."""
-        self.transaction_cost_paid: float = 0.0
-        self.slippage_cost: float = 0.0
-        self.adverse_selection_cost: float = 0.0
-
-    def simulate_fill(
-        self,
-        quote: QuoteAction,
-        market_state: MarketState,
-        next_trades: List[Trade],
-        inventory_pressure: float = 0.0,
-        transaction_cost_bps: float = 0.0,
-    ) -> Optional[Fill]:
-        """
-        Simulate whether a quote gets filled by incoming trades.
-
-        Args:
-            quote: The quote we placed
-            market_state: Current market state
-            next_trades: Trades that occur after our quote
-            inventory_pressure: How much we're pushing inventory limits
-
-        Returns:
-            Fill object if filled, None otherwise
-        """
-        if not next_trades:
-            return None
-
-        # Simulate latency: our quote arrives after some delay
-        if self.config.latency_std_ms <= 0:
-            latency_ms = max(0.0, self.config.base_latency_ms)
-        else:
-            latency_ms = max(
-                0.0,
-                self.rng.normal(self.config.base_latency_ms, self.config.latency_std_ms),
-            )
-
-        # Check each trade against our quote
-        for trade in next_trades:
-            # Check if trade timestamp is after our quote + latency
-            trade_delay_ms = (trade.timestamp - market_state.timestamp).total_seconds() * 1000
-            if trade_delay_ms < latency_ms:
-                continue  # Trade happened before our quote arrived
-
-            # Check if trade hits our quote
-            if trade.side == OrderSide.SELL:
-                # Seller hits bids - check if our bid is competitive
-                if trade.price <= quote.bid_price and quote.bid_size > 0:
-                    return self._create_fill(
-                        trade,
-                        quote,
-                        OrderSide.BUY,
-                        market_state,
-                        transaction_cost_bps,
-                        latency_ms=latency_ms,
-                        inventory_pressure=inventory_pressure,
-                    )
-            else:
-                # Buyer lifts asks - check if our ask is competitive
-                if trade.price >= quote.ask_price and quote.ask_size > 0:
-                    return self._create_fill(
-                        trade,
-                        quote,
-                        OrderSide.SELL,
-                        market_state,
-                        transaction_cost_bps,
-                        latency_ms=latency_ms,
-                        inventory_pressure=inventory_pressure,
-                    )
-
-        return None
-
-    def _create_fill(
-        self,
-        trade: Trade,
-        quote: QuoteAction,
-        our_side: OrderSide,
-        market_state: MarketState,
-        transaction_cost_bps: float = 0.0,
-        latency_ms: float = 0.0,
-        inventory_pressure: float = 0.0,
-    ) -> Optional[Fill]:
-        """Create a fill object with realistic sizing, slippage, and costs."""
-        our_size = quote.bid_size if our_side == OrderSide.BUY else quote.ask_size
-        if our_size <= 0:
-            return None
-
-        fill_prob = self._estimate_fill_probability(
-            quote=quote,
-            trade=trade,
-            our_side=our_side,
-            market_state=market_state,
-            latency_ms=latency_ms,
-            inventory_pressure=inventory_pressure,
-        )
-        if self.rng.random() > fill_prob:
-            return None
-
-        fill_size = min(trade.size, our_size)
-
-        base_price = quote.bid_price if our_side == OrderSide.BUY else quote.ask_price
-        fill_price = self._apply_order_book_slippage(
-            quote_price=base_price,
-            trade_size=fill_size,
-            order_book=market_state.order_book,
-            side=our_side,
-        )
-        self.slippage_cost += self._cost_against_side(
-            reference_price=base_price,
-            executed_price=fill_price,
-            side=our_side,
-            size=fill_size,
-        )
-
-        # Apply transaction cost: buyer pays more, seller receives less
-        cost_multiplier = transaction_cost_bps / 10_000
-        pre_fee_price = fill_price
-        if our_side == OrderSide.BUY:
-            fill_price *= (1 + cost_multiplier)
-        else:
-            fill_price *= (1 - cost_multiplier)
-        self.transaction_cost_paid += self._cost_against_side(
-            reference_price=pre_fee_price,
-            executed_price=fill_price,
-            side=our_side,
-            size=fill_size,
-        )
-
-        # Adverse selection: additional slippage against us
-        is_adverse = self._check_adverse_selection(trade, market_state)
-        if is_adverse:
-            adverse_slip = self.config.adverse_selection_factor * 0.001
-            pre_adverse_price = fill_price
-            if our_side == OrderSide.BUY:
-                fill_price *= (1 + adverse_slip)
-            else:
-                fill_price *= (1 - adverse_slip)
-            self.adverse_selection_cost += self._cost_against_side(
-                reference_price=pre_adverse_price,
-                executed_price=fill_price,
-                side=our_side,
-                size=fill_size,
-            )
-
-        return Fill(
-            timestamp=trade.timestamp,
-            instrument=market_state.instrument,
-            side=our_side,
-            price=fill_price,
-            size=fill_size,
-            quote_id=None
-        )
-
-    @staticmethod
-    def _sigmoid(x: float) -> float:
-        """Numerically stable sigmoid."""
-        if x >= 0:
-            z = np.exp(-x)
-            return float(1.0 / (1.0 + z))
-        z = np.exp(x)
-        return float(z / (1.0 + z))
-
-    def _queue_depth_ahead(self, quote: QuoteAction, side: OrderSide, order_book: OrderBook) -> float:
-        """Approximate queue depth ahead of our quote."""
-        if side == OrderSide.BUY:
-            our_price = quote.bid_price
-            levels = order_book.bids
-            better = lambda p: p > our_price
-            same = lambda p: p == our_price
-        else:
-            our_price = quote.ask_price
-            levels = order_book.asks
-            better = lambda p: p < our_price
-            same = lambda p: p == our_price
-
-        volume_ahead = 0.0
-        for level in levels:
-            if better(level.price):
-                volume_ahead += level.size
-            elif same(level.price):
-                # Random queue placement approximation: half of same-price depth ahead.
-                volume_ahead += 0.5 * level.size
-                break
-            else:
-                break
-        return float(max(volume_ahead, 0.0))
-
-    @staticmethod
-    def _short_horizon_volatility(market_state: MarketState) -> float:
-        """Estimate short-horizon realized volatility from recent trade prices."""
-        trades = market_state.recent_trades or []
-        if len(trades) < 3:
-            return 0.0
-        prices = np.array([max(float(t.price), 1e-12) for t in trades], dtype=float)
-        returns = np.diff(np.log(prices))
-        if len(returns) == 0:
-            return 0.0
-        return float(np.std(returns))
-
-    def _estimate_fill_probability(
-        self,
-        quote: QuoteAction,
-        trade: Trade,
-        our_side: OrderSide,
-        market_state: MarketState,
-        latency_ms: float = 0.0,
-        inventory_pressure: float = 0.0,
-    ) -> float:
-        """Estimate fill probability from microstructure features."""
-        order_book = market_state.order_book
-        if our_side == OrderSide.BUY:
-            our_price = quote.bid_price
-            our_size = max(quote.bid_size, 1e-8)
-            competitiveness = max(0.0, our_price - trade.price) / max(abs(our_price), 1e-8)
-            imbalance_term = float(order_book.imbalance(levels=5))
-        else:
-            our_price = quote.ask_price
-            our_size = max(quote.ask_size, 1e-8)
-            competitiveness = max(0.0, trade.price - our_price) / max(abs(our_price), 1e-8)
-            imbalance_term = float(-order_book.imbalance(levels=5))
-
-        queue_ahead = self._queue_depth_ahead(quote, our_side, order_book)
-        queue_ratio = queue_ahead / our_size
-        size_ratio = max(float(trade.size), 0.0) / our_size
-        vol = self._short_horizon_volatility(market_state)
-
-        latency_scale = max(self.config.base_latency_ms + self.config.latency_std_ms + 1.0, 1.0)
-        latency_penalty = max(latency_ms, 0.0) / latency_scale
-
-        # Logistic score calibrated to preserve old baseline behavior while using features.
-        score = (
-            1.8
-            + 45.0 * competitiveness
-            - 0.7 * queue_ratio
-            - 0.45 * size_ratio
-            - 15.0 * vol
-            - 0.3 * latency_penalty
-            - 0.25 * max(imbalance_term, 0.0)
-            - 0.3 * abs(inventory_pressure)
-        )
-        prob = self._sigmoid(score)
-        return float(np.clip(prob, 0.02, 0.98))
-
-    def _check_adverse_selection(self, trade: Trade, market_state: MarketState) -> bool:
-        """Check if this trade represents informed flow."""
-        # Simple heuristic: large trades more likely to be informed
-        avg_trade_size = 0.1  # Assume average
-        if trade.size > 3 * avg_trade_size:
-            return self.rng.random() < self.config.adverse_selection_factor * 2
-        return self.rng.random() < self.config.adverse_selection_factor
-
-    def _apply_order_book_slippage(
-        self,
-        quote_price: float,
-        trade_size: float,
-        order_book: Optional[OrderBook],
-        side: OrderSide
-    ) -> float:
-        """Apply size/depth-aware slippage around quoted price."""
-        if order_book is None:
-            return quote_price
-
-        levels = order_book.asks if side == OrderSide.BUY else order_book.bids
-        if not levels or trade_size <= 0:
-            return quote_price
-
-        remaining = trade_size
-        notional = 0.0
-
-        for level in levels:
-            if remaining <= 0:
-                break
-            take = min(remaining, level.size)
-            notional += take * level.price
-            remaining -= take
-
-        if remaining > 0:
-            worst_price = levels[-1].price
-            penalty = worst_price * (1.001 if side == OrderSide.BUY else 0.999)
-            notional += remaining * penalty
-
-        vwap = notional / trade_size
-        random_slip = self.rng.normal(0.0, quote_price * 0.0001)
-        return float(vwap + random_slip)
-
-    @staticmethod
-    def _cost_against_side(
-        reference_price: float,
-        executed_price: float,
-        side: OrderSide,
-        size: float
-    ) -> float:
-        """Positive execution loss measured against reference price."""
-        if side == OrderSide.BUY:
-            return max(executed_price - reference_price, 0.0) * size
-        return max(reference_price - executed_price, 0.0) * size
-
-
-@dataclass
 class BacktestResult:
     """Results from a backtest run (coin-margined)."""
+
     strategy_name: str
 
     # PnL metrics (in crypto units for coin-margined)
@@ -584,7 +262,7 @@ class BacktestEngine:
         self,
         market_data: pd.DataFrame,
         price_column: str = "price",
-        timestamp_column: str = "timestamp"
+        timestamp_column: str = "timestamp",
     ) -> BacktestResult:
         """
         Run backtest on historical market data.
@@ -618,7 +296,9 @@ class BacktestEngine:
             timestamp = timestamps_arr[i]
 
             current_ob = self._update_order_book(current_ob, price)
-            market_state = _build_market_state_snapshot(timestamp=timestamp, price=price, order_book=current_ob)
+            market_state = _build_market_state_snapshot(
+                timestamp=timestamp, price=price, order_book=current_ob
+            )
 
             position = self.positions.get("SYNTHETIC", Position("SYNTHETIC", 0, 0))
             position = self._maybe_process_previous_quote(
@@ -628,7 +308,9 @@ class BacktestEngine:
                 event_volume=float(event_volumes[i]),
                 current_price=price,
             )
-            new_quote = self._quote_with_lagged_price(prices=prices, idx=i, market_state=market_state, position=position)
+            new_quote = self._quote_with_lagged_price(
+                prices=prices, idx=i, market_state=market_state, position=position
+            )
             self.quotes.append(new_quote)
             previous_quote = new_quote
 
@@ -649,13 +331,14 @@ class BacktestEngine:
     def _create_dummy_order_book(self, price: float) -> OrderBook:
         """Create a simple order book around given price."""
         from core.types import OrderBookLevel
+
         spread = price * 0.001  # 10 bps spread
 
         return OrderBook(
             timestamp=datetime.now(timezone.utc),
             instrument="SYNTHETIC",
-            bids=[OrderBookLevel(price=price - spread/2, size=1.0)],
-            asks=[OrderBookLevel(price=price + spread/2, size=1.0)]
+            bids=[OrderBookLevel(price=price - spread / 2, size=1.0)],
+            asks=[OrderBookLevel(price=price + spread / 2, size=1.0)],
         )
 
     def _update_order_book(self, ob: OrderBook, new_price: float) -> OrderBook:
@@ -666,16 +349,12 @@ class BacktestEngine:
         return OrderBook(
             timestamp=ob.timestamp,
             instrument=ob.instrument,
-            bids=[OrderBookLevel(price=new_price - spread/2, size=1.0)],
-            asks=[OrderBookLevel(price=new_price + spread/2, size=1.0)]
+            bids=[OrderBookLevel(price=new_price - spread / 2, size=1.0)],
+            asks=[OrderBookLevel(price=new_price + spread / 2, size=1.0)],
         )
 
     def _apply_slippage(
-        self,
-        quote_price: float,
-        trade_size: float,
-        order_book: OrderBook,
-        side: OrderSide
+        self, quote_price: float, trade_size: float, order_book: OrderBook, side: OrderSide
     ) -> float:
         """Apply realistic slippage model based on order book depth.
 
@@ -725,10 +404,7 @@ class BacktestEngine:
         return vwap + random_slippage
 
     def _calculate_fill_probability(
-        self,
-        quote: QuoteAction,
-        order_book: OrderBook,
-        side: OrderSide
+        self, quote: QuoteAction, order_book: OrderBook, side: OrderSide
     ) -> float:
         """Calculate probability of fill based on quote position in order book.
 
@@ -782,11 +458,7 @@ class BacktestEngine:
         return max(0.05, base_prob - queue_penalty - size_penalty)
 
     def _simulate_fill_simple(
-        self,
-        quote: QuoteAction,
-        current_price: float,
-        price_change: float,
-        order_book: OrderBook
+        self, quote: QuoteAction, current_price: float, price_change: float, order_book: OrderBook
     ) -> Optional[Fill]:
         """Enhanced fill simulation with slippage and realistic fill probability."""
         # Determine which side might get filled based on price movement
@@ -840,13 +512,11 @@ class BacktestEngine:
             instrument="SYNTHETIC",
             side=side,
             price=fill_price,
-            size=fill_size
+            size=fill_size,
         )
 
     def _generate_synthetic_trades(
-        self,
-        market_state: MarketState,
-        volume: float = 1.0
+        self, market_state: MarketState, volume: float = 1.0
     ) -> List[Trade]:
         """Generate synthetic trades based on current market activity (no look-ahead).
 
@@ -860,7 +530,11 @@ class BacktestEngine:
 
         for _ in range(num_trades):
             # Random trade side (slight bias based on order book imbalance)
-            imbalance = market_state.order_book.imbalance() if hasattr(market_state.order_book, 'imbalance') else 0
+            imbalance = (
+                market_state.order_book.imbalance()
+                if hasattr(market_state.order_book, "imbalance")
+                else 0
+            )
             side_bias = 0.5 + imbalance * 0.2  # Small bias towards buy if bids are heavier
             side = OrderSide.BUY if self.rng.random() < side_bias else OrderSide.SELL
 
@@ -872,13 +546,15 @@ class BacktestEngine:
             # Trade size proportional to volume
             trade_size = volume * self.rng.random() * 0.3
 
-            trades.append(Trade(
-                timestamp=timestamp,
-                instrument=market_state.instrument,
-                price=abs(trade_price),
-                size=abs(trade_size),
-                side=side
-            ))
+            trades.append(
+                Trade(
+                    timestamp=timestamp,
+                    instrument=market_state.instrument,
+                    price=abs(trade_price),
+                    size=abs(trade_size),
+                    side=side,
+                )
+            )
 
         return trades
 
@@ -963,16 +639,13 @@ class BacktestEngine:
                         entry_price=position.avg_entry_price,
                         exit_price=current_price,
                         size=position.size,
-                        inverse=True
+                        inverse=True,
                     )
 
         return realized_pnl + unrealized_pnl
 
     def _bootstrap_risk_ci(
-        self,
-        returns: pd.Series,
-        n_bootstrap: int = 500,
-        alpha: float = 0.05
+        self, returns: pd.Series, n_bootstrap: int = 500, alpha: float = 0.05
     ) -> Tuple[Tuple[float, float], Tuple[float, float]]:
         """
         Bootstrap 95% CI for Sharpe and max drawdown.
@@ -1070,9 +743,15 @@ class BacktestEngine:
 
         buys, sells = _trade_side_counts(self.trades)
         avg_size = np.mean([t.size for t in self.trades]) if self.trades else 0
-        returns_for_ci = pnl_series.diff().dropna() / max(self.initial_crypto_balance, 1e-12) if len(pnl_series) > 1 else pd.Series(dtype=float)
+        returns_for_ci = (
+            pnl_series.diff().dropna() / max(self.initial_crypto_balance, 1e-12)
+            if len(pnl_series) > 1
+            else pd.Series(dtype=float)
+        )
         sharpe_ci, drawdown_ci = self._bootstrap_risk_ci(returns_for_ci)
-        deflated_sharpe = self._deflated_sharpe_ratio(float(sharpe), n_obs=len(returns_for_ci), n_trials=1)
+        deflated_sharpe = self._deflated_sharpe_ratio(
+            float(sharpe), n_obs=len(returns_for_ci), n_trials=1
+        )
         execution_cost, adverse_selection_cost = self._execution_costs()
 
         return BacktestResult(
@@ -1100,5 +779,5 @@ class BacktestEngine:
             crypto_balance=self.crypto_balance,
             crypto_balance_series=crypto_balance_series,
             pnl_series=pnl_series,
-            inventory_series=inventory_series
+            inventory_series=inventory_series,
         )
