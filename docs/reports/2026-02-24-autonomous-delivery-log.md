@@ -55,6 +55,10 @@
 - Added workflow step to publish `research-audit-weekly-summary.md` into GitHub Step Summary and artifacts.
 - Added tests: `tests/test_research_audit_weekly_summary.py`.
 
+8. Research frontier mapping:
+- Added `docs/reports/2026-02-25-arxiv-frontier-inverse-options.md`.
+- Curated arXiv frontier papers and mapped each to concrete implementation paths in current codebase.
+
 ## In-Flight Remote Checks
 
 1. `CI` / `CD` / `Complexity Governance` runs are active on the latest `master` pushes.
