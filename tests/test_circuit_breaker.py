@@ -520,7 +520,8 @@ class TestCircuitBreakerStatus:
         cb = CircuitBreaker()
 
         # Add a violation
-        timestamps = pd.date_range(start=datetime.now(timezone.utc), periods=5, freq='min')
+        # Use a fixed intraday UTC window to avoid date rollovers near midnight.
+        timestamps = pd.date_range(start=datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc), periods=5, freq='min')
         pnl_series = pd.Series([0, -0.02, -0.04, -0.055], index=timestamps[:4])
 
         portfolio = PortfolioState(
@@ -606,7 +607,8 @@ class TestCircuitBreakerIntegration:
         config = CircuitBreakerConfig(cooldown_period_seconds=0)
         cb = CircuitBreaker(config)
 
-        timestamps = pd.date_range(start=datetime.now(timezone.utc), periods=20, freq='min')
+        # Use a fixed intraday UTC window to keep daily PnL grouping deterministic.
+        timestamps = pd.date_range(start=datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc), periods=20, freq='min')
 
         # Simulate a trading session with various conditions
         # Note: State transitions depend on both current conditions and history
