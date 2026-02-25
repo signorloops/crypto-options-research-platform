@@ -73,6 +73,7 @@
 - Added `research/pricing/inverse_power_options.py` (Monte Carlo baseline for inverse-power options).
 - Added tests `tests/test_inverse_power_options.py` including `power=1` consistency check vs closed-form inverse pricing.
 - Exported new pricer/greeks in `research/pricing/__init__.py`.
+- Added `validation_scripts/inverse_power_validation.py` + tests `tests/test_inverse_power_validation.py` for reportable consistency checks.
 
 ## In-Flight Remote Checks
 
