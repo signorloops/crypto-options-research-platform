@@ -1,17 +1,29 @@
-.PHONY: help install install-dev test test-unit test-integration test-cov lint lint-fix format format-check type-check quality clean docs research-audit research-audit-compare research-audit-refresh-baseline inverse-power-validate
+.PHONY: help install install-dev test test-unit test-integration test-cov lint lint-fix format format-check type-check quality complexity-audit weekly-operating-audit weekly-adr-draft clean docs
 
-# Detect virtual environment or use system Python
-VENV_PYTHON := $(wildcard ./venv/bin/python) $(wildcard ./.venv/bin/python) $(wildcard ./.venv311/bin/python) $(wildcard ./env/bin/python)
-ifeq ($(VENV_PYTHON),)
-    PYTHON ?= $(shell which python3)
-else
-    PYTHON ?= $(firstword $(VENV_PYTHON))
+# Detect Python interpreter with project minimum version (3.9+).
+PYTHON_CANDIDATES := ./venv/bin/python ./.venv/bin/python ./env/bin/python python3.13 python3.12 python3.11 python3.10 python3.9 python3 python
+PYTHON ?= $(shell \
+	for candidate in $(PYTHON_CANDIDATES); do \
+		resolved="$$candidate"; \
+		if [ ! -x "$$resolved" ]; then \
+			resolved=$$(command -v "$$candidate" 2>/dev/null || true); \
+		fi; \
+		[ -n "$$resolved" ] || continue; \
+		[ -x "$$resolved" ] || continue; \
+		"$$resolved" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)' >/dev/null 2>&1 || continue; \
+		echo "$$resolved"; \
+		break; \
+	done \
+)
+ifeq ($(strip $(PYTHON)),)
+$(error Python >=3.9 not found. Create a 3.11+ environment and run `make install-dev`)
 endif
 PIP := $(PYTHON) -m pip
 PYTEST := $(PYTHON) -m pytest
 RUFF := $(PYTHON) -m ruff
 BLACK := $(PYTHON) -m black
 MYPY := $(PYTHON) -m mypy
+ADR_OWNER ?= TBD
 
 SRC_DIRS := core data research strategies utils config execution tests
 
@@ -29,10 +41,9 @@ help:
 	@echo "  format-check     Check code formatting"
 	@echo "  type-check       Run type checking (mypy)"
 	@echo "  quality          Run format-check + lint + type-check"
-	@echo "  research-audit   Generate IV stability/model-zoo/rough-jump research reports"
-	@echo "  research-audit-compare Compare current audit snapshot against tracked baseline"
-	@echo "  research-audit-refresh-baseline Refresh tracked baseline with current snapshot"
-	@echo "  inverse-power-validate Validate inverse-power MC pricing against closed-form inverse"
+	@echo "  complexity-audit Run strict complexity governance checks"
+	@echo "  weekly-operating-audit Generate weekly KPI and risk exception report"
+	@echo "  weekly-adr-draft Generate ADR draft from weekly audit JSON"
 	@echo "  clean            Clean build artifacts"
 	@echo "  docs             Build documentation"
 
@@ -44,13 +55,13 @@ install-dev:
 	$(PYTHON) -m pre_commit install
 
 test:
-	$(PYTEST) -v -m "not integration"
+	$(PYTEST) -v
 
 test-unit:
 	$(PYTEST) -v -m "not integration"
 
 test-integration:
-	RUN_INTEGRATION_TESTS=1 $(PYTEST) -v -m "integration"
+	$(PYTEST) -v -m "integration"
 
 test-cov:
 	$(PYTEST) --cov=core --cov=data --cov=research --cov=strategies --cov=utils --cov=config --cov=execution --cov-report=term-missing --cov-report=html
@@ -73,76 +84,31 @@ type-check:
 quality: format-check lint type-check
 	@echo "All quality checks passed!"
 
-research-audit:
-	mkdir -p artifacts
-	$(PYTHON) validation_scripts/iv_surface_stability_report.py \
-		--seed 42 \
-		--fast-calibration \
-		--cache-dir artifacts/research-audit-cache/iv \
-		--fail-on-arbitrage \
-		--min-short-max-jump-reduction 0.005 \
-		--output-md artifacts/iv-surface-stability-report.md \
-		--output-json artifacts/iv-surface-stability-report.json
-	$(PYTHON) validation_scripts/rough_jump_experiment.py --seed 42 > artifacts/rough-jump-experiment.txt
-	$(PYTHON) validation_scripts/jump_premia_stability_report.py \
-		--seed 42 \
-		--output-md artifacts/jump-premia-stability-report.md \
-		--output-json artifacts/jump-premia-stability-report.json
-	$(PYTHON) validation_scripts/inverse_power_validation.py \
-		--n-paths 120000 \
-		--seed 42 \
-		--max-abs-error 0.0006 \
-		--output-md artifacts/inverse-power-validation-report.md \
-		--output-json artifacts/inverse-power-validation-report.json
-	$(PYTHON) validation_scripts/pricing_model_zoo_benchmark.py \
-		--quotes-json validation_scripts/fixtures/model_zoo_quotes_seed42.json \
-		--expected-best-model bates \
-		--max-best-rmse 120.0 \
-		--output-json artifacts/pricing-model-zoo-benchmark.json \
-		--output-md artifacts/pricing-model-zoo-benchmark.md \
-		> artifacts/pricing-model-zoo-benchmark.txt
-	$(PYTHON) validation_scripts/research_audit_snapshot.py \
-		--iv-report-json artifacts/iv-surface-stability-report.json \
-		--model-zoo-json artifacts/pricing-model-zoo-benchmark.json \
-		--rough-jump-txt artifacts/rough-jump-experiment.txt \
-		--output-json artifacts/research-audit-snapshot.json
-	$(PYTHON) validation_scripts/research_audit_compare.py \
-		--baseline-json validation_scripts/fixtures/research_audit_snapshot_baseline.json \
-		--current-json artifacts/research-audit-snapshot.json \
-		--max-best-rmse-increase-pct 25.0 \
-		--max-iv-reduction-drop-pct 30.0 \
-		--output-json artifacts/research-audit-drift-report.json \
-		--output-md artifacts/research-audit-drift-report.md
-	$(PYTHON) validation_scripts/research_audit_weekly_summary.py \
-		--iv-report-json artifacts/iv-surface-stability-report.json \
-		--model-zoo-json artifacts/pricing-model-zoo-benchmark.json \
-		--drift-report-json artifacts/research-audit-drift-report.json \
-		--output-md artifacts/research-audit-weekly-summary.md
-	@echo "Research audit artifacts generated under artifacts/"
+complexity-audit:
+	$(PYTHON) scripts/governance/complexity_guard.py \
+		--config config/complexity_budget.json \
+		--report-md artifacts/complexity-governance-report.md \
+		--report-json artifacts/complexity-governance-report.json \
+		--strict
 
-research-audit-compare:
-	$(PYTHON) validation_scripts/research_audit_compare.py \
-		--baseline-json validation_scripts/fixtures/research_audit_snapshot_baseline.json \
-		--current-json artifacts/research-audit-snapshot.json \
-		--max-best-rmse-increase-pct 25.0 \
-		--max-iv-reduction-drop-pct 30.0 \
-		--output-json artifacts/research-audit-drift-report.json \
-		--output-md artifacts/research-audit-drift-report.md
+weekly-operating-audit:
+	$(PYTHON) scripts/governance/weekly_operating_audit.py \
+		--thresholds config/weekly_operating_thresholds.json \
+		--consistency-thresholds config/consistency_thresholds.json \
+		--output-md artifacts/weekly-operating-audit.md \
+		--output-json artifacts/weekly-operating-audit.json \
+		--regression-cmd "$(PYTHON) -m pytest -q tests/test_pricing_inverse.py tests/test_volatility.py tests/test_hawkes_comparison.py tests/test_research_dashboard.py" \
+		--strict
+	$(PYTHON) scripts/governance/weekly_adr_draft.py \
+		--audit-json artifacts/weekly-operating-audit.json \
+		--output-md artifacts/weekly-adr-draft.md \
+		--owner "$(ADR_OWNER)"
 
-research-audit-refresh-baseline:
-	$(MAKE) research-audit
-	cp artifacts/research-audit-snapshot.json validation_scripts/fixtures/research_audit_snapshot_baseline.json
-	@echo "Baseline refreshed: validation_scripts/fixtures/research_audit_snapshot_baseline.json"
-
-inverse-power-validate:
-	mkdir -p artifacts
-	$(PYTHON) validation_scripts/inverse_power_validation.py \
-		--n-paths 120000 \
-		--seed 42 \
-		--max-abs-error 0.0006 \
-		--output-md artifacts/inverse-power-validation-report.md \
-		--output-json artifacts/inverse-power-validation-report.json
-	@echo "Inverse-power validation artifacts generated under artifacts/"
+weekly-adr-draft:
+	$(PYTHON) scripts/governance/weekly_adr_draft.py \
+		--audit-json artifacts/weekly-operating-audit.json \
+		--output-md artifacts/weekly-adr-draft.md \
+		--owner "$(ADR_OWNER)"
 
 clean:
 	rm -rf build/

@@ -1,0 +1,5 @@
+{
+  "max_abs_pnl_diff": 20000.0,
+  "max_abs_sharpe_diff": 1500.0,
+  "max_abs_max_drawdown_diff": 0.2
+}

@@ -1,0 +1,79 @@
+name: Weekly Operating Audit
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 13 * * 1" # Every Monday 13:00 UTC
+  pull_request:
+    paths:
+      - "results/**/*.json"
+      - "scripts/governance/weekly_operating_audit.py"
+      - "config/weekly_operating_thresholds.json"
+      - "config/consistency_thresholds.json"
+      - "docs/plans/weekly-operating-checklist.md"
+      - ".github/workflows/weekly-operating-audit.yml"
+  push:
+    paths:
+      - "results/**/*.json"
+      - "scripts/governance/weekly_operating_audit.py"
+      - "config/weekly_operating_thresholds.json"
+      - "config/consistency_thresholds.json"
+      - "docs/plans/weekly-operating-checklist.md"
+      - ".github/workflows/weekly-operating-audit.yml"
+
+jobs:
+  weekly-operating-audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run weekly operating audit (strict)
+        run: |
+          python scripts/governance/weekly_operating_audit.py \
+            --thresholds config/weekly_operating_thresholds.json \
+            --consistency-thresholds config/consistency_thresholds.json \
+            --output-md artifacts/weekly-operating-audit.md \
+            --output-json artifacts/weekly-operating-audit.json \
+            --regression-cmd "python -m pytest -q tests/test_pricing_inverse.py tests/test_volatility.py tests/test_hawkes_comparison.py tests/test_research_dashboard.py" \
+            --strict
+
+      - name: Generate ADR draft
+        run: |
+          python scripts/governance/weekly_adr_draft.py \
+            --audit-json artifacts/weekly-operating-audit.json \
+            --output-md artifacts/weekly-adr-draft.md \
+            --owner "weekly-ci"
+
+      - name: Publish report to job summary
+        if: always()
+        run: |
+          if [ -f artifacts/weekly-operating-audit.md ]; then
+            cat artifacts/weekly-operating-audit.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Weekly operating audit report not generated." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload audit artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-operating-audit-report
+          path: |
+            artifacts/weekly-operating-audit.md
+            artifacts/weekly-operating-audit.json
+            artifacts/weekly-adr-draft.md
