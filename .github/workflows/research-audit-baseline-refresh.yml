@@ -68,6 +68,12 @@ jobs:
             --output-md artifacts/jump-premia-stability-report.md \
             --output-json artifacts/jump-premia-stability-report.json
 
+          python validation_scripts/inverse_power_validation.py \
+            --seed "$SEED" \
+            --max-abs-error 0.0006 \
+            --output-md artifacts/inverse-power-validation-report.md \
+            --output-json artifacts/inverse-power-validation-report.json
+
           CMD_ARGS=(--seed "$SEED" --n-per-bucket "$N_PER_BUCKET")
           if [ -n "$QUOTES_JSON" ]; then
             CMD_ARGS=(--quotes-json "$QUOTES_JSON")
@@ -103,6 +109,7 @@ jobs:
             --iv-report-json artifacts/iv-surface-stability-report.json \
             --model-zoo-json artifacts/pricing-model-zoo-benchmark.json \
             --drift-report-json artifacts/proposed-baseline-diff.json \
+            --inverse-power-report-json artifacts/inverse-power-validation-report.json \
             --output-md artifacts/proposed-baseline-weekly-summary.md
 
       - name: Publish proposed baseline summary
@@ -130,6 +137,8 @@ jobs:
             artifacts/rough-jump-experiment.txt
             artifacts/jump-premia-stability-report.md
             artifacts/jump-premia-stability-report.json
+            artifacts/inverse-power-validation-report.md
+            artifacts/inverse-power-validation-report.json
             artifacts/pricing-model-zoo-benchmark.txt
             artifacts/pricing-model-zoo-benchmark.json
             artifacts/pricing-model-zoo-benchmark.md

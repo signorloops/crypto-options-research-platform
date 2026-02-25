@@ -18,13 +18,15 @@
 3. `rough-jump-experiment.txt`
 4. `jump-premia-stability-report.md`
 5. `jump-premia-stability-report.json`
-6. `pricing-model-zoo-benchmark.txt`
-7. `pricing-model-zoo-benchmark.json`
-8. `pricing-model-zoo-benchmark.md`
-9. `research-audit-snapshot.json`
-10. `research-audit-drift-report.md`
-11. `research-audit-drift-report.json`
-12. `research-audit-weekly-summary.md`
+6. `inverse-power-validation-report.md`
+7. `inverse-power-validation-report.json`
+8. `pricing-model-zoo-benchmark.txt`
+9. `pricing-model-zoo-benchmark.json`
+10. `pricing-model-zoo-benchmark.md`
+11. `research-audit-snapshot.json`
+12. `research-audit-drift-report.md`
+13. `research-audit-drift-report.json`
+14. `research-audit-weekly-summary.md`
 
 ## 质量门槛（默认）
 
@@ -43,6 +45,9 @@
 
 4. jump-premia 门槛：
 - `min_net_jump_premium_std=0.0003`
+
+5. inverse-power 一致性门槛：
+- `max_inverse_power_abs_error=0.0006`
 
 ## 本地执行
 
@@ -73,6 +78,7 @@ make research-audit-refresh-baseline
 - `proposed-research-audit-snapshot-baseline.json`
 - `proposed-baseline-diff.md`
 - `proposed-baseline-weekly-summary.md`
+- `inverse-power-validation-report.md`
 4. 若确认变更是预期升级，再提交基线文件更新。
 
 ## 调参建议

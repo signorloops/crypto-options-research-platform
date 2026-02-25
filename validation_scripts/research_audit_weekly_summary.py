@@ -19,11 +19,13 @@ def render_weekly_summary(
     iv_report: dict[str, Any],
     model_report: dict[str, Any],
     drift_report: dict[str, Any],
+    inverse_power_report: dict[str, Any] | None = None,
 ) -> str:
     """Render one-page weekly summary for CI/GitHub dashboard."""
     iv_summary = iv_report.get("summary", {})
     model = drift_report.get("model_zoo", {})
     iv_drift = drift_report.get("iv_surface", {})
+    inverse_power_summary = (inverse_power_report or {}).get("summary", {})
     passed = bool(drift_report.get("passed", False))
     violations = drift_report.get("violations", [])
     best_model = model.get("current_best_model") or model_report.get("results", [{}])[0].get(
@@ -57,10 +59,23 @@ def render_weekly_summary(
             "| Best RMSE increase vs baseline | "
             f"`{float(model.get('best_rmse_increase_pct', 0.0)):.6f}%` |"
         ),
-        "",
-        "## Violations",
-        "",
     ]
+
+    if inverse_power_summary:
+        lines.extend(
+            [
+                (
+                    "| Inverse-power max abs error | "
+                    f"`{float(inverse_power_summary.get('max_abs_error', 0.0)):.8f}` |"
+                ),
+                (
+                    "| Inverse-power p95 abs error | "
+                    f"`{float(inverse_power_summary.get('p95_abs_error', 0.0)):.8f}` |"
+                ),
+            ]
+        )
+
+    lines.extend(["", "## Violations", ""])
 
     if violations:
         for violation in violations:
@@ -92,6 +107,12 @@ def main() -> None:
         help="Path to drift report JSON.",
     )
     parser.add_argument(
+        "--inverse-power-report-json",
+        type=str,
+        default="artifacts/inverse-power-validation-report.json",
+        help="Path to inverse-power validation report JSON.",
+    )
+    parser.add_argument(
         "--output-md",
         type=str,
         default="artifacts/research-audit-weekly-summary.md",
@@ -103,6 +124,11 @@ def main() -> None:
         iv_report=_load_json(args.iv_report_json),
         model_report=_load_json(args.model_zoo_json),
         drift_report=_load_json(args.drift_report_json),
+        inverse_power_report=(
+            _load_json(args.inverse_power_report_json)
+            if os.path.exists(args.inverse_power_report_json)
+            else {}
+        ),
     )
 
     directory = os.path.dirname(args.output_md)

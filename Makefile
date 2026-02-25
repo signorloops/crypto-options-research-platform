@@ -86,6 +86,12 @@ research-audit:
 		--seed 42 \
 		--output-md artifacts/jump-premia-stability-report.md \
 		--output-json artifacts/jump-premia-stability-report.json
+	$(PYTHON) validation_scripts/inverse_power_validation.py \
+		--n-paths 120000 \
+		--seed 42 \
+		--max-abs-error 0.0006 \
+		--output-md artifacts/inverse-power-validation-report.md \
+		--output-json artifacts/inverse-power-validation-report.json
 	$(PYTHON) validation_scripts/pricing_model_zoo_benchmark.py \
 		--quotes-json validation_scripts/fixtures/model_zoo_quotes_seed42.json \
 		--expected-best-model bates \

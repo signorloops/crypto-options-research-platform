@@ -76,6 +76,11 @@
 - Added `validation_scripts/inverse_power_validation.py` + tests `tests/test_inverse_power_validation.py` for reportable consistency checks.
 - Added Make target `inverse-power-validate` for one-command local verification.
 
+12. Inverse-power audit integration:
+- Wired inverse-power validation md/json into `Research Audit` and `Research Audit Baseline Refresh` workflows.
+- Added workflow input gate `max_inverse_power_abs_error`.
+- Extended weekly summary card to include inverse-power validation error metrics.
+
 ## In-Flight Remote Checks
 
 1. `CI` / `CD` / `Complexity Governance` runs are active on the latest `master` pushes.

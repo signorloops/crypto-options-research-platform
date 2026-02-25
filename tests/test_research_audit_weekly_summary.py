@@ -31,13 +31,25 @@ def test_render_weekly_summary_contains_core_metrics_and_pass_status():
         },
         "violations": [],
     }
+    inverse_power_report = {
+        "summary": {
+            "max_abs_error": 0.00012,
+            "p95_abs_error": 0.00008,
+        }
+    }
 
-    markdown = render_weekly_summary(iv_report, model_report, drift_report)
+    markdown = render_weekly_summary(
+        iv_report,
+        model_report,
+        drift_report,
+        inverse_power_report=inverse_power_report,
+    )
 
     assert "# Research Audit Weekly Card" in markdown
     assert "- Status: `PASS`" in markdown
     assert "| Best model | `bates` |" in markdown
     assert "| Best RMSE increase vs baseline | `3.200000%` |" in markdown
+    assert "| Inverse-power max abs error | `0.00012000` |" in markdown
     assert "## Violations" in markdown
     assert "- None" in markdown
 
