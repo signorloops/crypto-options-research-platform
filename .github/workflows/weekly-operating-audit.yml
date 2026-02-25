@@ -90,11 +90,19 @@ jobs:
       - name: Publish report to job summary
         if: always()
         run: |
-          if [ -f artifacts/weekly-operating-audit.md ]; then
-            cat artifacts/weekly-operating-audit.md >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "Weekly operating audit report not generated." >> "$GITHUB_STEP_SUMMARY"
-          fi
+          for report in \
+            artifacts/weekly-operating-audit.md \
+            artifacts/weekly-pnl-attribution.md \
+            artifacts/weekly-canary-checklist.md \
+            artifacts/weekly-decision-log.md \
+            artifacts/weekly-adr-draft.md; do
+            if [ -f "$report" ]; then
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+              echo "---" >> "$GITHUB_STEP_SUMMARY"
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+              cat "$report" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
 
       - name: Upload audit artifacts
         if: always()
