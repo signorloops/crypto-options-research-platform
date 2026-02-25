@@ -63,9 +63,9 @@ DoD:
 
 ### P1-3 拆 `research/risk/var.py` 大函数（高收益 / 中风险）
 
-- [ ] 抽离 `monte_carlo_var` 内部块为纯函数（例如路径生成、重估、聚合）  
-- [ ] 新增 `var_mc.py`（或同级模块）并保留兼容入口  
-- [ ] 增加函数级单测覆盖
+- [x] 抽离 `monte_carlo_var` 内部块为纯函数（例如路径生成、重估、聚合）  
+- [x] 新增同级 helper 方法并保留兼容入口  
+- [x] 增加函数级单测覆盖
 
 DoD:
 
@@ -74,9 +74,9 @@ DoD:
 
 ### P1-4 拆回测成交路径（高收益 / 中风险）
 
-- [ ] 将 fill probability 估计与成交构造拆到 `research/backtest/fill_model.py`  
-- [ ] `engine.py` 仅保留调度与生命周期逻辑  
-- [ ] 保持结果一致性（同随机种子）
+- [x] 将 fill probability 估计与成交构造拆到 `research/backtest/fill_model.py`  
+- [x] `engine.py` 仅保留调度与生命周期逻辑  
+- [x] 保持结果一致性（同随机种子）
 
 DoD:
 
@@ -113,13 +113,13 @@ DoD:
 - [x] Day 1: P0-1 反向依赖拆除 + 边界测试  
 - [x] Day 2: P0-2 pricing/volatility lazy export  
 - [x] Day 3: P0-2 hedging/signals/arbitrage lazy export  
-- [ ] Day 4: P1-3 var 拆分（第一批）  
-- [ ] Day 5: P1-3 var 拆分（收敛）+ 周回归
+- [x] Day 4: P1-3 var 拆分（第一批）  
+- [x] Day 5: P1-3 var 拆分（收敛）+ 周回归
 
 ### Week 2（Day 6-10）
 
-- [ ] Day 6: P1-4 fill model 拆分（第一批）  
-- [ ] Day 7: P1-4 fill model 回归与性能对比  
+- [x] Day 6: P1-4 fill model 拆分（第一批）  
+- [x] Day 7: P1-4 fill model 回归与性能对比  
 - [ ] Day 8: P2-5 implied 模块拆分（第一批）  
 - [ ] Day 9: P2-5 implied 收敛 + 全量相关测试  
 - [ ] Day 10: P2-6 CI 架构守门 + 文档沉淀 + ADR
