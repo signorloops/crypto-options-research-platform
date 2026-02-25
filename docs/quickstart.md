@@ -217,6 +217,9 @@ python validation_scripts/pricing_model_zoo_benchmark.py --quotes-json validatio
 
 # 若需要动态生成样本，也可使用 seed + bucket
 python validation_scripts/pricing_model_zoo_benchmark.py --seed 42 --n-per-bucket 1
+
+# inverse-power MC 基线与闭式 inverse 定价一致性验证
+python validation_scripts/inverse_power_validation.py --n-paths 120000 --max-abs-error 0.0006
 ```
 
 GitHub Actions:

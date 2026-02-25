@@ -74,6 +74,7 @@
 - Added tests `tests/test_inverse_power_options.py` including `power=1` consistency check vs closed-form inverse pricing.
 - Exported new pricer/greeks in `research/pricing/__init__.py`.
 - Added `validation_scripts/inverse_power_validation.py` + tests `tests/test_inverse_power_validation.py` for reportable consistency checks.
+- Added Make target `inverse-power-validate` for one-command local verification.
 
 ## In-Flight Remote Checks
 

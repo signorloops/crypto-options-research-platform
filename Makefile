@@ -1,4 +1,4 @@
-.PHONY: help install install-dev test test-unit test-integration test-cov lint lint-fix format format-check type-check quality clean docs research-audit research-audit-compare research-audit-refresh-baseline
+.PHONY: help install install-dev test test-unit test-integration test-cov lint lint-fix format format-check type-check quality clean docs research-audit research-audit-compare research-audit-refresh-baseline inverse-power-validate
 
 # Detect virtual environment or use system Python
 VENV_PYTHON := $(wildcard ./venv/bin/python) $(wildcard ./.venv/bin/python) $(wildcard ./.venv311/bin/python) $(wildcard ./env/bin/python)
@@ -32,6 +32,7 @@ help:
 	@echo "  research-audit   Generate IV stability/model-zoo/rough-jump research reports"
 	@echo "  research-audit-compare Compare current audit snapshot against tracked baseline"
 	@echo "  research-audit-refresh-baseline Refresh tracked baseline with current snapshot"
+	@echo "  inverse-power-validate Validate inverse-power MC pricing against closed-form inverse"
 	@echo "  clean            Clean build artifacts"
 	@echo "  docs             Build documentation"
 
@@ -124,6 +125,16 @@ research-audit-refresh-baseline:
 	$(MAKE) research-audit
 	cp artifacts/research-audit-snapshot.json validation_scripts/fixtures/research_audit_snapshot_baseline.json
 	@echo "Baseline refreshed: validation_scripts/fixtures/research_audit_snapshot_baseline.json"
+
+inverse-power-validate:
+	mkdir -p artifacts
+	$(PYTHON) validation_scripts/inverse_power_validation.py \
+		--n-paths 120000 \
+		--seed 42 \
+		--max-abs-error 0.0006 \
+		--output-md artifacts/inverse-power-validation-report.md \
+		--output-json artifacts/inverse-power-validation-report.json
+	@echo "Inverse-power validation artifacts generated under artifacts/"
 
 clean:
 	rm -rf build/
