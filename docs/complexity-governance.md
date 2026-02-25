@@ -65,7 +65,7 @@ Checker script:
 
 Workflow behavior:
 
-1. Runs on every `pull_request` and `push` to ensure required check is always reported.
+1. Runs on `pull_request` and `push` for governed production-code paths.
 2. Runs every week on Monday (UTC) and on manual dispatch.
 3. Generates Markdown + JSON reports.
 4. Uploads reports as workflow artifacts.
@@ -77,7 +77,7 @@ Workflow behavior:
 
 ```bash
 cd corp
-./venv/bin/python scripts/governance/complexity_guard.py --strict
+make complexity-audit
 ```
 
 Outputs:

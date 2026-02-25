@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, Tuple
 
 import pandas as pd
 
@@ -16,7 +15,7 @@ OPTION_TYPE_CANDIDATES = ("option_type", "type", "right")
 VENUE_CANDIDATES = ("venue", "exchange", "source", "market")
 
 
-def _find_first_existing(df: pd.DataFrame, candidates: Tuple[str, ...]) -> Optional[str]:
+def _find_first_existing(df: pd.DataFrame, candidates: tuple[str, ...]) -> str | None:
     for candidate in candidates:
         if candidate in df.columns:
             return candidate
@@ -51,7 +50,9 @@ def _normalize_quotes(df: pd.DataFrame, fallback_venue: str) -> pd.DataFrame:
 
     out["price"] = pd.to_numeric(df[price_col], errors="coerce")
     out["symbol"] = df[symbol_col].astype(str) if symbol_col else "UNKNOWN"
-    out["option_type"] = df[option_type_col].astype(str).str.lower() if option_type_col else "unknown"
+    out["option_type"] = (
+        df[option_type_col].astype(str).str.lower() if option_type_col else "unknown"
+    )
     out["expiry_years"] = pd.to_numeric(df[expiry_col], errors="coerce") if expiry_col else 0.0
     out["delta"] = pd.to_numeric(df[delta_col], errors="coerce") if delta_col else 0.5
     out["venue"] = df[venue_col].astype(str) if venue_col else fallback_venue
@@ -60,7 +61,6 @@ def _normalize_quotes(df: pd.DataFrame, fallback_venue: str) -> pd.DataFrame:
     if out.empty:
         raise ValueError("Quote data has no valid rows after normalization")
 
-    # Pandas 3 compatibility: use explicit forward/backward fill accessors.
     out["timestamp"] = out["timestamp"].ffill().bfill()
     out = out.dropna(subset=["timestamp"])
     if out.empty:

@@ -3,6 +3,22 @@
 > 用法：每周复制一份到周报或任务系统，按日填充并在周五归档。  
 > 建议周期：每周一到周五固定执行。
 
+自动化入口（生成 KPI 快照 + 风险例外 + 未完成任务清单）：
+
+```bash
+cd corp
+make weekly-operating-audit
+```
+
+说明：该命令默认包含最小回归集（inverse/volatility/hawkes/dashboard）。
+并自动生成近 7 天变更记录与回滚基线 tag（如存在）。
+
+输出文件：
+
+- `artifacts/weekly-operating-audit.md`
+- `artifacts/weekly-operating-audit.json`
+- `artifacts/weekly-adr-draft.md`
+
 ---
 
 ## 1. 周信息
@@ -110,4 +126,3 @@
 - inventory cost：  
 - hedging cost：  
 - 结论：  
-
