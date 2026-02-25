@@ -30,6 +30,7 @@ Scope: `docs/plans/2026-02-24-coin-margined-options-research-roadmap.md` and `do
 ## Remaining Tasks (Not Fully Automated)
 
 1. 灰度发布与 24h 观察。  
+   （已自动生成 canary checklist，仍需真实环境执行与签字）  
 2. 收益归因表人工确认（自动生成后确认口径与数据源）。  
 3. ADR 决策沉淀与回滚决策记录。  
 4. W2-W4 观测一致性里程碑（线上数据联调、日回归+周回放门禁）。

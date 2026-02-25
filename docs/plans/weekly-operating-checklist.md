@@ -12,6 +12,7 @@ make weekly-operating-audit
 
 说明：该命令默认包含最小回归集（inverse/volatility/hawkes/dashboard）。
 并自动生成收益归因表（spread/adverse/inventory/hedging）。
+并自动生成灰度发布与 24h 观察清单（含 go/hold 建议）。
 并自动生成近 7 天变更记录与回滚基线 tag（如存在）。
 
 并行冲刺（架构降复杂）：
@@ -24,6 +25,8 @@ make weekly-operating-audit
 - `artifacts/weekly-operating-audit.json`
 - `artifacts/weekly-pnl-attribution.md`
 - `artifacts/weekly-pnl-attribution.json`
+- `artifacts/weekly-canary-checklist.md`
+- `artifacts/weekly-canary-checklist.json`
 - `artifacts/weekly-adr-draft.md`
 
 ---
@@ -85,7 +88,8 @@ make weekly-operating-audit
 
 1. 小流量、小仓位灰度发布。  
 2. 观察 24h：收益、风险、漂移告警、回滚信号。  
-3. 达不到门槛立即降级或回滚。  
+3. 对照 `artifacts/weekly-canary-checklist.md` 执行并签字。  
+4. 达不到门槛立即降级或回滚。  
 
 完成标记：
 - [ ] 灰度发布完成  

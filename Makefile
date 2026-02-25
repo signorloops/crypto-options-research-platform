@@ -1,4 +1,4 @@
-.PHONY: help install install-dev test test-unit test-integration test-cov lint lint-fix format format-check type-check quality complexity-audit weekly-operating-audit weekly-pnl-attribution weekly-adr-draft clean docs
+.PHONY: help install install-dev test test-unit test-integration test-cov lint lint-fix format format-check type-check quality complexity-audit weekly-operating-audit weekly-pnl-attribution weekly-canary-checklist weekly-adr-draft clean docs
 
 # Detect Python interpreter with project minimum version (3.9+).
 PYTHON_CANDIDATES := ./venv/bin/python ./.venv/bin/python ./env/bin/python python3.13 python3.12 python3.11 python3.10 python3.9 python3 python
@@ -44,6 +44,7 @@ help:
 	@echo "  complexity-audit Run strict complexity governance checks"
 	@echo "  weekly-operating-audit Generate weekly KPI and risk exception report"
 	@echo "  weekly-pnl-attribution Generate weekly PnL attribution report"
+	@echo "  weekly-canary-checklist Generate weekly canary rollout checklist"
 	@echo "  weekly-adr-draft Generate ADR draft from weekly audit JSON"
 	@echo "  clean            Clean build artifacts"
 	@echo "  docs             Build documentation"
@@ -103,6 +104,11 @@ weekly-operating-audit:
 	$(PYTHON) scripts/governance/weekly_pnl_attribution.py \
 		--output-md artifacts/weekly-pnl-attribution.md \
 		--output-json artifacts/weekly-pnl-attribution.json
+	$(PYTHON) scripts/governance/weekly_canary_checklist.py \
+		--audit-json artifacts/weekly-operating-audit.json \
+		--attribution-json artifacts/weekly-pnl-attribution.json \
+		--output-md artifacts/weekly-canary-checklist.md \
+		--output-json artifacts/weekly-canary-checklist.json
 	$(PYTHON) scripts/governance/weekly_adr_draft.py \
 		--audit-json artifacts/weekly-operating-audit.json \
 		--output-md artifacts/weekly-adr-draft.md \
@@ -112,6 +118,13 @@ weekly-pnl-attribution:
 	$(PYTHON) scripts/governance/weekly_pnl_attribution.py \
 		--output-md artifacts/weekly-pnl-attribution.md \
 		--output-json artifacts/weekly-pnl-attribution.json
+
+weekly-canary-checklist:
+	$(PYTHON) scripts/governance/weekly_canary_checklist.py \
+		--audit-json artifacts/weekly-operating-audit.json \
+		--attribution-json artifacts/weekly-pnl-attribution.json \
+		--output-md artifacts/weekly-canary-checklist.md \
+		--output-json artifacts/weekly-canary-checklist.json
 
 weekly-adr-draft:
 	$(PYTHON) scripts/governance/weekly_adr_draft.py \
