@@ -81,6 +81,10 @@ research-audit:
 		--output-md artifacts/iv-surface-stability-report.md \
 		--output-json artifacts/iv-surface-stability-report.json
 	$(PYTHON) validation_scripts/rough_jump_experiment.py --seed 42 > artifacts/rough-jump-experiment.txt
+	$(PYTHON) validation_scripts/jump_premia_stability_report.py \
+		--seed 42 \
+		--output-md artifacts/jump-premia-stability-report.md \
+		--output-json artifacts/jump-premia-stability-report.json
 	$(PYTHON) validation_scripts/pricing_model_zoo_benchmark.py \
 		--quotes-json validation_scripts/fixtures/model_zoo_quotes_seed42.json \
 		--expected-best-model bates \

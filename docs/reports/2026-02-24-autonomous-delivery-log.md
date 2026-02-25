@@ -63,6 +63,11 @@
 - Added `docs/plans/2026-02-25-inverse-options-arxiv-implementation-plan.md`.
 - Split arXiv-driven upgrades into phased deliverables with acceptance criteria and risk controls.
 
+10. Jump-premia audit coverage:
+- Added `validation_scripts/jump_premia_stability_report.py` and tests `tests/test_jump_premia_stability_report.py`.
+- Wired jump-premia md/json outputs into `Research Audit` workflow summary + artifacts.
+- Synced `make research-audit` and docs artifact list.
+
 ## In-Flight Remote Checks
 
 1. `CI` / `CD` / `Complexity Governance` runs are active on the latest `master` pushes.

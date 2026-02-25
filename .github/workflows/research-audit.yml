@@ -109,6 +109,13 @@ jobs:
           python validation_scripts/rough_jump_experiment.py --seed "$SEED" \
             > artifacts/rough-jump-experiment.txt
 
+      - name: Run jump-premia stability audit
+        run: |
+          python validation_scripts/jump_premia_stability_report.py \
+            --seed "$SEED" \
+            --output-md artifacts/jump-premia-stability-report.md \
+            --output-json artifacts/jump-premia-stability-report.json
+
       - name: Run model-zoo benchmark
         run: |
           CMD_ARGS=(--seed "$SEED" --n-per-bucket "$N_PER_BUCKET")
@@ -164,6 +171,10 @@ jobs:
             echo "" >> "$GITHUB_STEP_SUMMARY"
             cat artifacts/iv-surface-stability-report.md >> "$GITHUB_STEP_SUMMARY"
           fi
+          if [ -f artifacts/jump-premia-stability-report.md ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            cat artifacts/jump-premia-stability-report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
           if [ -f artifacts/research-audit-drift-report.md ]; then
             echo "" >> "$GITHUB_STEP_SUMMARY"
             cat artifacts/research-audit-drift-report.md >> "$GITHUB_STEP_SUMMARY"
@@ -182,6 +193,8 @@ jobs:
             artifacts/iv-surface-stability-report.md
             artifacts/iv-surface-stability-report.json
             artifacts/rough-jump-experiment.txt
+            artifacts/jump-premia-stability-report.md
+            artifacts/jump-premia-stability-report.json
             artifacts/pricing-model-zoo-benchmark.txt
             artifacts/pricing-model-zoo-benchmark.json
             artifacts/pricing-model-zoo-benchmark.md
