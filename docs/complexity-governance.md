@@ -58,6 +58,7 @@ Budgets are intended to be tightened gradually, not relaxed casually.
 Weekly CI workflow:
 
 - [complexity-governance.yml](../.github/workflows/complexity-governance.yml)
+- [ci.yml](../.github/workflows/ci.yml)（changed-files lint/type 增量门禁）
 
 Checker script:
 
@@ -70,6 +71,7 @@ Workflow behavior:
 3. Generates Markdown + JSON reports.
 4. Uploads reports as workflow artifacts.
 5. Fails workflow when threshold violations exist.
+6. CI 增量门禁仅对 changed files 执行更严格 lint/type 检查，作为逐步收紧策略。
 
 ---
 

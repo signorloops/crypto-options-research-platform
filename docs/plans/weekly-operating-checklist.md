@@ -67,11 +67,13 @@ make weekly-operating-audit
 
 1. 运行回测回归与线上/离线一致性检查。  
 2. 生成风险例外（VaR/ES）报告。  
-3. 对异常项进行归因与修复计划。  
+3. 运行复杂度治理基线（`make complexity-audit`）并确认 CI changed-files lint/type gate 通过。  
+4. 对异常项进行归因与修复计划。  
 
 完成标记：
 - [ ] 一致性检查完成  
 - [ ] 风险例外报告输出  
+- [ ] 复杂度治理基线通过  
 - [ ] 异常项已归因  
 
 ---

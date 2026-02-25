@@ -85,8 +85,8 @@ DoD:
 
 ### P2-5 拆 `research/volatility/implied.py`（中高收益 / 中风险）
 
-- [ ] 将曲面拟合、查询、校验拆分子模块（例如 `surface_fit.py`, `surface_query.py`）  
-- [ ] 保留 `VolatilitySurface` 门面类与向后兼容导入路径
+- [x] 将曲面拟合、查询、校验拆分子模块（例如 `surface_fit.py`, `surface_query.py`）  
+- [x] 保留 `VolatilitySurface` 门面类与向后兼容导入路径
 
 DoD:
 
@@ -96,8 +96,8 @@ DoD:
 ### P2-6 CI 增加架构守门（中收益 / 低风险）
 
 - [x] 新增 `tests/test_architecture_boundaries.py`（分层依赖断言）  
-- [ ] 在 CI 中为 changed files 启用更严格 lint/type 检查（逐步收紧）  
-- [ ] 将该检查纳入周三审计基线
+- [x] 在 CI 中为 changed files 启用更严格 lint/type 检查（逐步收紧）  
+- [x] 将该检查纳入周三审计基线
 
 DoD:
 
@@ -120,9 +120,9 @@ DoD:
 
 - [x] Day 6: P1-4 fill model 拆分（第一批）  
 - [x] Day 7: P1-4 fill model 回归与性能对比  
-- [ ] Day 8: P2-5 implied 模块拆分（第一批）  
-- [ ] Day 9: P2-5 implied 收敛 + 全量相关测试  
-- [ ] Day 10: P2-6 CI 架构守门 + 文档沉淀 + ADR
+- [x] Day 8: P2-5 implied 模块拆分（第一批）  
+- [x] Day 9: P2-5 implied 收敛 + 全量相关测试  
+- [x] Day 10: P2-6 CI 架构守门 + 文档沉淀 + ADR
 
 ---
 

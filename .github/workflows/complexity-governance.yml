@@ -2,14 +2,30 @@ name: Complexity Governance
 
 on:
   pull_request:
+    paths:
+      - "core/**/*.py"
+      - "data/**/*.py"
+      - "research/**/*.py"
+      - "strategies/**/*.py"
+      - "execution/**/*.py"
+      - "utils/**/*.py"
+      - "config/complexity_budget.json"
+      - "scripts/governance/complexity_guard.py"
+      - ".github/workflows/complexity-governance.yml"
   push:
+    paths:
+      - "core/**/*.py"
+      - "data/**/*.py"
+      - "research/**/*.py"
+      - "strategies/**/*.py"
+      - "execution/**/*.py"
+      - "utils/**/*.py"
+      - "config/complexity_budget.json"
+      - "scripts/governance/complexity_guard.py"
+      - ".github/workflows/complexity-governance.yml"
   schedule:
     - cron: "0 14 * * 1" # Every Monday 14:00 UTC
   workflow_dispatch:
-
-concurrency:
-  group: complexity-governance-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   complexity-audit:
@@ -19,11 +35,18 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Install governance toolchain
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff mypy
 
       - name: Run complexity guard (strict)
         run: |
@@ -32,6 +55,47 @@ jobs:
             --report-md artifacts/complexity-governance-report.md \
             --report-json artifacts/complexity-governance-report.json \
             --strict
+
+      - name: Changed-files lint/type gate
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE_SHA="${{ github.event.before }}"
+          fi
+
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            BASE_SHA="$(git rev-parse HEAD~1 2>/dev/null || true)"
+          fi
+          if [ -z "$BASE_SHA" ]; then
+            echo "No usable base SHA; skipping changed-files gate."
+            exit 0
+          fi
+
+          CHANGED_PY="$(git diff --name-only "$BASE_SHA" "$GITHUB_SHA" | grep -E '^(core|data|research|strategies|execution|utils)/.*\.py$' || true)"
+          if [ -z "$CHANGED_PY" ]; then
+            echo "No governed Python files changed; skipping changed-files gate."
+            exit 0
+          fi
+
+          echo "Changed governed Python files:"
+          echo "$CHANGED_PY"
+
+          echo "$CHANGED_PY" | xargs ruff check --select E9,F63,F7,F401
+
+          CHANGED_STRICT="$(echo "$CHANGED_PY" | grep -E '^(core/types\.py|core/validation/validators\.py|strategies/arbitrage/(basis|conversion|option_box)\.py)$' || true)"
+          if [ -z "$CHANGED_STRICT" ]; then
+            echo "No strict-typed modules changed; skipping mypy."
+            exit 0
+          fi
+
+          echo "Changed strict-typed modules:"
+          echo "$CHANGED_STRICT"
+          echo "$CHANGED_STRICT" | xargs mypy \
+            --ignore-missing-imports \
+            --python-version 3.11 \
+            --follow-imports=skip
 
       - name: Publish report to job summary
         if: always()
