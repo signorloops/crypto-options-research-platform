@@ -97,3 +97,22 @@
 1. 每 phase 独立提交，避免大批量耦合改动。
 2. 保持 fixture-first：先固化输入样本，再调整模型实现。
 3. 守门参数默认保守，实验路径通过显式 flag 开启。
+
+## Progress Snapshot (2026-02-25)
+
+1. Phase 1:
+- `DONE` inverse-power 模块与测试（`research/pricing/inverse_power_options.py`, `tests/test_inverse_power_options.py`）。
+- `DONE` inverse-power 一致性验证脚本与 make 入口（`validation_scripts/inverse_power_validation.py`, `make inverse-power-validate`）。
+- `DONE` quanto-inverse-power 基线模块与测试（`research/pricing/quanto_inverse_power.py`, `tests/test_quanto_inverse_power.py`）。
+- `PENDING` 将 `InversePowerQuote` 类型补齐并接入基准脚本输入模式。
+
+2. Phase 2:
+- `DONE` jump-premia 稳定性报告与 workflow 集成（含阈值门槛）。
+- `PENDING` jump premia 的 regime/cluster 状态分层输出。
+
+3. Phase 3:
+- `DONE` `iv_surface_stability_report` fast path（`--fast-calibration` + cache + latency metrics）。
+- `PENDING` 引入 surrogate/近似器（当前仍是 cache-first fast path）。
+
+4. Phase 4:
+- `PENDING` 全部未开始（joint calibration / deep no-arb baseline / term-structure drift）。

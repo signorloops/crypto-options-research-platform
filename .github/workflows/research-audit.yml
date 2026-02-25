@@ -18,6 +18,11 @@ on:
         required: false
         type: boolean
         default: true
+      fast_calibration:
+        description: "Enable cache-backed fast calibration path for IV surface report"
+        required: false
+        type: boolean
+        default: true
       min_short_max_jump_reduction:
         description: "Minimum avg max-jump reduction required on short maturities"
         required: false
@@ -70,6 +75,7 @@ jobs:
       SEED: ${{ github.event_name == 'workflow_dispatch' && inputs.seed || '42' }}
       N_PER_BUCKET: ${{ github.event_name == 'workflow_dispatch' && inputs.n_per_bucket || '1' }}
       FAIL_ON_ARBITRAGE: ${{ github.event_name == 'workflow_dispatch' && inputs.fail_on_arbitrage || 'true' }}
+      FAST_CALIBRATION: ${{ github.event_name == 'workflow_dispatch' && inputs.fast_calibration || 'true' }}
       MIN_SHORT_MAX_JUMP_REDUCTION: ${{ github.event_name == 'workflow_dispatch' && inputs.min_short_max_jump_reduction || '0.005' }}
       QUOTES_JSON: ${{ github.event_name == 'workflow_dispatch' && inputs.quotes_json || 'validation_scripts/fixtures/model_zoo_quotes_seed42.json' }}
       EXPECTED_BEST_MODEL: ${{ github.event_name == 'workflow_dispatch' && inputs.expected_best_model || 'bates' }}
@@ -96,6 +102,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-research-audit-
 
+      - name: Cache research-audit calibration artifacts
+        uses: actions/cache@v4
+        with:
+          path: artifacts/research-audit-cache
+          key: ${{ runner.os }}-research-audit-cache-${{ env.SEED }}
+          restore-keys: |
+            ${{ runner.os }}-research-audit-cache-
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -105,7 +119,10 @@ jobs:
         run: |
           EXTRA_FLAGS=""
           if [ "$FAIL_ON_ARBITRAGE" = "true" ]; then
-            EXTRA_FLAGS="--fail-on-arbitrage"
+            EXTRA_FLAGS="$EXTRA_FLAGS --fail-on-arbitrage"
+          fi
+          if [ "$FAST_CALIBRATION" = "true" ]; then
+            EXTRA_FLAGS="$EXTRA_FLAGS --fast-calibration --cache-dir artifacts/research-audit-cache/iv"
           fi
           python validation_scripts/iv_surface_stability_report.py \
             --seed "$SEED" \

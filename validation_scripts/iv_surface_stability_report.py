@@ -8,6 +8,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from typing import Dict, List
 
 import numpy as np
@@ -83,6 +84,13 @@ def _render_markdown(report: Dict[str, object]) -> str:
         f"- Avg max-jump reduction (short): `{summary['avg_max_jump_reduction_short']:.6f}`",
         f"- Avg mean-jump reduction (short): `{summary['avg_mean_jump_reduction_short']:.6f}`",
         "",
+        "## Calibration Runtime",
+        "",
+        f"- Fast calibration mode: `{bool(summary.get('fast_calibration', False))}`",
+        f"- Cache hit: `{bool(summary.get('cache_hit', False))}`",
+        f"- Cache key: `{summary.get('cache_key', '')}`",
+        f"- Calibration latency (sec): `{float(summary.get('calibration_latency_sec', 0.0)):.6f}`",
+        "",
         "## Per-Expiry Detail",
         "",
         "| Expiry (days) | Short? | Points | Raw max jump | Stabilized max jump | Max jump reduction |",
@@ -135,6 +143,42 @@ def _write_text(path: str, content: str) -> None:
         file_obj.write(content)
 
 
+def _cache_key(seed: int) -> str:
+    return f"iv-surface-stability-seed-{int(seed)}-v1"
+
+
+def _cache_path(cache_dir: str, cache_key: str) -> str:
+    return os.path.join(cache_dir, f"{cache_key}.json")
+
+
+def _strip_runtime_metadata(report: Dict[str, object]) -> Dict[str, object]:
+    """Remove runtime metadata before cache persistence."""
+    out = dict(report)
+    summary = dict(out.get("summary", {}))
+    for key in ("fast_calibration", "cache_hit", "cache_key", "calibration_latency_sec"):
+        summary.pop(key, None)
+    out["summary"] = summary
+    return out
+
+
+def _attach_runtime_metadata(
+    report: Dict[str, object],
+    fast_calibration: bool,
+    cache_hit: bool,
+    cache_key: str,
+    calibration_latency_sec: float,
+) -> Dict[str, object]:
+    """Attach runtime metadata for audit observability."""
+    out = dict(report)
+    summary = dict(out.get("summary", {}))
+    summary["fast_calibration"] = bool(fast_calibration)
+    summary["cache_hit"] = bool(cache_hit)
+    summary["cache_key"] = str(cache_key)
+    summary["calibration_latency_sec"] = float(calibration_latency_sec)
+    out["summary"] = summary
+    return out
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate IV surface stability report.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for synthetic quotes.")
@@ -161,10 +205,45 @@ def main() -> None:
         default=0.0,
         help="Minimum required avg max-jump reduction on short maturities.",
     )
+    parser.add_argument(
+        "--fast-calibration",
+        action="store_true",
+        help="Enable local cache fast path for repeated runs with same seed.",
+    )
+    parser.add_argument(
+        "--cache-dir",
+        type=str,
+        default="artifacts/research-audit-cache/iv",
+        help="Directory for fast-calibration cache files.",
+    )
     args = parser.parse_args()
 
-    surface = _build_synthetic_surface(seed=args.seed)
-    report = audit_surface_stability(surface=surface)
+    cache_key = _cache_key(args.seed)
+    cache_file = _cache_path(args.cache_dir, cache_key)
+    cache_hit = False
+    start = time.perf_counter()
+
+    if args.fast_calibration and os.path.exists(cache_file):
+        with open(cache_file, "r", encoding="utf-8") as file_obj:
+            report = json.load(file_obj)
+        cache_hit = True
+    else:
+        surface = _build_synthetic_surface(seed=args.seed)
+        report = audit_surface_stability(surface=surface)
+        if args.fast_calibration:
+            os.makedirs(args.cache_dir, exist_ok=True)
+            with open(cache_file, "w", encoding="utf-8") as file_obj:
+                json.dump(_strip_runtime_metadata(report), file_obj, indent=2, ensure_ascii=False)
+                file_obj.write("\n")
+
+    elapsed = time.perf_counter() - start
+    report = _attach_runtime_metadata(
+        report=report,
+        fast_calibration=bool(args.fast_calibration),
+        cache_hit=cache_hit,
+        cache_key=cache_key,
+        calibration_latency_sec=elapsed,
+    )
 
     md = _render_markdown(report)
     _write_text(args.output_md, md)

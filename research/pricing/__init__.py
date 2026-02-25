@@ -11,6 +11,10 @@ from research.pricing.inverse_options import InverseOptionPricer, inverse_option
 from research.pricing.inverse_power_options import InversePowerGreeks, InversePowerOptionPricer
 from research.pricing.model_zoo import CryptoOptionModelZoo, OptionQuote
 from research.pricing.quanto_inverse import QuantoInverseGreeks, QuantoInverseOptionPricer
+from research.pricing.quanto_inverse_power import (
+    QuantoInversePowerGreeks,
+    QuantoInversePowerOptionPricer,
+)
 from research.pricing.rough_volatility import RoughVolConfig, RoughVolatilityPricer
 
 __all__ = [
@@ -22,6 +26,8 @@ __all__ = [
     "OptionQuote",
     "QuantoInverseOptionPricer",
     "QuantoInverseGreeks",
+    "QuantoInversePowerOptionPricer",
+    "QuantoInversePowerGreeks",
     "RoughVolConfig",
     "RoughVolatilityPricer",
 ]

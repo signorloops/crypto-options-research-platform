@@ -77,6 +77,8 @@ research-audit:
 	mkdir -p artifacts
 	$(PYTHON) validation_scripts/iv_surface_stability_report.py \
 		--seed 42 \
+		--fast-calibration \
+		--cache-dir artifacts/research-audit-cache/iv \
 		--fail-on-arbitrage \
 		--min-short-max-jump-reduction 0.005 \
 		--output-md artifacts/iv-surface-stability-report.md \

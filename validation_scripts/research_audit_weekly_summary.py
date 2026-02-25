@@ -41,6 +41,12 @@ def render_weekly_summary(
         "| Metric | Value |",
         "| --- | --- |",
         f"| IV no-arbitrage | `{bool(iv_summary.get('no_arbitrage', False))}` |",
+        f"| IV fast calibration | `{bool(iv_summary.get('fast_calibration', False))}` |",
+        f"| IV cache hit | `{bool(iv_summary.get('cache_hit', False))}` |",
+        (
+            "| IV calibration latency (sec) | "
+            f"`{float(iv_summary.get('calibration_latency_sec', 0.0)):.6f}` |"
+        ),
         (
             "| Avg short max-jump reduction | "
             f"`{float(iv_summary.get('avg_max_jump_reduction_short', 0.0)):.6f}` |"

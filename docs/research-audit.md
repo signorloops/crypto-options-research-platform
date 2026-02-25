@@ -32,6 +32,7 @@
 
 1. IV 报告门槛：
 - `fail_on_arbitrage=true`
+- `fast_calibration=true`
 - `min_short_max_jump_reduction=0.005`
 
 2. model-zoo 门槛：
@@ -94,3 +95,4 @@ make research-audit-refresh-baseline
 3. 若 CI 波动导致偶发失败：
 - 优先检查随机种子、输入样本是否固定。
 - 保持 `quotes_json` 固定输入，不建议切回纯随机样本守门。
+- 若需要更快重复审计，可启用 `fast_calibration` 并保留 `artifacts/research-audit-cache/iv`。

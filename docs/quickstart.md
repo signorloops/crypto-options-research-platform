@@ -200,6 +200,9 @@ python validation_scripts/iv_surface_stability_report.py
 # 加质量门槛（CI 模式）
 python validation_scripts/iv_surface_stability_report.py --fail-on-arbitrage --min-short-max-jump-reduction 0.005
 
+# 启用 fast-calibration（本地重复运行可复用缓存）
+python validation_scripts/iv_surface_stability_report.py --fast-calibration --cache-dir artifacts/research-audit-cache/iv
+
 # Rough volatility + jumps 实验对比
 python validation_scripts/rough_jump_experiment.py --seed 42
 
@@ -225,7 +228,7 @@ python validation_scripts/inverse_power_validation.py --n-paths 120000 --max-abs
 GitHub Actions:
 - `Research Audit` workflow 每周一 UTC 自动运行，并可手动触发。
 - `Research Audit Baseline Refresh` 可手动生成“候选基线 + 差异报告”artifact 供审阅。
-- 手动触发时可调 `seed`、`n_per_bucket`、`quotes_json`、`expected_best_model`、`max_best_rmse`、`max_best_rmse_increase_pct`、`max_iv_reduction_drop_pct`、`allow_best_model_change`、`fail_on_arbitrage`、`min_short_max_jump_reduction`、`min_net_jump_premium_std`、`max_inverse_power_abs_error`。
+- 手动触发时可调 `seed`、`n_per_bucket`、`quotes_json`、`expected_best_model`、`max_best_rmse`、`max_best_rmse_increase_pct`、`max_iv_reduction_drop_pct`、`allow_best_model_change`、`fail_on_arbitrage`、`fast_calibration`、`min_short_max_jump_reduction`、`min_net_jump_premium_std`、`max_inverse_power_abs_error`。
 - 运行后可在 artifact 下载 `iv-surface-stability`（md/json）、`rough-jump`（txt）、`jump-premia-stability`（md/json）、`inverse-power-validation`（md/json）、`model-zoo`（txt/json/md）、`research-audit-snapshot.json`、`research-audit-drift-report`（md/json）、`research-audit-weekly-summary.md`。
 - 如果你确认模型升级是预期行为，可本地执行 `make research-audit-refresh-baseline` 刷新基线。
 

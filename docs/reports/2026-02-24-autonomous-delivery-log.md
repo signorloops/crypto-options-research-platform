@@ -81,6 +81,11 @@
 - Added workflow input gate `max_inverse_power_abs_error`.
 - Extended weekly summary card to include inverse-power validation error metrics.
 
+13. Fast calibration path:
+- Added `--fast-calibration` / `--cache-dir` support in `validation_scripts/iv_surface_stability_report.py`.
+- Added runtime observability fields (`fast_calibration`, `cache_hit`, `cache_key`, `calibration_latency_sec`) into IV report summary.
+- Enabled cache-backed fast path in research-audit workflows and local `make research-audit`.
+
 ## In-Flight Remote Checks
 
 1. `CI` / `CD` / `Complexity Governance` runs are active on the latest `master` pushes.
