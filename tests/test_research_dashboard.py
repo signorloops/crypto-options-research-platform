@@ -1,6 +1,8 @@
 """Tests for the research dashboard web app."""
 
+import pandas as pd
 from fastapi.testclient import TestClient
+from unittest.mock import AsyncMock
 
 from execution.research_dashboard import create_dashboard_app
 
@@ -94,6 +96,66 @@ def test_dashboard_live_deviation_api_aligns_cex_defi_sources(tmp_path):
     assert payload["sources"]["rows_aligned"] == 2
     assert payload["summary"]["n_rows"] == 2
     assert payload["summary"]["n_alerts"] >= 1
+    assert payload["sources"]["mode"] == "file"
+
+
+def test_dashboard_live_deviation_api_supports_provider_mode(tmp_path, monkeypatch):
+    defi_path = tmp_path / "defi_quotes.csv"
+    defi_path.write_text(
+        (
+            "timestamp,symbol,option_type,maturity,delta,price,source\n"
+            "2024-01-01T00:00:20Z,BTC-OPT,call,0.05,0.25,1140,lyra\n"
+        ),
+        encoding="utf-8",
+    )
+    mock_dataset = pd.DataFrame(
+        [
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "symbol": "BTC-OPT",
+                "option_type": "call",
+                "maturity": 0.05,
+                "delta": 0.25,
+                "market_price": 1200.0,
+                "model_price": 1140.0,
+                "venue": "cex_vs_defi",
+            },
+            {
+                "timestamp": "2024-01-01T00:01:00Z",
+                "symbol": "BTC-OPT",
+                "option_type": "call",
+                "maturity": 0.05,
+                "delta": 0.25,
+                "market_price": 1180.0,
+                "model_price": 1130.0,
+                "venue": "cex_vs_defi",
+            },
+        ]
+    )
+    fetch_mock = AsyncMock(return_value=mock_dataset)
+    monkeypatch.setattr(
+        "execution.research_dashboard.build_cex_defi_deviation_dataset_live",
+        fetch_mock,
+    )
+
+    app = create_dashboard_app(results_dir=tmp_path)
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/deviation/live",
+            params={
+                "threshold_bps": 200.0,
+                "cex_provider": "okx",
+                "defi_file": str(defi_path),
+                "underlying": "BTC-USD",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["sources"]["mode"] == "provider"
+    assert payload["sources"]["cex_provider"] == "okx"
+    assert payload["sources"]["rows_aligned"] == 2
+    fetch_mock.assert_awaited_once()
 
 
 def test_dashboard_live_deviation_api_requires_sources(tmp_path):

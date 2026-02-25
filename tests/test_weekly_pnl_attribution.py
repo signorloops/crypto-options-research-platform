@@ -88,3 +88,13 @@ def test_main_strict_exits_nonzero_when_no_input_files(tmp_path, monkeypatch):
     assert exit_code == 2
     assert not report_md.exists()
     assert not report_json.exists()
+
+
+def test_discover_input_files_searches_nested_result_directories(tmp_path):
+    module = _load_module()
+    nested = tmp_path / "results" / "backtest_with_output" / "backtest_results_nested.json"
+    _write(nested, json.dumps({"S": {"summary": {"spread_capture": 1.0}}}))
+
+    found = module._discover_input_files(tmp_path / "results", "backtest*.json")
+
+    assert nested in found

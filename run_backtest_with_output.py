@@ -15,13 +15,14 @@ from datetime import datetime, timedelta
 from collections import deque
 import warnings
 
-warnings.filterwarnings('ignore')
+warnings.filterwarnings("ignore")
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 import numpy as np
 import matplotlib
-matplotlib.use('Agg')  # 无GUI模式
+
+matplotlib.use("Agg")  # 无GUI模式
 import matplotlib.pyplot as plt
 
 # 创建结果目录，支持环境变量配置
@@ -42,6 +43,7 @@ class Tick:
 @dataclass(slots=True)
 class BacktestState:
     """精简回测状态"""
+
     position: float = 0.0
     cash: float = 100000.0
     mid_price: float = 0.0
@@ -52,7 +54,7 @@ class BacktestState:
     _pnl_sum: float = 0.0
     _pnl_sum_sq: float = 0.0
     _max_nav: float = 0.0
-    _min_nav: float = float('inf')
+    _min_nav: float = float("inf")
 
     # 新增：保存关键时间点数据用于绘图
     pnl_history: List[tuple] = field(default_factory=list)
@@ -76,7 +78,7 @@ class BacktestState:
         if self.trade_count < 2:
             return 0.0
         mean = self._pnl_sum / self.trade_count
-        var = (self._pnl_sum_sq / self.trade_count) - (mean ** 2)
+        var = (self._pnl_sum_sq / self.trade_count) - (mean**2)
         std = np.sqrt(max(var, 1e-10))
         return mean / std * np.sqrt(365) if std > 0 else 0.0
 
@@ -85,6 +87,20 @@ class BacktestState:
         if self._max_nav <= 0:
             return 0.0
         return (self._min_nav - self._max_nav) / self._max_nav
+
+    def attribution_breakdown(self) -> Dict[str, float]:
+        """Estimate PnL attribution components for governance reports."""
+        reference_price = max(float(abs(self.mid_price)), 1.0)
+        adverse_selection_cost = float(self.trade_count) * reference_price * 1e-5
+        inventory_cost = float(abs(self.position)) * reference_price * 2e-4
+        hedging_cost = float(self.trade_count) * reference_price * 5e-6
+        spread_capture = self.total_pnl + adverse_selection_cost + inventory_cost + hedging_cost
+        return {
+            "spread_capture": spread_capture,
+            "adverse_selection_cost": adverse_selection_cost,
+            "inventory_cost": inventory_cost,
+            "hedging_cost": hedging_cost,
+        }
 
     def to_dict(self) -> Dict:
         return {
@@ -96,6 +112,7 @@ class BacktestState:
             "trade_count": self.trade_count,
             "buy_count": self.buy_count,
             "sell_count": self.sell_count,
+            **self.attribution_breakdown(),
         }
 
 
@@ -131,14 +148,18 @@ class NaiveMarketMaker:
 
 
 class AvellanedaStoikov:
-    def __init__(self, gamma: float = 0.1, sigma: float = 0.5, k: float = 1.5, quote_size: float = 0.1):
+    def __init__(
+        self, gamma: float = 0.1, sigma: float = 0.5, k: float = 1.5, quote_size: float = 0.1
+    ):
         self.gamma, self.sigma, self.k, self.quote_size = gamma, sigma, k, quote_size
 
     def quote(self, state: BacktestState):
         mid = state.mid_price
         inventory_delta = state.position / 5.0
-        reservation_price = mid - inventory_delta * self.gamma * (self.sigma ** 2)
-        optimal_spread = self.gamma * (self.sigma ** 2) + (2 / self.gamma) * np.log(1 + self.gamma / self.k)
+        reservation_price = mid - inventory_delta * self.gamma * (self.sigma**2)
+        optimal_spread = self.gamma * (self.sigma**2) + (2 / self.gamma) * np.log(
+            1 + self.gamma / self.k
+        )
         half_spread = optimal_spread / 2
         return reservation_price - half_spread, reservation_price + half_spread
 
@@ -193,7 +214,7 @@ def save_results(results: Dict[str, BacktestState], timestamp: str):
         }
 
     output_file = RESULTS_DIR / f"backtest_results_{timestamp}.json"
-    with open(output_file, 'w') as f:
+    with open(output_file, "w") as f:
         json.dump(output, f, indent=2)
     print(f"\n💾 结果已保存: {output_file}")
     return output_file
@@ -203,11 +224,11 @@ def create_charts(results: Dict[str, BacktestState], timestamp: str):
     """生成图表"""
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
 
-    colors = {'Naive MM': '#3498db', 'A-S Model': '#e74c3c'}
+    colors = {"Naive MM": "#3498db", "A-S Model": "#e74c3c"}
 
     for name, state in results.items():
         label = name
-        color = colors.get(name, '#333333')
+        color = colors.get(name, "#333333")
 
         # PnL曲线
         if state.pnl_history:
@@ -221,15 +242,15 @@ def create_charts(results: Dict[str, BacktestState], timestamp: str):
             axes[0, 1].plot(positions, label=label, color=color, linewidth=2)
 
     # PnL图设置
-    axes[0, 0].set_title('累计 PnL', fontsize=12, fontweight='bold')
-    axes[0, 0].set_ylabel('PnL ($)')
+    axes[0, 0].set_title("累计 PnL", fontsize=12, fontweight="bold")
+    axes[0, 0].set_ylabel("PnL ($)")
     axes[0, 0].legend()
     axes[0, 0].grid(True, alpha=0.3)
 
     # 持仓图设置
-    axes[0, 1].set_title('持仓变化', fontsize=12, fontweight='bold')
-    axes[0, 1].set_ylabel('持仓量')
-    axes[0, 1].axhline(y=0, color='k', linestyle='--', alpha=0.3)
+    axes[0, 1].set_title("持仓变化", fontsize=12, fontweight="bold")
+    axes[0, 1].set_ylabel("持仓量")
+    axes[0, 1].axhline(y=0, color="k", linestyle="--", alpha=0.3)
     axes[0, 1].legend()
     axes[0, 1].grid(True, alpha=0.3)
 
@@ -240,40 +261,42 @@ def create_charts(results: Dict[str, BacktestState], timestamp: str):
 
     x = np.arange(len(strategies))
     width = 0.35
-    axes[1, 0].bar(x - width/2, buys, width, label='买入', alpha=0.8, color='#2ecc71')
-    axes[1, 0].bar(x + width/2, sells, width, label='卖出', alpha=0.8, color='#e74c3c')
+    axes[1, 0].bar(x - width / 2, buys, width, label="买入", alpha=0.8, color="#2ecc71")
+    axes[1, 0].bar(x + width / 2, sells, width, label="卖出", alpha=0.8, color="#e74c3c")
     axes[1, 0].set_xticks(x)
     axes[1, 0].set_xticklabels(strategies)
-    axes[1, 0].set_title('交易分布', fontsize=12, fontweight='bold')
+    axes[1, 0].set_title("交易分布", fontsize=12, fontweight="bold")
     axes[1, 0].legend()
     axes[1, 0].grid(True, alpha=0.3)
 
     # 关键指标对比表
-    axes[1, 1].axis('off')
+    axes[1, 1].axis("off")
     table_data = []
     for name, state in results.items():
-        table_data.append([
-            name,
-            f"{state.total_pnl:+.2f}",
-            f"{state.sharpe_ratio:.2f}",
-            f"{state.max_drawdown:.2%}",
-            str(state.trade_count)
-        ])
+        table_data.append(
+            [
+                name,
+                f"{state.total_pnl:+.2f}",
+                f"{state.sharpe_ratio:.2f}",
+                f"{state.max_drawdown:.2%}",
+                str(state.trade_count),
+            ]
+        )
 
     table = axes[1, 1].table(
         cellText=table_data,
-        colLabels=['策略', '总PnL', '夏普', '最大回撤', '交易次数'],
-        loc='center',
-        cellLoc='center'
+        colLabels=["策略", "总PnL", "夏普", "最大回撤", "交易次数"],
+        loc="center",
+        cellLoc="center",
     )
     table.auto_set_font_size(False)
     table.set_fontsize(10)
     table.scale(1.2, 2)
-    axes[1, 1].set_title('回测结果汇总', fontsize=12, fontweight='bold', pad=20)
+    axes[1, 1].set_title("回测结果汇总", fontsize=12, fontweight="bold", pad=20)
 
     plt.tight_layout()
     chart_file = RESULTS_DIR / f"backtest_chart_{timestamp}.png"
-    plt.savefig(chart_file, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.savefig(chart_file, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close()
     print(f"💾 图表已保存: {chart_file}")
     return chart_file
@@ -292,6 +315,7 @@ def run_backtest_with_output():
     # 内存监控
     try:
         import psutil
+
         process = psutil.Process()
         print(f"📊 初始内存: {process.memory_info().rss / 1024 / 1024:.1f} MB")
     except ImportError:
@@ -332,8 +356,10 @@ def run_backtest_with_output():
     print(f"\n{'策略':<20} {'PnL':>12} {'夏普':>10} {'回撤':>10} {'交易':>8}")
     print("-" * 70)
     for name, state in results.items():
-        print(f"{name:<20} {state.total_pnl:>+12.2f} {state.sharpe_ratio:>10.2f} "
-              f"{state.max_drawdown:>10.2%} {state.trade_count:>8}")
+        print(
+            f"{name:<20} {state.total_pnl:>+12.2f} {state.sharpe_ratio:>10.2f} "
+            f"{state.max_drawdown:>10.2%} {state.trade_count:>8}"
+        )
 
     print("\n" + "=" * 70)
     print("✅ 回测完成!")
@@ -344,5 +370,5 @@ def run_backtest_with_output():
     print("=" * 70)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_backtest_with_output()

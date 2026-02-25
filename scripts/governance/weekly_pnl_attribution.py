@@ -121,7 +121,7 @@ def _extract_rows(raw: dict[str, Any], source: Path) -> list[dict[str, Any]]:
 
 def _discover_input_files(results_dir: Path, pattern: str) -> list[Path]:
     return sorted(
-        [p for p in results_dir.glob(pattern) if p.is_file()],
+        [p for p in results_dir.rglob(pattern) if p.is_file()],
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )

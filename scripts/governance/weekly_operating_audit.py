@@ -141,7 +141,7 @@ def _extract_strategy_rows(raw: dict[str, Any], source: Path) -> list[dict[str, 
 
 
 def _discover_input_files(results_dir: Path, pattern: str) -> list[Path]:
-    candidates = sorted(results_dir.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
+    candidates = sorted(results_dir.rglob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
     return [p for p in candidates if p.is_file()]
 
 

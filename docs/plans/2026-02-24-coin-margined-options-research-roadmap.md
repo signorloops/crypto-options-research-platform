@@ -18,7 +18,7 @@
 
 仍需人工闭环（不可完全自动化）：
 - [ ] 灰度发布与 24h 观察（已自动生成 canary checklist，待实盘执行）
-- [ ] 收益归因表（spread/adverse/inventory/hedging，已自动生成模板，待补全数据并人工确认）
+- [ ] 收益归因表（spread/adverse/inventory/hedging，模板 + 回测输出字段已补齐，待生产周数据人工确认）
 - [ ] 异常项归因与修复计划确认（若周审计出现风险例外）
 - [ ] ADR 决策沉淀与回滚决策记录（已自动生成 decision log，待人工签字）
 

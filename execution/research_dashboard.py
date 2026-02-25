@@ -11,7 +11,10 @@ import plotly.express as px
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from data.quote_integration import build_cex_defi_deviation_dataset
+from data.quote_integration import (
+    build_cex_defi_deviation_dataset,
+    build_cex_defi_deviation_dataset_live,
+)
 
 DEFAULT_RESULTS_DIR = Path(os.getenv("CORP_RESULTS_DIR", "results"))
 TIMESTAMP_CANDIDATES = ("timestamp", "datetime", "date", "time")
@@ -104,7 +107,9 @@ def build_cross_market_deviation_report(
     work["abs_deviation_bps"] = work["deviation_bps"].abs()
 
     if expiry_col:
-        work["expiry_bucket"] = _bucket_expiry(pd.to_numeric(work[expiry_col], errors="coerce").fillna(0.0))
+        work["expiry_bucket"] = _bucket_expiry(
+            pd.to_numeric(work[expiry_col], errors="coerce").fillna(0.0)
+        )
     else:
         work["expiry_bucket"] = "ALL"
 
@@ -253,7 +258,9 @@ def _build_dashboard_html(df: pd.DataFrame, selected: Path, files: List[Path]) -
                     "<tr>" + "".join(f"<td>{v}</td>" for v in row.values()) + "</tr>"
                     for row in alerts[:20]
                 )
-                alerts_table = f"<table><thead><tr>{header}</tr></thead><tbody>{rows}</tbody></table>"
+                alerts_table = (
+                    f"<table><thead><tr>{header}</tr></thead><tbody>{rows}</tbody></table>"
+                )
             else:
                 alerts_table = "<p>No alerts over 300 bps.</p>"
 
@@ -334,27 +341,49 @@ def create_dashboard_app(results_dir: Optional[Path] = None) -> FastAPI:
     async def deviation_live(
         threshold_bps: float = Query(default=300.0, ge=0.0),
         cex_file: Optional[str] = Query(default=None),
+        cex_provider: Optional[str] = Query(default=None),
+        underlying: str = Query(default="BTC-USD"),
         defi_file: Optional[str] = Query(default=None),
     ) -> dict:
         cex_source = cex_file or os.getenv("CEX_QUOTES_FILE", "")
+        provider = cex_provider or os.getenv("CEX_QUOTES_PROVIDER", "")
         defi_source = defi_file or os.getenv("DEFI_QUOTES_FILE", "")
-        if not cex_source or not defi_source:
+        if not defi_source:
             raise HTTPException(
                 status_code=422,
-                detail="cex_file and defi_file are required (query or env)",
+                detail="defi_file is required (query or env)",
+            )
+        if not cex_source and not provider:
+            raise HTTPException(
+                status_code=422,
+                detail="Either cex_file or cex_provider is required (query or env)",
             )
 
         try:
-            dataset = build_cex_defi_deviation_dataset(Path(cex_source), Path(defi_source))
+            if cex_source:
+                dataset = build_cex_defi_deviation_dataset(Path(cex_source), Path(defi_source))
+                source_meta = {
+                    "mode": "file",
+                    "cex_file": cex_source,
+                    "defi_file": defi_source,
+                }
+            else:
+                dataset = await build_cex_defi_deviation_dataset_live(
+                    provider,
+                    Path(defi_source),
+                    underlying=underlying,
+                )
+                source_meta = {
+                    "mode": "provider",
+                    "cex_provider": provider,
+                    "underlying": underlying,
+                    "defi_file": defi_source,
+                }
         except (FileNotFoundError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 
         report = build_cross_market_deviation_report(dataset, threshold_bps=float(threshold_bps))
-        report["sources"] = {
-            "cex_file": cex_source,
-            "defi_file": defi_source,
-            "rows_aligned": int(len(dataset)),
-        }
+        report["sources"] = {**source_meta, "rows_aligned": int(len(dataset))}
         return report
 
     @app.get("/", response_class=HTMLResponse)

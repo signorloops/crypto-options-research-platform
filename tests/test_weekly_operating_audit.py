@@ -244,6 +244,16 @@ def test_main_regression_command_runs_without_shell(tmp_path, monkeypatch):
     assert regression_kwargs.get("shell") in (None, False)
 
 
+def test_discover_input_files_searches_nested_result_directories(tmp_path):
+    module = _load_module()
+    nested = tmp_path / "results" / "backtest_full_history" / "backtest_full_nested.json"
+    _write(nested, json.dumps({"S": {"summary": {"total_pnl": 1.0, "sharpe_ratio": 1.0}}}))
+
+    found = module._discover_input_files(tmp_path / "results", "backtest*.json")
+
+    assert nested in found
+
+
 def test_build_report_flags_consistency_exceptions(tmp_path):
     module = _load_module()
     newer = tmp_path / "results" / "backtest_results_new.json"
