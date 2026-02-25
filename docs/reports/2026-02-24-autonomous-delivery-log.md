@@ -44,6 +44,17 @@
 - `monte_carlo_var` LOC reduced from `192` to `129` (per complexity guard report).
 - Verified by full `tests/test_risk.py` pass.
 
+6. Post-checkpoint hardening:
+- Fixed cross-midnight test flakiness in `tests/test_circuit_breaker.py` by pinning intraday UTC windows.
+- Enhanced `validation_scripts/pricing_model_zoo_benchmark.py` with Markdown report output (`--output-md`).
+- Research Audit workflow now publishes and uploads `pricing-model-zoo-benchmark.md`.
+- Synced local `make research-audit` and docs to include model-zoo Markdown artifact.
+
+7. Weekly dashboard card:
+- Added `validation_scripts/research_audit_weekly_summary.py` to generate a compact weekly Markdown card.
+- Added workflow step to publish `research-audit-weekly-summary.md` into GitHub Step Summary and artifacts.
+- Added tests: `tests/test_research_audit_weekly_summary.py`.
+
 ## In-Flight Remote Checks
 
 1. `CI` / `CD` / `Complexity Governance` runs are active on the latest `master` pushes.

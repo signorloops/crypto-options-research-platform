@@ -146,10 +146,22 @@ jobs:
             --output-json artifacts/research-audit-drift-report.json \
             --output-md artifacts/research-audit-drift-report.md
 
+      - name: Build weekly summary card
+        run: |
+          python validation_scripts/research_audit_weekly_summary.py \
+            --iv-report-json artifacts/iv-surface-stability-report.json \
+            --model-zoo-json artifacts/pricing-model-zoo-benchmark.json \
+            --drift-report-json artifacts/research-audit-drift-report.json \
+            --output-md artifacts/research-audit-weekly-summary.md
+
       - name: Publish report summary
         if: always()
         run: |
+          if [ -f artifacts/research-audit-weekly-summary.md ]; then
+            cat artifacts/research-audit-weekly-summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
           if [ -f artifacts/iv-surface-stability-report.md ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
             cat artifacts/iv-surface-stability-report.md >> "$GITHUB_STEP_SUMMARY"
           fi
           if [ -f artifacts/research-audit-drift-report.md ]; then
@@ -176,3 +188,4 @@ jobs:
             artifacts/research-audit-snapshot.json
             artifacts/research-audit-drift-report.json
             artifacts/research-audit-drift-report.md
+            artifacts/research-audit-weekly-summary.md

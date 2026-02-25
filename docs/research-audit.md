@@ -22,6 +22,7 @@
 7. `research-audit-snapshot.json`
 8. `research-audit-drift-report.md`
 9. `research-audit-drift-report.json`
+10. `research-audit-weekly-summary.md`
 
 ## 质量门槛（默认）
 

@@ -100,6 +100,11 @@ research-audit:
 		--max-iv-reduction-drop-pct 30.0 \
 		--output-json artifacts/research-audit-drift-report.json \
 		--output-md artifacts/research-audit-drift-report.md
+	$(PYTHON) validation_scripts/research_audit_weekly_summary.py \
+		--iv-report-json artifacts/iv-surface-stability-report.json \
+		--model-zoo-json artifacts/pricing-model-zoo-benchmark.json \
+		--drift-report-json artifacts/research-audit-drift-report.json \
+		--output-md artifacts/research-audit-weekly-summary.md
 	@echo "Research audit artifacts generated under artifacts/"
 
 research-audit-compare:
