@@ -69,6 +69,11 @@
 - Synced `make research-audit` and docs artifact list.
 - Added configurable workflow threshold `min_net_jump_premium_std` for jump-premia stability gating.
 
+11. Inverse-power pricing baseline:
+- Added `research/pricing/inverse_power_options.py` (Monte Carlo baseline for inverse-power options).
+- Added tests `tests/test_inverse_power_options.py` including `power=1` consistency check vs closed-form inverse pricing.
+- Exported new pricer/greeks in `research/pricing/__init__.py`.
+
 ## In-Flight Remote Checks
 
 1. `CI` / `CD` / `Complexity Governance` runs are active on the latest `master` pushes.
