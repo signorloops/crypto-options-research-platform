@@ -11,6 +11,7 @@ make weekly-operating-audit
 ```
 
 说明：该命令默认包含最小回归集（inverse/volatility/hawkes/dashboard）。
+并自动生成收益归因表（spread/adverse/inventory/hedging）。
 并自动生成近 7 天变更记录与回滚基线 tag（如存在）。
 
 并行冲刺（架构降复杂）：
@@ -21,6 +22,8 @@ make weekly-operating-audit
 
 - `artifacts/weekly-operating-audit.md`
 - `artifacts/weekly-operating-audit.json`
+- `artifacts/weekly-pnl-attribution.md`
+- `artifacts/weekly-pnl-attribution.json`
 - `artifacts/weekly-adr-draft.md`
 
 ---
@@ -100,7 +103,7 @@ make weekly-operating-audit
 完成标记：
 - [ ] KPI 快照  
 - [ ] 风险例外报告  
-- [ ] 收益归因表  
+- [ ] 收益归因表（自动生成后确认）  
 - [ ] 变更与回滚记录  
 - [ ] ADR  
 

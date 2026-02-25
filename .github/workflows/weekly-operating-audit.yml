@@ -8,6 +8,7 @@ on:
     paths:
       - "results/**/*.json"
       - "scripts/governance/weekly_operating_audit.py"
+      - "scripts/governance/weekly_pnl_attribution.py"
       - "config/weekly_operating_thresholds.json"
       - "config/consistency_thresholds.json"
       - "docs/plans/weekly-operating-checklist.md"
@@ -16,6 +17,7 @@ on:
     paths:
       - "results/**/*.json"
       - "scripts/governance/weekly_operating_audit.py"
+      - "scripts/governance/weekly_pnl_attribution.py"
       - "config/weekly_operating_thresholds.json"
       - "config/consistency_thresholds.json"
       - "docs/plans/weekly-operating-checklist.md"
@@ -52,6 +54,12 @@ jobs:
             --regression-cmd "python -m pytest -q tests/test_pricing_inverse.py tests/test_volatility.py tests/test_hawkes_comparison.py tests/test_research_dashboard.py" \
             --strict
 
+      - name: Generate PnL attribution report
+        run: |
+          python scripts/governance/weekly_pnl_attribution.py \
+            --output-md artifacts/weekly-pnl-attribution.md \
+            --output-json artifacts/weekly-pnl-attribution.json
+
       - name: Generate ADR draft
         run: |
           python scripts/governance/weekly_adr_draft.py \
@@ -76,4 +84,6 @@ jobs:
           path: |
             artifacts/weekly-operating-audit.md
             artifacts/weekly-operating-audit.json
+            artifacts/weekly-pnl-attribution.md
+            artifacts/weekly-pnl-attribution.json
             artifacts/weekly-adr-draft.md

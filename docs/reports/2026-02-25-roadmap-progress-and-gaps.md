@@ -18,14 +18,19 @@ Scope: `docs/plans/2026-02-24-coin-margined-options-research-roadmap.md` and `do
 3. Added governance script regression tests:
    - `tests/test_complexity_guard.py`
    - `tests/test_weekly_operating_audit.py`
-4. Fixed pandas forward/backward fill deprecation warning:
+4. Added weekly PnL attribution automation:
+   - `scripts/governance/weekly_pnl_attribution.py`
+   - `artifacts/weekly-pnl-attribution.md`
+   - `artifacts/weekly-pnl-attribution.json`
+   - Integrated into `make weekly-operating-audit` and CI workflow artifacts
+5. Fixed pandas forward/backward fill deprecation warning:
    - `data/quote_integration.py`
-5. Synced plan docs with completion snapshot and outstanding manual tasks.
+6. Synced plan docs with completion snapshot and outstanding manual tasks.
 
 ## Remaining Tasks (Not Fully Automated)
 
 1. 灰度发布与 24h 观察。  
-2. 收益归因表沉淀。  
+2. 收益归因表人工确认（自动生成后确认口径与数据源）。  
 3. ADR 决策沉淀与回滚决策记录。  
 4. W2-W4 观测一致性里程碑（线上数据联调、日回归+周回放门禁）。
 

@@ -6,6 +6,24 @@
 
 ---
 
+## 0. 进度快照（2026-02-25）
+
+- [x] P0-1 Inverse 短期限 IV/Skew 稳定化（实现 + 测试通过）
+- [x] P0-2 Jump Risk Premia 信号化（实现 + 测试通过）
+- [x] P0-3 Model Zoo 基准框架（实现 + 测试通过）
+- [x] P1-4 Rough + Jumps 实验通道（实现 + 测试通过）
+- [x] P1-5 CEX/DeFi 偏离监控（实现 + 测试通过）
+- [x] P2 Quanto-Inverse 定价与对冲骨架（实现 + 测试通过）
+- [x] 周度自动审计（KPI 快照/风险例外）脚本 + CI 工作流
+
+仍需人工闭环（不可完全自动化）：
+- [ ] 灰度发布与 24h 观察
+- [ ] 收益归因表（spread/adverse/inventory/hedging，已自动生成模板，待补全数据并人工确认）
+- [ ] 异常项归因与修复计划确认（若周审计出现风险例外）
+- [ ] ADR 决策沉淀与回滚决策记录
+
+---
+
 ## 1. 优先级（论文 -> 工程）
 
 ### P0（本轮必须完成）
@@ -53,7 +71,7 @@
   - `tests/test_pricing_inverse.py`
 - 交付：
   - 新增短期限正则/先验开关（默认兼容旧行为）
-  - 近月 IV surface 平滑度与静态无套利检查报告（`validation_scripts/iv_surface_stability_report.py`）
+  - 近月 IV surface 平滑度与静态无套利检查报告（研究脚本）
 
 2. **Day 3-4: P0-2 Jump Risk Premia 信号**
 - 代码：
