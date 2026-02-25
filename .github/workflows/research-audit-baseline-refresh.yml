@@ -72,6 +72,7 @@ jobs:
             --expected-best-model bates \
             --max-best-rmse 120.0 \
             --output-json artifacts/pricing-model-zoo-benchmark.json \
+            --output-md artifacts/pricing-model-zoo-benchmark.md \
             > artifacts/pricing-model-zoo-benchmark.txt
 
           python validation_scripts/research_audit_snapshot.py \
@@ -91,10 +92,22 @@ jobs:
             --output-json artifacts/proposed-baseline-diff.json \
             --output-md artifacts/proposed-baseline-diff.md
 
+      - name: Build proposed baseline weekly summary
+        run: |
+          python validation_scripts/research_audit_weekly_summary.py \
+            --iv-report-json artifacts/iv-surface-stability-report.json \
+            --model-zoo-json artifacts/pricing-model-zoo-benchmark.json \
+            --drift-report-json artifacts/proposed-baseline-diff.json \
+            --output-md artifacts/proposed-baseline-weekly-summary.md
+
       - name: Publish proposed baseline summary
         if: always()
         run: |
+          if [ -f artifacts/proposed-baseline-weekly-summary.md ]; then
+            cat artifacts/proposed-baseline-weekly-summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
           if [ -f artifacts/proposed-baseline-diff.md ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
             cat artifacts/proposed-baseline-diff.md >> "$GITHUB_STEP_SUMMARY"
           fi
 
@@ -112,4 +125,5 @@ jobs:
             artifacts/rough-jump-experiment.txt
             artifacts/pricing-model-zoo-benchmark.txt
             artifacts/pricing-model-zoo-benchmark.json
-
+            artifacts/pricing-model-zoo-benchmark.md
+            artifacts/proposed-baseline-weekly-summary.md

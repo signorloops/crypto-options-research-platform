@@ -67,6 +67,7 @@ make research-audit-refresh-baseline
 3. 审阅：
 - `proposed-research-audit-snapshot-baseline.json`
 - `proposed-baseline-diff.md`
+- `proposed-baseline-weekly-summary.md`
 4. 若确认变更是预期升级，再提交基线文件更新。
 
 ## 调参建议
