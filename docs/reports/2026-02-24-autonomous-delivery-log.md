@@ -67,6 +67,7 @@
 - Added `validation_scripts/jump_premia_stability_report.py` and tests `tests/test_jump_premia_stability_report.py`.
 - Wired jump-premia md/json outputs into `Research Audit` workflow summary + artifacts.
 - Synced `make research-audit` and docs artifact list.
+- Added configurable workflow threshold `min_net_jump_premium_std` for jump-premia stability gating.
 
 ## In-Flight Remote Checks
 

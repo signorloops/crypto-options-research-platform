@@ -47,6 +47,10 @@ on:
         required: false
         type: boolean
         default: false
+      min_net_jump_premium_std:
+        description: "Minimum required std of net jump premium in jump-premia stability audit"
+        required: false
+        default: "0.0003"
 
 concurrency:
   group: research-audit-${{ github.ref }}
@@ -69,6 +73,7 @@ jobs:
       MAX_BEST_RMSE_INCREASE_PCT: ${{ github.event_name == 'workflow_dispatch' && inputs.max_best_rmse_increase_pct || '25.0' }}
       MAX_IV_REDUCTION_DROP_PCT: ${{ github.event_name == 'workflow_dispatch' && inputs.max_iv_reduction_drop_pct || '30.0' }}
       ALLOW_BEST_MODEL_CHANGE: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_best_model_change || 'false' }}
+      MIN_NET_JUMP_PREMIUM_STD: ${{ github.event_name == 'workflow_dispatch' && inputs.min_net_jump_premium_std || '0.0003' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -113,6 +118,7 @@ jobs:
         run: |
           python validation_scripts/jump_premia_stability_report.py \
             --seed "$SEED" \
+            --min-net-std "$MIN_NET_JUMP_PREMIUM_STD" \
             --output-md artifacts/jump-premia-stability-report.md \
             --output-json artifacts/jump-premia-stability-report.json
 

@@ -41,6 +41,9 @@
 - `max_iv_reduction_drop_pct=30.0`
 - `allow_best_model_change=false`
 
+4. jump-premia 门槛：
+- `min_net_jump_premium_std=0.0003`
+
 ## 本地执行
 
 ```bash
