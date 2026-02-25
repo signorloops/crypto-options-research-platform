@@ -3,6 +3,8 @@
 Date: 2026-02-24
 Scope: Coin-margined options roadmap P0/P1 increment + governance baseline checks.
 
+Update (2026-02-25): on Python 3.13 baseline, full suite `pytest -q` now passes.
+
 ## Commands Executed
 
 1. Core regression bundle (roadmap Day10):

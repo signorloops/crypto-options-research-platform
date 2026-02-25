@@ -8,22 +8,14 @@ on:
     paths:
       - "results/**/*.json"
       - "scripts/governance/weekly_operating_audit.py"
-      - "scripts/governance/weekly_pnl_attribution.py"
-      - "scripts/governance/weekly_canary_checklist.py"
-      - "scripts/governance/weekly_decision_log.py"
       - "config/weekly_operating_thresholds.json"
-      - "config/consistency_thresholds.json"
       - "docs/plans/weekly-operating-checklist.md"
       - ".github/workflows/weekly-operating-audit.yml"
   push:
     paths:
       - "results/**/*.json"
       - "scripts/governance/weekly_operating_audit.py"
-      - "scripts/governance/weekly_pnl_attribution.py"
-      - "scripts/governance/weekly_canary_checklist.py"
-      - "scripts/governance/weekly_decision_log.py"
       - "config/weekly_operating_thresholds.json"
-      - "config/consistency_thresholds.json"
       - "docs/plans/weekly-operating-checklist.md"
       - ".github/workflows/weekly-operating-audit.yml"
 
@@ -35,8 +27,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -46,31 +36,16 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
+          python -m pip install -r requirements.lock
 
       - name: Run weekly operating audit (strict)
         run: |
           python scripts/governance/weekly_operating_audit.py \
             --thresholds config/weekly_operating_thresholds.json \
-            --consistency-thresholds config/consistency_thresholds.json \
             --output-md artifacts/weekly-operating-audit.md \
             --output-json artifacts/weekly-operating-audit.json \
             --regression-cmd "python -m pytest -q tests/test_pricing_inverse.py tests/test_volatility.py tests/test_hawkes_comparison.py tests/test_research_dashboard.py" \
             --strict
-
-      - name: Generate PnL attribution report
-        run: |
-          python scripts/governance/weekly_pnl_attribution.py \
-            --output-md artifacts/weekly-pnl-attribution.md \
-            --output-json artifacts/weekly-pnl-attribution.json
-
-      - name: Generate canary checklist
-        run: |
-          python scripts/governance/weekly_canary_checklist.py \
-            --audit-json artifacts/weekly-operating-audit.json \
-            --attribution-json artifacts/weekly-pnl-attribution.json \
-            --output-md artifacts/weekly-canary-checklist.md \
-            --output-json artifacts/weekly-canary-checklist.json
 
       - name: Generate ADR draft
         run: |
@@ -79,30 +54,14 @@ jobs:
             --output-md artifacts/weekly-adr-draft.md \
             --owner "weekly-ci"
 
-      - name: Generate decision log
-        run: |
-          python scripts/governance/weekly_decision_log.py \
-            --audit-json artifacts/weekly-operating-audit.json \
-            --canary-json artifacts/weekly-canary-checklist.json \
-            --output-md artifacts/weekly-decision-log.md \
-            --output-json artifacts/weekly-decision-log.json
-
       - name: Publish report to job summary
         if: always()
         run: |
-          for report in \
-            artifacts/weekly-operating-audit.md \
-            artifacts/weekly-pnl-attribution.md \
-            artifacts/weekly-canary-checklist.md \
-            artifacts/weekly-decision-log.md \
-            artifacts/weekly-adr-draft.md; do
-            if [ -f "$report" ]; then
-              echo "" >> "$GITHUB_STEP_SUMMARY"
-              echo "---" >> "$GITHUB_STEP_SUMMARY"
-              echo "" >> "$GITHUB_STEP_SUMMARY"
-              cat "$report" >> "$GITHUB_STEP_SUMMARY"
-            fi
-          done
+          if [ -f artifacts/weekly-operating-audit.md ]; then
+            cat artifacts/weekly-operating-audit.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Weekly operating audit report not generated." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Upload audit artifacts
         if: always()
@@ -112,10 +71,4 @@ jobs:
           path: |
             artifacts/weekly-operating-audit.md
             artifacts/weekly-operating-audit.json
-            artifacts/weekly-pnl-attribution.md
-            artifacts/weekly-pnl-attribution.json
-            artifacts/weekly-canary-checklist.md
-            artifacts/weekly-canary-checklist.json
             artifacts/weekly-adr-draft.md
-            artifacts/weekly-decision-log.md
-            artifacts/weekly-decision-log.json

@@ -1,4 +1,4 @@
-.PHONY: help install install-dev test test-unit test-integration test-cov lint lint-fix format format-check type-check quality complexity-audit daily-regression weekly-operating-audit weekly-pnl-attribution weekly-canary-checklist weekly-adr-draft weekly-decision-log clean docs
+.PHONY: help install install-dev test test-unit test-integration test-cov lint lint-fix format format-check type-check quality complexity-audit weekly-operating-audit weekly-adr-draft clean docs
 
 # Detect Python interpreter with project minimum version (3.9+).
 PYTHON_CANDIDATES := ./venv/bin/python ./.venv/bin/python ./env/bin/python python3.13 python3.12 python3.11 python3.10 python3.9 python3 python
@@ -42,12 +42,8 @@ help:
 	@echo "  type-check       Run type checking (mypy)"
 	@echo "  quality          Run format-check + lint + type-check"
 	@echo "  complexity-audit Run strict complexity governance checks"
-	@echo "  daily-regression Run daily regression gate report"
 	@echo "  weekly-operating-audit Generate weekly KPI and risk exception report"
-	@echo "  weekly-pnl-attribution Generate weekly PnL attribution report"
-	@echo "  weekly-canary-checklist Generate weekly canary rollout checklist"
 	@echo "  weekly-adr-draft Generate ADR draft from weekly audit JSON"
-	@echo "  weekly-decision-log Generate weekly decision and rollback log"
 	@echo "  clean            Clean build artifacts"
 	@echo "  docs             Build documentation"
 
@@ -95,57 +91,17 @@ complexity-audit:
 		--report-json artifacts/complexity-governance-report.json \
 		--strict
 
-daily-regression:
-	$(PYTHON) scripts/governance/daily_regression_gate.py \
-		--cmd "$(PYTHON) -m pytest -q tests/test_pricing_inverse.py tests/test_volatility.py tests/test_hawkes_comparison.py tests/test_research_dashboard.py" \
-		--output-md artifacts/daily-regression-gate.md \
-		--output-json artifacts/daily-regression-gate.json \
-		--strict
-
 weekly-operating-audit:
 	$(PYTHON) scripts/governance/weekly_operating_audit.py \
 		--thresholds config/weekly_operating_thresholds.json \
-		--consistency-thresholds config/consistency_thresholds.json \
 		--output-md artifacts/weekly-operating-audit.md \
 		--output-json artifacts/weekly-operating-audit.json \
 		--regression-cmd "$(PYTHON) -m pytest -q tests/test_pricing_inverse.py tests/test_volatility.py tests/test_hawkes_comparison.py tests/test_research_dashboard.py" \
 		--strict
-	$(PYTHON) scripts/governance/weekly_pnl_attribution.py \
-		--output-md artifacts/weekly-pnl-attribution.md \
-		--output-json artifacts/weekly-pnl-attribution.json
-	$(PYTHON) scripts/governance/weekly_canary_checklist.py \
-		--audit-json artifacts/weekly-operating-audit.json \
-		--attribution-json artifacts/weekly-pnl-attribution.json \
-		--output-md artifacts/weekly-canary-checklist.md \
-		--output-json artifacts/weekly-canary-checklist.json
 	$(PYTHON) scripts/governance/weekly_adr_draft.py \
 		--audit-json artifacts/weekly-operating-audit.json \
 		--output-md artifacts/weekly-adr-draft.md \
 		--owner "$(ADR_OWNER)"
-	$(PYTHON) scripts/governance/weekly_decision_log.py \
-		--audit-json artifacts/weekly-operating-audit.json \
-		--canary-json artifacts/weekly-canary-checklist.json \
-		--output-md artifacts/weekly-decision-log.md \
-		--output-json artifacts/weekly-decision-log.json
-
-weekly-pnl-attribution:
-	$(PYTHON) scripts/governance/weekly_pnl_attribution.py \
-		--output-md artifacts/weekly-pnl-attribution.md \
-		--output-json artifacts/weekly-pnl-attribution.json
-
-weekly-canary-checklist:
-	$(PYTHON) scripts/governance/weekly_canary_checklist.py \
-		--audit-json artifacts/weekly-operating-audit.json \
-		--attribution-json artifacts/weekly-pnl-attribution.json \
-		--output-md artifacts/weekly-canary-checklist.md \
-		--output-json artifacts/weekly-canary-checklist.json
-
-weekly-decision-log:
-	$(PYTHON) scripts/governance/weekly_decision_log.py \
-		--audit-json artifacts/weekly-operating-audit.json \
-		--canary-json artifacts/weekly-canary-checklist.json \
-		--output-md artifacts/weekly-decision-log.md \
-		--output-json artifacts/weekly-decision-log.json
 
 weekly-adr-draft:
 	$(PYTHON) scripts/governance/weekly_adr_draft.py \

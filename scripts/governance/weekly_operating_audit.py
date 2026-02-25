@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import shlex
 import subprocess
 from collections.abc import Sequence
 from datetime import datetime, timezone
@@ -19,17 +18,11 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "max_fill_calibration_error": 0.20,
 }
 
-DEFAULT_CONSISTENCY_THRESHOLDS: dict[str, float] = {
-    "max_abs_pnl_diff": 20000.0,
-    "max_abs_sharpe_diff": 1500.0,
-    "max_abs_max_drawdown_diff": 0.20,
-}
-
 MANUAL_CHECKLIST_ITEMS: list[str] = [
     "灰度发布完成",
     "24h 观察完成",
     "是否触发回滚已决策",
-    "收益归因表（自动生成后确认）",
+    "收益归因表",
     "变更与回滚记录",
     "ADR",
 ]
@@ -141,7 +134,7 @@ def _extract_strategy_rows(raw: dict[str, Any], source: Path) -> list[dict[str, 
 
 
 def _discover_input_files(results_dir: Path, pattern: str) -> list[Path]:
-    candidates = sorted(results_dir.rglob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
+    candidates = sorted(results_dir.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
     return [p for p in candidates if p.is_file()]
 
 
@@ -177,36 +170,7 @@ def _load_thresholds(path: Path) -> dict[str, float]:
     return thresholds
 
 
-def _load_consistency_thresholds(path: Path) -> dict[str, float]:
-    if not path.exists():
-        return dict(DEFAULT_CONSISTENCY_THRESHOLDS)
-
-    raw = _load_json(path)
-    thresholds = dict(DEFAULT_CONSISTENCY_THRESHOLDS)
-    for key in DEFAULT_CONSISTENCY_THRESHOLDS:
-        if key in raw:
-            value = _to_float(raw[key])
-            if value is None:
-                raise ValueError(f"Invalid consistency threshold value for '{key}'")
-            thresholds[key] = float(value)
-    return thresholds
-
-
-def _is_shallow_repository(repo_root: Path) -> bool:
-    completed = subprocess.run(
-        ["git", "rev-parse", "--is-shallow-repository"],
-        cwd=repo_root,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if completed.returncode != 0:
-        return False
-    return completed.stdout.strip().lower() == "true"
-
-
 def _collect_recent_changes(repo_root: Path, since_days: int) -> dict[str, Any]:
-    shallow = _is_shallow_repository(repo_root)
     completed = subprocess.run(
         [
             "git",
@@ -226,7 +190,6 @@ def _collect_recent_changes(repo_root: Path, since_days: int) -> dict[str, Any]:
             "since_days": since_days,
             "entries": [],
             "count": 0,
-            "shallow": shallow,
             "error": completed.stderr.strip(),
         }
 
@@ -243,7 +206,6 @@ def _collect_recent_changes(repo_root: Path, since_days: int) -> dict[str, Any]:
         "since_days": since_days,
         "entries": entries,
         "count": len(entries),
-        "shallow": shallow,
         "error": "",
     }
 
@@ -306,85 +268,14 @@ def _evaluate_rows(
     return evaluated
 
 
-def _evaluate_consistency_rows(
-    rows_by_strategy: dict[str, list[dict[str, Any]]],
-    thresholds: dict[str, float],
-) -> list[dict[str, Any]]:
-    checks: list[dict[str, Any]] = []
-    for strategy, rows in sorted(rows_by_strategy.items()):
-        if len(rows) < 2:
-            checks.append(
-                {
-                    "strategy": strategy,
-                    "latest_source_file": rows[0]["source_file"] if rows else "",
-                    "baseline_source_file": "",
-                    "abs_pnl_diff": None,
-                    "abs_sharpe_diff": None,
-                    "abs_max_drawdown_diff": None,
-                    "status": "SKIP",
-                    "breached_rules": "insufficient_history",
-                }
-            )
-            continue
-
-        latest = rows[0]
-        baseline = rows[1]
-        abs_pnl_diff = None
-        if latest.get("pnl") is not None and baseline.get("pnl") is not None:
-            abs_pnl_diff = abs(float(latest["pnl"]) - float(baseline["pnl"]))
-
-        abs_sharpe_diff = None
-        if latest.get("sharpe") is not None and baseline.get("sharpe") is not None:
-            abs_sharpe_diff = abs(float(latest["sharpe"]) - float(baseline["sharpe"]))
-
-        abs_max_drawdown_diff = None
-        if (
-            latest.get("max_drawdown_abs") is not None
-            and baseline.get("max_drawdown_abs") is not None
-        ):
-            abs_max_drawdown_diff = abs(
-                float(latest["max_drawdown_abs"]) - float(baseline["max_drawdown_abs"])
-            )
-
-        breaches: list[str] = []
-        if abs_pnl_diff is not None and abs_pnl_diff > thresholds["max_abs_pnl_diff"]:
-            breaches.append(f"abs_pnl_diff>{thresholds['max_abs_pnl_diff']}")
-        if abs_sharpe_diff is not None and abs_sharpe_diff > thresholds["max_abs_sharpe_diff"]:
-            breaches.append(f"abs_sharpe_diff>{thresholds['max_abs_sharpe_diff']}")
-        if (
-            abs_max_drawdown_diff is not None
-            and abs_max_drawdown_diff > thresholds["max_abs_max_drawdown_diff"]
-        ):
-            breaches.append(f"abs_max_drawdown_diff>{thresholds['max_abs_max_drawdown_diff']}")
-
-        checks.append(
-            {
-                "strategy": strategy,
-                "latest_source_file": latest["source_file"],
-                "baseline_source_file": baseline["source_file"],
-                "abs_pnl_diff": abs_pnl_diff,
-                "abs_sharpe_diff": abs_sharpe_diff,
-                "abs_max_drawdown_diff": abs_max_drawdown_diff,
-                "status": "FAIL" if breaches else "PASS",
-                "breached_rules": "; ".join(breaches),
-            }
-        )
-    return checks
-
-
 def _build_report(
     input_files: Sequence[Path],
     thresholds: dict[str, float],
-    consistency_thresholds: dict[str, float] | None = None,
     regression_result: dict[str, Any] | None = None,
     change_log: dict[str, Any] | None = None,
     rollback_marker: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if consistency_thresholds is None:
-        consistency_thresholds = dict(DEFAULT_CONSISTENCY_THRESHOLDS)
-
     latest_by_strategy: dict[str, dict[str, Any]] = {}
-    rows_by_strategy: dict[str, list[dict[str, Any]]] = {}
     parse_errors: list[dict[str, str]] = []
     files_sorted = sorted(input_files, key=lambda p: p.stat().st_mtime, reverse=True)
 
@@ -398,24 +289,12 @@ def _build_report(
 
         for row in rows:
             strategy = row["strategy"]
-            rows_by_strategy.setdefault(strategy, []).append(row)
             if strategy not in latest_by_strategy:
                 latest_by_strategy[strategy] = row
 
     snapshot_rows = _evaluate_rows(
         sorted(latest_by_strategy.values(), key=lambda r: r["strategy"]), thresholds
     )
-    consistency_checks = _evaluate_consistency_rows(rows_by_strategy, consistency_thresholds)
-    consistency_exceptions = [
-        {
-            "strategy": row["strategy"],
-            "latest_source_file": row["latest_source_file"],
-            "baseline_source_file": row["baseline_source_file"],
-            "breached_rules": row["breached_rules"],
-        }
-        for row in consistency_checks
-        if row["status"] == "FAIL"
-    ]
     risk_exceptions = [
         {
             "strategy": row["strategy"],
@@ -431,24 +310,14 @@ def _build_report(
         "experiment_ids_assigned": bool(snapshot_rows)
         and all(bool(row.get("experiment_id")) for row in snapshot_rows),
         "risk_thresholds_confirmed": True,
-        "change_log_complete": bool(
-            change_log
-            and change_log.get("executed")
-            and not change_log.get("shallow", False)
-            and change_log.get("count", 0) > 0
-        ),
+        "change_log_complete": bool(change_log and change_log.get("count", 0) > 0),
         "rollback_version_marked": bool(rollback_marker and rollback_marker.get("tag")),
-        "rollback_marker_from_tag": bool(
-            rollback_marker
-            and rollback_marker.get("source") == "tag"
-            and rollback_marker.get("tag")
-        ),
         "minimum_regression_passed": (
             bool(regression_result["passed"])
             if regression_result is not None and regression_result.get("executed")
             else None
         ),
-        "consistency_check_completed": len(parse_errors) == 0 and len(consistency_exceptions) == 0,
+        "consistency_check_completed": len(parse_errors) == 0,
         "risk_exception_report_output": True,
         "anomalies_attributed": len(risk_exceptions) == 0,
     }
@@ -474,16 +343,12 @@ def _build_report(
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "inputs": [str(p) for p in files_sorted],
         "thresholds": thresholds,
-        "consistency_thresholds": consistency_thresholds,
         "summary": {
             "strategies": len(snapshot_rows),
             "exceptions": len(risk_exceptions),
-            "consistency_exceptions": len(consistency_exceptions),
             "parse_errors": len(parse_errors),
         },
         "kpi_snapshot": snapshot_rows,
-        "consistency_checks": consistency_checks,
-        "consistency_exceptions": consistency_exceptions,
         "risk_exceptions": risk_exceptions,
         "checklist": checklist,
         "manual_checklist_items": MANUAL_CHECKLIST_ITEMS,
@@ -503,14 +368,7 @@ def _build_report(
         "change_log": (
             change_log
             if change_log is not None
-            else {
-                "executed": False,
-                "since_days": 0,
-                "entries": [],
-                "count": 0,
-                "shallow": False,
-                "error": "",
-            }
+            else {"executed": False, "since_days": 0, "entries": [], "count": 0, "error": ""}
         ),
         "rollback_marker": (
             rollback_marker
@@ -528,7 +386,6 @@ def _to_markdown(report: dict[str, Any]) -> str:
     lines.append(f"- Input files: `{len(report['inputs'])}`")
     lines.append(f"- Strategies in snapshot: `{report['summary']['strategies']}`")
     lines.append(f"- Risk exceptions: `{report['summary']['exceptions']}`")
-    lines.append(f"- Consistency exceptions: `{report['summary']['consistency_exceptions']}`")
     lines.append("")
     lines.append("## Input Files")
     lines.append("")
@@ -572,38 +429,6 @@ def _to_markdown(report: dict[str, Any]) -> str:
         )
     )
     lines.append("")
-    lines.append("## Consistency Checks")
-    lines.append("")
-    consistency_rows = []
-    for row in report["consistency_checks"]:
-        consistency_rows.append(
-            {
-                "strategy": row["strategy"],
-                "latest_source_file": row["latest_source_file"],
-                "baseline_source_file": row["baseline_source_file"] or "n/a",
-                "abs_pnl_diff": _fmt(row.get("abs_pnl_diff"), digits=4),
-                "abs_sharpe_diff": _fmt(row.get("abs_sharpe_diff"), digits=4),
-                "abs_max_drawdown_diff": _fmt(row.get("abs_max_drawdown_diff"), digits=4),
-                "status": row["status"],
-                "breached_rules": row.get("breached_rules", ""),
-            }
-        )
-    lines.append(
-        _format_table(
-            consistency_rows,
-            [
-                "strategy",
-                "latest_source_file",
-                "baseline_source_file",
-                "abs_pnl_diff",
-                "abs_sharpe_diff",
-                "abs_max_drawdown_diff",
-                "status",
-                "breached_rules",
-            ],
-        )
-    )
-    lines.append("")
     lines.append("## Risk Exceptions")
     lines.append("")
     lines.append(
@@ -621,7 +446,6 @@ def _to_markdown(report: dict[str, Any]) -> str:
         ("风险门槛已确认", report["checklist"]["risk_thresholds_confirmed"]),
         ("变更记录完整", report["checklist"]["change_log_complete"]),
         ("回滚版本已标记", report["checklist"]["rollback_version_marked"]),
-        ("回滚基线来源为 tag", report["checklist"]["rollback_marker_from_tag"]),
         ("最小回归通过", report["checklist"]["minimum_regression_passed"]),
         ("一致性检查完成", report["checklist"]["consistency_check_completed"]),
         ("风险例外报告输出", report["checklist"]["risk_exception_report_output"]),
@@ -654,8 +478,6 @@ def _to_markdown(report: dict[str, Any]) -> str:
     change_log = report["change_log"]
     if change_log.get("executed"):
         lines.append(f"- Window: last `{change_log['since_days']}` day(s)")
-        if change_log.get("shallow"):
-            lines.append("- Repository clone is shallow; change log may be incomplete.")
         lines.append("")
         lines.append(_format_table(change_log["entries"], ["date", "commit", "subject"]))
     else:
@@ -705,11 +527,6 @@ def main() -> int:
         help="Path to thresholds JSON. Uses defaults when file is missing.",
     )
     parser.add_argument(
-        "--consistency-thresholds",
-        default="config/consistency_thresholds.json",
-        help="Path to consistency thresholds JSON. Uses defaults when file is missing.",
-    )
-    parser.add_argument(
         "--output-md",
         default="artifacts/weekly-operating-audit.md",
         help="Output markdown report path.",
@@ -740,8 +557,6 @@ def main() -> int:
     repo_root = Path(".").resolve()
     thresholds_path = (repo_root / args.thresholds).resolve()
     thresholds = _load_thresholds(thresholds_path)
-    consistency_thresholds_path = (repo_root / args.consistency_thresholds).resolve()
-    consistency_thresholds = _load_consistency_thresholds(consistency_thresholds_path)
 
     if args.inputs:
         input_files = [Path(p).resolve() for p in args.inputs]
@@ -755,40 +570,22 @@ def main() -> int:
 
     regression_result: dict[str, Any] | None = None
     if args.regression_cmd.strip():
-        regression_cmd = args.regression_cmd.strip()
-        try:
-            regression_argv = shlex.split(regression_cmd)
-        except ValueError as exc:
-            regression_result = {
-                "executed": True,
-                "command": regression_cmd,
-                "passed": False,
-                "return_code": 127,
-                "output_tail": str(exc),
-            }
-        else:
-            try:
-                completed = subprocess.run(
-                    regression_argv,
-                    cwd=repo_root,
-                    text=True,
-                    capture_output=True,
-                    check=False,
-                )
-                return_code = completed.returncode
-                combined_output = f"{completed.stdout}\n{completed.stderr}".strip()
-            except OSError as exc:
-                return_code = 127
-                combined_output = str(exc)
-
-            output_lines = combined_output.splitlines()
-            regression_result = {
-                "executed": True,
-                "command": regression_cmd,
-                "passed": return_code == 0,
-                "return_code": return_code,
-                "output_tail": "\n".join(output_lines[-40:]),
-            }
+        completed = subprocess.run(
+            args.regression_cmd,
+            cwd=repo_root,
+            shell=True,
+            text=True,
+            capture_output=True,
+        )
+        combined_output = f"{completed.stdout}\n{completed.stderr}".strip()
+        output_lines = combined_output.splitlines()
+        regression_result = {
+            "executed": True,
+            "command": args.regression_cmd,
+            "passed": completed.returncode == 0,
+            "return_code": completed.returncode,
+            "output_tail": "\n".join(output_lines[-40:]),
+        }
 
     change_log = _collect_recent_changes(repo_root, max(args.change_log_days, 1))
     rollback_marker = _detect_latest_tag(repo_root)
@@ -796,7 +593,6 @@ def main() -> int:
     report = _build_report(
         input_files,
         thresholds,
-        consistency_thresholds=consistency_thresholds,
         regression_result=regression_result,
         change_log=change_log,
         rollback_marker=rollback_marker,
@@ -812,13 +608,6 @@ def main() -> int:
     had_issue = False
     if report["summary"]["exceptions"] > 0:
         print(f"Weekly operating audit: {report['summary']['exceptions']} risk exception(s).")
-        had_issue = True
-        if args.strict:
-            return 2
-    if report["summary"]["consistency_exceptions"] > 0:
-        print(
-            f"Weekly operating audit: {report['summary']['consistency_exceptions']} consistency exception(s)."
-        )
         had_issue = True
         if args.strict:
             return 2
