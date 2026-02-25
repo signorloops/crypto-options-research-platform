@@ -3,8 +3,10 @@ Value at Risk (VaR) and Expected Shortfall (CVaR) calculations.
 Includes parametric, historical, and Monte Carlo methods.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -21,7 +23,7 @@ class VaRResult:
     cvar_99: float  # Expected shortfall at 99%
     method: str  # Calculation method used
 
-    def to_dict(self) -> Dict[str, float]:
+    def to_dict(self) -> dict[str, object]:
         """Convert to dictionary."""
         return {
             "var_95": self.var_95,
@@ -86,7 +88,7 @@ class VaRCalculator:
         return aligned_returns.to_numpy() @ weights
 
     @staticmethod
-    def _normalize_option_type(raw_option_type: object) -> Optional[str]:
+    def _normalize_option_type(raw_option_type: object) -> str | None:
         """Normalize option type representation to {'call', 'put'}."""
         if raw_option_type is None:
             return None
@@ -377,20 +379,30 @@ class VaRCalculator:
         )
 
     @staticmethod
-    def _regularize_covariance_matrix(cov: np.ndarray) -> np.ndarray:
-        """Ensure covariance matrix is positive definite for simulation."""
-        eigenvalues = np.linalg.eigvalsh(cov)
+    def _regularize_covariance(cov: np.ndarray) -> np.ndarray:
+        """Ensure covariance matrix is positive definite for simulation stability."""
+        cov_matrix = np.array(cov, dtype=float, copy=True)
+        eigenvalues = np.linalg.eigvalsh(cov_matrix)
         if np.any(eigenvalues <= 1e-10):
-            min_eigenvalue = np.min(eigenvalues)
+            min_eigenvalue = float(np.min(eigenvalues))
             regularization = max(1e-6, -min_eigenvalue + 1e-6)
-            cov = cov + np.eye(len(cov)) * regularization
-        return cov
+            cov_matrix += np.eye(len(cov_matrix)) * regularization
+        return cov_matrix
 
     @staticmethod
-    def _apply_leverage_effect(
-        simulated_returns: np.ndarray, weights: np.ndarray, leverage_correlation: float
+    def _simulate_correlated_returns(
+        mean: np.ndarray,
+        cov: np.ndarray,
+        weights: np.ndarray,
+        n_simulations: int,
+        holding_period: int,
+        leverage_correlation: float,
+        rng: Any,
     ) -> np.ndarray:
-        """Apply return-volatility leverage effect to simulated paths."""
+        """Generate correlated returns with optional leverage-effect volatility scaling."""
+        simulated_returns = rng.multivariate_normal(
+            mean * holding_period, cov * holding_period, n_simulations
+        )
         if abs(leverage_correlation) <= 1e-8:
             return simulated_returns
 
@@ -402,77 +414,68 @@ class VaRCalculator:
         return simulated_returns * vol_multiplier[:, None]
 
     @staticmethod
-    def _greeks_approx_pnl(
-        greeks_row: pd.Series,
-        asset_returns: np.ndarray,
+    def _greeks_component_pnl(
+        greek_row: pd.Series,
         position_value: float,
-        rng,
+        shocks: np.ndarray,
         n_simulations: int,
+        rng: Any,
     ) -> np.ndarray:
-        """Delta-gamma-vega approximation for non-linear position PnL."""
-        delta_pnl = greeks_row["delta"] * asset_returns * position_value
-        gamma_pnl = 0.5 * greeks_row.get("gamma", 0) * (asset_returns**2) * position_value
-        vega_pnl = greeks_row.get("vega", 0) * rng.normal(0, 0.05, n_simulations) * position_value
+        """Delta-gamma-vega PnL approximation component for one position."""
+        delta_pnl = greek_row["delta"] * shocks * position_value
+        gamma_pnl = 0.5 * greek_row.get("gamma", 0) * (shocks**2) * position_value
+        vega_pnl = greek_row.get("vega", 0) * rng.normal(0, 0.05, n_simulations) * position_value
         return delta_pnl + gamma_pnl + vega_pnl
 
-    def _fallback_position_pnl(
+    def _single_position_full_revaluation_pnl(
         self,
-        position_id: object,
-        position_row: pd.Series,
+        idx: object,
+        row: pd.Series,
+        default_asset_idx: int,
         simulated_returns: np.ndarray,
-        position_idx: int,
-        greeks: Optional[pd.DataFrame],
-        rng,
+        column_index: dict[object, int],
+        greeks: pd.DataFrame | None,
         n_simulations: int,
-    ) -> np.ndarray:
-        """Fallback PnL path for non-option positions or option parse failures."""
-        position_value = float(position_row["value"])
-        if greeks is not None and position_id in greeks.index:
-            greeks_row = greeks.loc[position_id]
-            return self._greeks_approx_pnl(
-                greeks_row=greeks_row,
-                asset_returns=simulated_returns[:, position_idx],
-                position_value=position_value,
-                rng=rng,
-                n_simulations=n_simulations,
-            )
-        return simulated_returns[:, position_idx] * position_value
-
-    @staticmethod
-    def _option_underlying_index(
-        option_row: pd.Series, columns: list[str], fallback_idx: int
-    ) -> int:
-        """Resolve underlying return series index for option full revaluation."""
-        underlying_asset = option_row.get("underlying_asset", columns[fallback_idx])
-        if underlying_asset in columns:
-            return columns.index(underlying_asset)
-        return fallback_idx
-
-    def _option_full_revaluation_pnl(
-        self,
-        option_pricer_cls,
-        option_row: pd.Series,
-        option_type: str,
-        simulated_returns: np.ndarray,
-        underlying_idx: int,
         holding_period: int,
         leverage_correlation: float,
-        rng,
-        n_simulations: int,
-    ) -> Optional[np.ndarray]:
-        """Return option full-revaluation PnL vector, or None on invalid inputs."""
+        rng: Any,
+    ) -> np.ndarray:
+        """
+        Compute simulated PnL component for one position under option-aware revaluation path.
+
+        Falls back to Greeks approximation or linear approximation when option metadata
+        is invalid/incomplete.
+        """
+        position_value = float(row["value"])
+        linear_component = simulated_returns[:, default_asset_idx] * position_value
+
+        option_type = self._normalize_option_type(row.get("option_type"))
+        if option_type is None:
+            if greeks is not None and idx in greeks.index:
+                return self._greeks_component_pnl(
+                    greek_row=greeks.loc[idx],
+                    position_value=position_value,
+                    shocks=simulated_returns[:, default_asset_idx],
+                    n_simulations=n_simulations,
+                    rng=rng,
+                )
+            return linear_component
+
+        underlying_asset = row.get("underlying_asset", idx)
+        underlying_idx = column_index.get(underlying_asset, default_asset_idx)
+
         try:
-            spot_0 = float(option_row["spot"])
-            strike = float(option_row["strike"])
-            time_to_expiry = float(option_row["time_to_expiry"])
-            implied_vol = float(option_row["implied_vol"])
-            risk_free_rate = float(option_row.get("risk_free_rate", 0.0))
-            vol_of_vol = float(option_row.get("vol_of_vol", 0.20))
+            spot_0 = float(row["spot"])
+            strike = float(row["strike"])
+            time_to_expiry = float(row["time_to_expiry"])
+            implied_vol = float(row["implied_vol"])
+            risk_free_rate = float(row.get("risk_free_rate", 0.0))
+            vol_of_vol = float(row.get("vol_of_vol", 0.20))
         except (TypeError, ValueError):
-            return None
+            return linear_component
 
         if spot_0 <= 0 or strike <= 0 or implied_vol <= 0:
-            return None
+            return linear_component
 
         underlying_returns = simulated_returns[:, underlying_idx]
         shocked_spot = np.clip(spot_0 * np.exp(underlying_returns), 1e-8, None)
@@ -484,8 +487,10 @@ class VaRCalculator:
         shocked_vol = np.clip(implied_vol * (1.0 + vol_shock), 0.01, 5.0)
         shocked_tte = max(1e-8, time_to_expiry - holding_period / 365.25)
 
+        from research.pricing.inverse_options import InverseOptionPricer
+
         try:
-            base_price_btc = option_pricer_cls.calculate_price(
+            base_price_btc = InverseOptionPricer.calculate_price(
                 S=spot_0,
                 K=strike,
                 T=max(time_to_expiry, 1e-8),
@@ -494,39 +499,104 @@ class VaRCalculator:
                 option_type=option_type,
             )
         except Exception:
-            return None
+            return linear_component
 
         base_price_usd = base_price_btc * spot_0
         if base_price_usd <= 1e-12:
-            return None
+            return linear_component
 
-        quantity = float(option_row["value"]) / base_price_usd
+        quantity = position_value / base_price_usd
         revalued_price_btc = np.array(
             [
-                option_pricer_cls.calculate_price(
-                    S=float(spot),
+                InverseOptionPricer.calculate_price(
+                    S=float(s),
                     K=strike,
                     T=shocked_tte,
                     r=risk_free_rate,
-                    sigma=float(vol),
+                    sigma=float(v),
                     option_type=option_type,
                 )
-                for spot, vol in zip(shocked_spot, shocked_vol)
+                for s, v in zip(shocked_spot, shocked_vol)
             ],
             dtype=float,
         )
         revalued_price_usd = revalued_price_btc * shocked_spot
         return quantity * (revalued_price_usd - base_price_usd)
 
+    def _option_schema_pnl(
+        self,
+        aligned_positions: pd.DataFrame,
+        aligned_columns: list[str],
+        simulated_returns: np.ndarray,
+        greeks: pd.DataFrame | None,
+        n_simulations: int,
+        holding_period: int,
+        leverage_correlation: float,
+        rng: Any,
+    ) -> np.ndarray:
+        """Compute portfolio PnL when option contract schema is available."""
+        pnl = np.zeros(n_simulations, dtype=float)
+        column_index = {name: idx for idx, name in enumerate(aligned_columns)}
+
+        for i, (idx, row) in enumerate(aligned_positions.iterrows()):
+            pnl += self._single_position_full_revaluation_pnl(
+                idx=idx,
+                row=row,
+                default_asset_idx=i,
+                simulated_returns=simulated_returns,
+                column_index=column_index,
+                greeks=greeks,
+                n_simulations=n_simulations,
+                holding_period=holding_period,
+                leverage_correlation=leverage_correlation,
+                rng=rng,
+            )
+        return pnl
+
+    def _greeks_approximation_pnl(
+        self,
+        aligned_positions: pd.DataFrame,
+        simulated_returns: np.ndarray,
+        greeks: pd.DataFrame,
+        n_simulations: int,
+        rng: Any,
+    ) -> np.ndarray:
+        """Compute portfolio PnL using delta-gamma-vega approximation only."""
+        pnl = np.zeros(n_simulations, dtype=float)
+        for i, (idx, row) in enumerate(aligned_positions.iterrows()):
+            position_value = float(row["value"])
+            if idx in greeks.index:
+                pnl += self._greeks_component_pnl(
+                    greek_row=greeks.loc[idx],
+                    position_value=position_value,
+                    shocks=simulated_returns[:, i],
+                    n_simulations=n_simulations,
+                    rng=rng,
+                )
+            else:
+                pnl += simulated_returns[:, i] * position_value
+        return pnl
+
+    @staticmethod
+    def _tail_risk_from_pnl(pnl: np.ndarray) -> tuple[float, float, float, float]:
+        """Calculate VaR/CVaR metrics from simulated PnL distribution."""
+        p5 = float(np.percentile(pnl, 5))
+        p1 = float(np.percentile(pnl, 1))
+        var_95 = -p5
+        var_99 = -p1
+        cvar_95 = -float(pnl[pnl <= p5].mean())
+        cvar_99 = -float(pnl[pnl <= p1].mean())
+        return var_95, var_99, cvar_95, cvar_99
+
     def monte_carlo_var(
         self,
         positions: pd.DataFrame,
         returns: pd.DataFrame,
-        greeks: Optional[pd.DataFrame] = None,
+        greeks: pd.DataFrame | None = None,
         n_simulations: int = 10000,
         holding_period: int = 1,
         leverage_correlation: float = -0.35,
-        random_seed: Optional[int] = None,
+        random_seed: int | None = None,
     ) -> VaRResult:
         """
         Calculate VaR using Monte Carlo simulation.
@@ -554,22 +624,19 @@ class VaRCalculator:
 
         # Estimate parameters from historical returns
         mean = aligned_returns.mean().values
-        cov = self._regularize_covariance_matrix(aligned_returns.cov().to_numpy(copy=True))
+        cov = self._regularize_covariance(aligned_returns.cov().to_numpy(copy=True))
 
         # Optional local RNG improves reproducibility without mutating global RNG state.
         rng = np.random.default_rng(random_seed) if random_seed is not None else np.random
 
-        # Generate correlated random returns
-        simulated_returns = rng.multivariate_normal(
-            mean * holding_period, cov * holding_period, n_simulations
-        )
-
-        # Leverage effect: negative return shocks tend to coincide with higher volatility.
-        # We modulate path volatility with a return-dependent exponential factor.
-        simulated_returns = self._apply_leverage_effect(
-            simulated_returns=simulated_returns,
+        simulated_returns = self._simulate_correlated_returns(
+            mean=mean,
+            cov=cov,
             weights=weights,
+            n_simulations=n_simulations,
+            holding_period=holding_period,
             leverage_correlation=leverage_correlation,
+            rng=rng,
         )
 
         # Calculate PnL for each simulation.
@@ -577,72 +644,29 @@ class VaRCalculator:
         option_schema_available = option_fields.issubset(set(aligned_positions.columns))
 
         if option_schema_available:
-            from research.pricing.inverse_options import InverseOptionPricer
-
-            pnl = np.zeros(n_simulations, dtype=float)
-            columns = list(aligned_returns.columns)
-
-            for i, (idx, row) in enumerate(aligned_positions.iterrows()):
-                option_type = self._normalize_option_type(row.get("option_type"))
-                if option_type is None:
-                    pnl += self._fallback_position_pnl(
-                        position_id=idx,
-                        position_row=row,
-                        simulated_returns=simulated_returns,
-                        position_idx=i,
-                        greeks=greeks,
-                        rng=rng,
-                        n_simulations=n_simulations,
-                    )
-                    continue
-
-                underlying_idx = self._option_underlying_index(row, columns, i)
-                option_pnl = self._option_full_revaluation_pnl(
-                    option_pricer_cls=InverseOptionPricer,
-                    option_row=row,
-                    option_type=option_type,
-                    simulated_returns=simulated_returns,
-                    underlying_idx=underlying_idx,
-                    holding_period=holding_period,
-                    leverage_correlation=leverage_correlation,
-                    rng=rng,
-                    n_simulations=n_simulations,
-                )
-                if option_pnl is None:
-                    pnl += self._fallback_position_pnl(
-                        position_id=idx,
-                        position_row=row,
-                        simulated_returns=simulated_returns,
-                        position_idx=i,
-                        greeks=greeks,
-                        rng=rng,
-                        n_simulations=n_simulations,
-                    )
-                else:
-                    pnl += option_pnl
+            pnl = self._option_schema_pnl(
+                aligned_positions=aligned_positions,
+                aligned_columns=list(aligned_returns.columns),
+                simulated_returns=simulated_returns,
+                greeks=greeks,
+                n_simulations=n_simulations,
+                holding_period=holding_period,
+                leverage_correlation=leverage_correlation,
+                rng=rng,
+            )
         elif greeks is not None:
-            # Include non-linear effects from options via Greeks approximation.
-            pnl = np.zeros(n_simulations, dtype=float)
-
-            for i, (idx, row) in enumerate(aligned_positions.iterrows()):
-                pnl += self._fallback_position_pnl(
-                    position_id=idx,
-                    position_row=row,
-                    simulated_returns=simulated_returns,
-                    position_idx=i,
-                    greeks=greeks,
-                    rng=rng,
-                    n_simulations=n_simulations,
-                )
+            pnl = self._greeks_approximation_pnl(
+                aligned_positions=aligned_positions,
+                simulated_returns=simulated_returns,
+                greeks=greeks,
+                n_simulations=n_simulations,
+                rng=rng,
+            )
         else:
             # Linear approximation
             pnl = simulated_returns @ weights * total_value
 
-        # Calculate VaR from simulated PnL
-        var_95 = -np.percentile(pnl, 5)
-        var_99 = -np.percentile(pnl, 1)
-        cvar_95 = -pnl[pnl <= np.percentile(pnl, 5)].mean()
-        cvar_99 = -pnl[pnl <= np.percentile(pnl, 1)].mean()
+        var_95, var_99, cvar_95, cvar_99 = self._tail_risk_from_pnl(pnl)
 
         return VaRResult(
             var_95=var_95, var_99=var_99, cvar_95=cvar_95, cvar_99=cvar_99, method="monte_carlo"
@@ -684,7 +708,7 @@ class StressTest:
 
     def run_stress_test(
         self, positions: pd.DataFrame, greeks: pd.DataFrame, scenario: str
-    ) -> Dict[str, float]:
+    ) -> dict[str, object]:
         """
         Run stress test for a given scenario.
 
@@ -731,7 +755,7 @@ class StressTest:
         """Run all predefined stress scenarios."""
         results = []
 
-        for scenario_name in self.SCENARIOS.keys():
+        for scenario_name in self.SCENARIOS:
             result = self.run_stress_test(positions, greeks, scenario_name)
             result["scenario"] = scenario_name
             results.append(result)
