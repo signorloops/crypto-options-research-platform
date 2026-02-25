@@ -168,7 +168,8 @@ def test_build_report_treats_commit_fallback_and_shallow_log_as_incomplete(tmp_p
     )
 
     assert report["checklist"]["change_log_complete"] is False
-    assert report["checklist"]["rollback_version_marked"] is False
+    assert report["checklist"]["rollback_version_marked"] is True
+    assert report["checklist"]["rollback_marker_from_tag"] is False
 
 
 def test_main_regression_command_runs_without_shell(tmp_path, monkeypatch):

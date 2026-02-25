@@ -437,7 +437,8 @@ def _build_report(
             and not change_log.get("shallow", False)
             and change_log.get("count", 0) > 0
         ),
-        "rollback_version_marked": bool(
+        "rollback_version_marked": bool(rollback_marker and rollback_marker.get("tag")),
+        "rollback_marker_from_tag": bool(
             rollback_marker
             and rollback_marker.get("source") == "tag"
             and rollback_marker.get("tag")
@@ -620,6 +621,7 @@ def _to_markdown(report: dict[str, Any]) -> str:
         ("风险门槛已确认", report["checklist"]["risk_thresholds_confirmed"]),
         ("变更记录完整", report["checklist"]["change_log_complete"]),
         ("回滚版本已标记", report["checklist"]["rollback_version_marked"]),
+        ("回滚基线来源为 tag", report["checklist"]["rollback_marker_from_tag"]),
         ("最小回归通过", report["checklist"]["minimum_regression_passed"]),
         ("一致性检查完成", report["checklist"]["consistency_check_completed"]),
         ("风险例外报告输出", report["checklist"]["risk_exception_report_output"]),

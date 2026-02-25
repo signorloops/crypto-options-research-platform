@@ -37,6 +37,7 @@ def _build_report(audit: dict[str, Any], attribution: dict[str, Any]) -> dict[st
     regression_ok = bool(regression.get("passed"))
 
     blockers: list[str] = []
+    warnings: list[str] = []
     if risk_exceptions > 0:
         blockers.append(f"risk_exceptions={risk_exceptions}")
     if consistency_exceptions > 0:
@@ -45,6 +46,8 @@ def _build_report(audit: dict[str, Any], attribution: dict[str, Any]) -> dict[st
         blockers.append("minimum_regression_failed")
     if checklist.get("rollback_version_marked") is not True:
         blockers.append("rollback_baseline_not_tagged")
+    elif checklist.get("rollback_marker_from_tag") is not True:
+        warnings.append("rollback_baseline_is_commit_not_tag")
 
     recommendation = "HOLD" if blockers else "PROCEED_CANARY"
     strategy_rows = audit.get("kpi_snapshot", [])
@@ -54,11 +57,13 @@ def _build_report(audit: dict[str, Any], attribution: dict[str, Any]) -> dict[st
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "recommendation": recommendation,
         "blockers": blockers,
+        "warnings": warnings,
         "preconditions": {
             "risk_exceptions": risk_exceptions,
             "consistency_exceptions": consistency_exceptions,
             "minimum_regression_passed": regression_ok,
             "rollback_version_marked": checklist.get("rollback_version_marked"),
+            "rollback_marker_from_tag": checklist.get("rollback_marker_from_tag"),
         },
         "thresholds": thresholds,
         "rollback_marker": rollback_marker,
@@ -80,6 +85,10 @@ def _to_markdown(report: dict[str, Any]) -> str:
         lines.append(f"- Blockers: `{'; '.join(report['blockers'])}`")
     else:
         lines.append("- Blockers: `_none_`")
+    if report.get("warnings"):
+        lines.append(f"- Warnings: `{'; '.join(report['warnings'])}`")
+    else:
+        lines.append("- Warnings: `_none_`")
     lines.append("")
     lines.append("## Preconditions (Auto)")
     lines.append("")
@@ -87,6 +96,7 @@ def _to_markdown(report: dict[str, Any]) -> str:
     lines.append(f"- Consistency exceptions: `{pre['consistency_exceptions']}`")
     lines.append(f"- Minimum regression passed: `{_fmt_bool(pre['minimum_regression_passed'])}`")
     lines.append(f"- Rollback baseline marked: `{_fmt_bool(pre['rollback_version_marked'])}`")
+    lines.append(f"- Rollback baseline from tag: `{_fmt_bool(pre['rollback_marker_from_tag'])}`")
     lines.append("")
     lines.append("## Rollback Baseline")
     lines.append("")
