@@ -18,9 +18,10 @@
 3. `rough-jump-experiment.txt`
 4. `pricing-model-zoo-benchmark.txt`
 5. `pricing-model-zoo-benchmark.json`
-6. `research-audit-snapshot.json`
-7. `research-audit-drift-report.md`
-8. `research-audit-drift-report.json`
+6. `pricing-model-zoo-benchmark.md`
+7. `research-audit-snapshot.json`
+8. `research-audit-drift-report.md`
+9. `research-audit-drift-report.json`
 
 ## 质量门槛（默认）
 

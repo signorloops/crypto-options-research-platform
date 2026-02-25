@@ -120,6 +120,7 @@ jobs:
             --expected-best-model "$EXPECTED_BEST_MODEL" \
             --max-best-rmse "$MAX_BEST_RMSE" \
             --output-json artifacts/pricing-model-zoo-benchmark.json \
+            --output-md artifacts/pricing-model-zoo-benchmark.md \
             > artifacts/pricing-model-zoo-benchmark.txt
 
       - name: Build research audit snapshot
@@ -155,6 +156,10 @@ jobs:
             echo "" >> "$GITHUB_STEP_SUMMARY"
             cat artifacts/research-audit-drift-report.md >> "$GITHUB_STEP_SUMMARY"
           fi
+          if [ -f artifacts/pricing-model-zoo-benchmark.md ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            cat artifacts/pricing-model-zoo-benchmark.md >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Upload research audit artifacts
         if: always()
@@ -167,6 +172,7 @@ jobs:
             artifacts/rough-jump-experiment.txt
             artifacts/pricing-model-zoo-benchmark.txt
             artifacts/pricing-model-zoo-benchmark.json
+            artifacts/pricing-model-zoo-benchmark.md
             artifacts/research-audit-snapshot.json
             artifacts/research-audit-drift-report.json
             artifacts/research-audit-drift-report.md

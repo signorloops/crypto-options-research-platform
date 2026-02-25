@@ -133,6 +133,41 @@ def save_benchmark_json(
         file_obj.write("\n")
 
 
+def render_benchmark_markdown(
+    source: str,
+    quotes: list[OptionQuote],
+    table: pd.DataFrame,
+    violations: list[str] | None = None,
+) -> str:
+    """Render benchmark result as a compact Markdown report."""
+    violations = violations or []
+    lines = [
+        "# Pricing Model Zoo Benchmark",
+        "",
+        f"- Quotes source: `{source}`",
+        f"- Number of quotes: `{len(quotes)}`",
+        "",
+        "## Ranking",
+        "",
+        "| Rank | Model | RMSE | MAE |",
+        "| --- | --- | ---: | ---: |",
+    ]
+    if table.empty:
+        lines.append("| 1 | (empty) | n/a | n/a |")
+    else:
+        for rank, (_, row) in enumerate(table.iterrows(), start=1):
+            lines.append(
+                f"| {rank} | {row['model']} | {float(row['rmse']):.6f} | {float(row['mae']):.6f} |"
+            )
+    lines.extend(["", "## Quality Gates", ""])
+    if violations:
+        for violation in violations:
+            lines.append(f"- FAIL: {violation}")
+    else:
+        lines.append("- PASS")
+    return "\n".join(lines) + "\n"
+
+
 def evaluate_benchmark_quality_gates(
     table: pd.DataFrame,
     expected_best_model: str = "",
@@ -240,6 +275,12 @@ def main() -> None:
         help="Optional path to write benchmark results JSON.",
     )
     parser.add_argument(
+        "--output-md",
+        type=str,
+        default="",
+        help="Optional path to write benchmark Markdown summary.",
+    )
+    parser.add_argument(
         "--expected-best-model",
         type=str,
         default="",
@@ -283,6 +324,19 @@ def main() -> None:
         expected_best_model=args.expected_best_model,
         max_best_rmse=float(args.max_best_rmse),
     )
+    if args.output_md:
+        output_dir = os.path.dirname(args.output_md)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+        with open(args.output_md, "w", encoding="utf-8") as file_obj:
+            file_obj.write(
+                render_benchmark_markdown(
+                    source=source,
+                    quotes=quotes,
+                    table=result,
+                    violations=violations,
+                )
+            )
     print(f"# quotes_source={source} n_quotes={len(quotes)}")
     print(result.to_string(index=False))
     if violations:

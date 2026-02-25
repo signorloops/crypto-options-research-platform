@@ -10,6 +10,7 @@ from validation_scripts.pricing_model_zoo_benchmark import (
     _build_synthetic_quotes,
     evaluate_benchmark_quality_gates,
     load_quotes_json,
+    render_benchmark_markdown,
     run_benchmark,
     save_benchmark_json,
     save_quotes_json,
@@ -106,3 +107,21 @@ def test_benchmark_quality_gates_fail_on_unexpected_model():
         max_best_rmse=120.0,
     )
     assert any("Unexpected best model" in violation for violation in violations)
+
+
+def test_render_benchmark_markdown_contains_ranking_and_gate_status():
+    fixture_path = Path("validation_scripts/fixtures/model_zoo_quotes_seed42.json")
+    quotes = load_quotes_json(str(fixture_path))
+    table = run_benchmark(quotes=quotes)
+    markdown = render_benchmark_markdown(
+        source=f"json:{fixture_path}",
+        quotes=quotes,
+        table=table,
+        violations=[],
+    )
+
+    assert "# Pricing Model Zoo Benchmark" in markdown
+    assert "## Ranking" in markdown
+    assert "| 1 | bates |" in markdown
+    assert "## Quality Gates" in markdown
+    assert "- PASS" in markdown
