@@ -1,0 +1,14 @@
+{
+  "metrics": {
+    "python_files": 85,
+    "total_loc": 25106,
+    "avg_loc_per_file": 295.36470588235295,
+    "max_file_loc": 865,
+    "files_over_soft_loc": 5,
+    "max_function_loc": 149,
+    "functions_over_soft_loc": 26,
+    "max_function_args": 13,
+    "max_methods_per_class": 29,
+    "classes_over_method_soft_limit": 3
+  }
+}

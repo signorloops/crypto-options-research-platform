@@ -99,6 +99,50 @@ def test_dashboard_live_deviation_api_aligns_cex_defi_sources(tmp_path):
     assert payload["sources"]["mode"] == "file"
 
 
+def test_dashboard_live_deviation_api_honors_alignment_tolerance(tmp_path):
+    cex_path = tmp_path / "cex_quotes.csv"
+    cex_path.write_text(
+        (
+            "timestamp,symbol,option_type,maturity,delta,price,exchange\n"
+            "2024-01-01T00:00:59Z,BTC-OPT,call,0.05,0.25,1200,okx\n"
+        ),
+        encoding="utf-8",
+    )
+    defi_path = tmp_path / "defi_quotes.csv"
+    defi_path.write_text(
+        (
+            "timestamp,symbol,option_type,maturity,delta,price,source\n"
+            "2024-01-01T00:01:01Z,BTC-OPT,call,0.05,0.25,1140,lyra\n"
+        ),
+        encoding="utf-8",
+    )
+
+    app = create_dashboard_app(results_dir=tmp_path)
+    with TestClient(app) as client:
+        fail_response = client.get(
+            "/api/deviation/live",
+            params={
+                "threshold_bps": 200.0,
+                "cex_file": str(cex_path),
+                "defi_file": str(defi_path),
+                "align_tolerance_seconds": 1,
+            },
+        )
+        pass_response = client.get(
+            "/api/deviation/live",
+            params={
+                "threshold_bps": 200.0,
+                "cex_file": str(cex_path),
+                "defi_file": str(defi_path),
+                "align_tolerance_seconds": 3,
+            },
+        )
+
+    assert fail_response.status_code == 422
+    assert pass_response.status_code == 200
+    assert pass_response.json()["summary"]["n_rows"] == 1
+
+
 def test_dashboard_live_deviation_api_supports_provider_mode(tmp_path, monkeypatch):
     defi_path = tmp_path / "defi_quotes.csv"
     defi_path.write_text(

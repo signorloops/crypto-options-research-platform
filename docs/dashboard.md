@@ -14,6 +14,7 @@ Environment variables:
 - `DASHBOARD_PORT` (default: `8501`)
 - `CORP_RESULTS_DIR` (default: `results`)
 - `CEX_QUOTES_FILE` (optional: live CEX quote file path for cross-market monitor)
+- `CEX_QUOTES_PROVIDER` (optional: live CEX provider, e.g. `okx`)
 - `DEFI_QUOTES_FILE` (optional: live DeFi quote file path for cross-market monitor)
 
 ## Features
@@ -30,7 +31,7 @@ Environment variables:
 - `GET /` web dashboard UI
 - `GET /api/files` list available result files
 - `GET /api/deviation` compute cross-market/model deviation report
-- `GET /api/deviation/live` compute aligned CEX-vs-DeFi deviation from two quote sources
+- `GET /api/deviation/live` compute aligned CEX-vs-DeFi deviation from file/provider sources
 - `GET /health` dashboard process health
 
 `/api/deviation` query params:
@@ -41,13 +42,16 @@ Environment variables:
 `/api/deviation/live` query params:
 
 - `cex_file`: CEX quote file path (optional if `CEX_QUOTES_FILE` is set)
-- `defi_file`: DeFi quote file path (optional if `DEFI_QUOTES_FILE` is set)
+- `cex_provider`: CEX live provider (optional if `cex_file` is set, currently supports `okx`)
+- `defi_file`: DeFi quote file path (required unless `DEFI_QUOTES_FILE` is set)
+- `underlying`: provider mode underlying (default `BTC-USD`)
+- `align_tolerance_seconds`: fallback nearest-timestamp alignment tolerance (default `60`)
 - `threshold_bps`: alert threshold in bps (default `300`)
 
 Live endpoint behavior:
 
 - Normalizes quote schemas from CEX/DeFi sources
-- Aligns rows by minute timestamp + symbol + option type + expiry bucket + delta bucket
+- Aligns rows by minute key first; if no exact match, uses nearest timestamp fallback within tolerance
 - Produces deviation report with the same shape as `/api/deviation`
 
 Minimal columns for deviation analysis:
@@ -70,6 +74,17 @@ Recommended live source columns:
 - `delta`
 - `price`
 - venue label (`exchange`/`source`)
+
+CLI snapshot automation:
+
+```bash
+make live-deviation-snapshot
+```
+
+This generates:
+
+- `artifacts/live-deviation-snapshot.md`
+- `artifacts/live-deviation-snapshot.json`
 
 ## Intended Usage
 

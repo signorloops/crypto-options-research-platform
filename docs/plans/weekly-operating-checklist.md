@@ -16,6 +16,13 @@ make weekly-operating-audit
 make weekly-close-gate
 ```
 
+生产偏离快照入口（可接入定时任务）：
+
+```bash
+cd corp
+make live-deviation-snapshot
+```
+
 说明：该命令默认包含最小回归集（inverse/volatility/hawkes/dashboard）。
 并自动生成近 7 天变更记录与回滚基线 tag（如存在）。
 并自动串联生成 canary、收益归因、决策日志、人工签字包与线上/线下一致性回放报告。
@@ -40,6 +47,9 @@ make weekly-close-gate
 - `artifacts/weekly-close-gate.md`（执行 `make weekly-close-gate` 时生成）
 - `artifacts/weekly-close-gate.json`（执行 `make weekly-close-gate` 时生成）
   - 包含可直接复制到 PR 描述的 `PR Brief (Copy/Paste)` 段落与 `pr_brief` 字段
+- `artifacts/live-deviation-snapshot.md`
+- `artifacts/live-deviation-snapshot.json`
+- `docs/templates/weekly-replay-template.md`
 
 ---
 

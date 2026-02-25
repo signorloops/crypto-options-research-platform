@@ -340,6 +340,7 @@ def create_dashboard_app(results_dir: Optional[Path] = None) -> FastAPI:
     @app.get("/api/deviation/live", response_class=JSONResponse)
     async def deviation_live(
         threshold_bps: float = Query(default=300.0, ge=0.0),
+        align_tolerance_seconds: float = Query(default=60.0, ge=0.0),
         cex_file: Optional[str] = Query(default=None),
         cex_provider: Optional[str] = Query(default=None),
         underlying: str = Query(default="BTC-USD"),
@@ -361,7 +362,11 @@ def create_dashboard_app(results_dir: Optional[Path] = None) -> FastAPI:
 
         try:
             if cex_source:
-                dataset = build_cex_defi_deviation_dataset(Path(cex_source), Path(defi_source))
+                dataset = build_cex_defi_deviation_dataset(
+                    Path(cex_source),
+                    Path(defi_source),
+                    align_tolerance_seconds=align_tolerance_seconds,
+                )
                 source_meta = {
                     "mode": "file",
                     "cex_file": cex_source,
@@ -372,6 +377,7 @@ def create_dashboard_app(results_dir: Optional[Path] = None) -> FastAPI:
                     provider,
                     Path(defi_source),
                     underlying=underlying,
+                    align_tolerance_seconds=align_tolerance_seconds,
                 )
                 source_meta = {
                     "mode": "provider",
@@ -383,7 +389,11 @@ def create_dashboard_app(results_dir: Optional[Path] = None) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(exc))
 
         report = build_cross_market_deviation_report(dataset, threshold_bps=float(threshold_bps))
-        report["sources"] = {**source_meta, "rows_aligned": int(len(dataset))}
+        report["sources"] = {
+            **source_meta,
+            "align_tolerance_seconds": float(align_tolerance_seconds),
+            "rows_aligned": int(len(dataset)),
+        }
         return report
 
     @app.get("/", response_class=HTMLResponse)

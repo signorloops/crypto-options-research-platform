@@ -1,4 +1,4 @@
-.PHONY: help install install-dev install-dev-full workspace-slim-report workspace-slim-clean workspace-slim-clean-venv test test-unit test-integration test-cov lint lint-fix format format-check type-check quality branch-name-guard check-service-entrypoint docs-link-check complexity-audit daily-regression weekly-operating-audit weekly-close-gate weekly-pnl-attribution weekly-canary-checklist weekly-decision-log weekly-manual-prefill weekly-signoff-pack weekly-consistency-replay weekly-adr-draft clean docs
+.PHONY: help install install-dev install-dev-full workspace-slim-report workspace-slim-clean workspace-slim-clean-venv test test-unit test-integration test-cov lint lint-fix format format-check type-check quality branch-name-guard check-service-entrypoint docs-link-check complexity-audit complexity-audit-regression daily-regression live-deviation-snapshot weekly-operating-audit weekly-close-gate weekly-pnl-attribution weekly-canary-checklist weekly-decision-log weekly-manual-prefill weekly-signoff-pack weekly-consistency-replay weekly-adr-draft clean docs
 
 # Detect Python interpreter with project minimum version (3.9+).
 PYTHON_CANDIDATES := ./venv/bin/python ./.venv/bin/python ./env/bin/python python3.13 python3.12 python3.11 python3.10 python3.9 python3 python
@@ -24,6 +24,7 @@ RUFF := $(PYTHON) -m ruff
 BLACK := $(PYTHON) -m black
 MYPY := $(PYTHON) -m mypy
 ADR_OWNER ?= TBD
+BASELINE_COMPLEXITY_JSON ?= config/complexity_baseline.json
 
 SRC_DIRS := core data research strategies utils config execution tests
 
@@ -49,7 +50,9 @@ help:
 	@echo "  check-service-entrypoint Fail if deployment docs/scripts use legacy execution modules"
 	@echo "  docs-link-check  Validate local markdown links"
 	@echo "  complexity-audit Run strict complexity governance checks"
+	@echo "  complexity-audit-regression Run strict complexity check against baseline (fail only on regressions)"
 	@echo "  daily-regression Run daily regression gate report"
+	@echo "  live-deviation-snapshot Generate live CEX-vs-DeFi deviation snapshot report"
 	@echo "  weekly-operating-audit Generate weekly KPI and risk exception report"
 	@echo "  weekly-close-gate Run weekly governance chain and enforce READY_FOR_CLOSE gate"
 	@echo "  weekly-pnl-attribution Generate weekly PnL attribution report"
@@ -134,12 +137,26 @@ complexity-audit:
 		--report-json artifacts/complexity-governance-report.json \
 		--strict
 
+complexity-audit-regression:
+	$(PYTHON) scripts/governance/complexity_guard.py \
+		--config config/complexity_budget.json \
+		--report-md artifacts/complexity-governance-report.md \
+		--report-json artifacts/complexity-governance-report.json \
+		--baseline-json $(BASELINE_COMPLEXITY_JSON) \
+		--strict \
+		--strict-regression-only
+
 daily-regression:
 	$(PYTHON) scripts/governance/daily_regression_gate.py \
 		--cmd "$(PYTHON) -m pytest -q --noconftest tests/test_pricing_inverse.py tests/test_volatility.py tests/test_hawkes_comparison.py tests/test_research_dashboard.py" \
 		--output-md artifacts/daily-regression-gate.md \
 		--output-json artifacts/daily-regression-gate.json \
 		--strict
+
+live-deviation-snapshot:
+	$(PYTHON) scripts/governance/live_deviation_snapshot.py \
+		--output-md artifacts/live-deviation-snapshot.md \
+		--output-json artifacts/live-deviation-snapshot.json
 
 weekly-operating-audit:
 	$(PYTHON) scripts/governance/weekly_operating_audit.py \

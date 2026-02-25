@@ -10,6 +10,7 @@ on:
       - "execution/**/*.py"
       - "utils/**/*.py"
       - "config/complexity_budget.json"
+      - "config/complexity_baseline.json"
       - "scripts/governance/complexity_guard.py"
       - ".github/workflows/complexity-governance.yml"
   push:
@@ -21,6 +22,7 @@ on:
       - "execution/**/*.py"
       - "utils/**/*.py"
       - "config/complexity_budget.json"
+      - "config/complexity_baseline.json"
       - "scripts/governance/complexity_guard.py"
       - ".github/workflows/complexity-governance.yml"
   schedule:
@@ -48,13 +50,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install ruff mypy
 
-      - name: Run complexity guard (strict)
+      - name: Run complexity guard (strict regression-only)
         run: |
           python scripts/governance/complexity_guard.py \
             --config config/complexity_budget.json \
             --report-md artifacts/complexity-governance-report.md \
             --report-json artifacts/complexity-governance-report.json \
-            --strict
+            --baseline-json config/complexity_baseline.json \
+            --strict \
+            --strict-regression-only
 
       - name: Changed-files lint/type gate
         if: github.event_name == 'pull_request' || github.event_name == 'push'

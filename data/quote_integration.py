@@ -44,7 +44,7 @@ def _normalize_quotes(df: pd.DataFrame, fallback_venue: str) -> pd.DataFrame:
 
     out = pd.DataFrame()
     if time_col is not None:
-        out["timestamp"] = pd.to_datetime(df[time_col], errors="coerce")
+        out["timestamp"] = pd.to_datetime(df[time_col], errors="coerce", utc=True)
     else:
         out["timestamp"] = pd.NaT
 
@@ -116,7 +116,8 @@ def _normalize_okx_option_summary(
 
         timestamp_raw = row.get("ts") or row.get("uTime") or row.get("cTime")
         if timestamp_raw is not None:
-            timestamp = pd.to_datetime(timestamp_raw, unit="ms", utc=True, errors="coerce")
+            timestamp_numeric = pd.to_numeric(timestamp_raw, errors="coerce")
+            timestamp = pd.to_datetime(timestamp_numeric, unit="ms", utc=True, errors="coerce")
         else:
             timestamp = pd.NaT
         if pd.isna(timestamp):
@@ -125,7 +126,8 @@ def _normalize_okx_option_summary(
         expiry_years = 0.0
         expiry_raw = row.get("expTime")
         if expiry_raw is not None:
-            expiry_ts = pd.to_datetime(expiry_raw, unit="ms", utc=True, errors="coerce")
+            expiry_numeric = pd.to_numeric(expiry_raw, errors="coerce")
+            expiry_ts = pd.to_datetime(expiry_numeric, unit="ms", utc=True, errors="coerce")
             if not pd.isna(expiry_ts):
                 expiry_years = max((expiry_ts - now).total_seconds(), 0.0) / (365.0 * 24.0 * 3600.0)
 
@@ -150,15 +152,39 @@ def _normalize_okx_option_summary(
     return _normalize_quotes(pd.DataFrame(normalized_rows), fallback_venue="okx")
 
 
-def _align_cex_defi_quotes(cex: pd.DataFrame, defi: pd.DataFrame) -> pd.DataFrame:
+def _align_cex_defi_quotes(
+    cex: pd.DataFrame,
+    defi: pd.DataFrame,
+    *,
+    align_tolerance_seconds: float = 60.0,
+) -> pd.DataFrame:
     join_cols = ["ts_bucket", "symbol", "option_type", "expiry_bucket", "delta_bucket"]
     merged = cex.merge(defi, on=join_cols, suffixes=("_cex", "_defi"))
+    if merged.empty:
+        key_cols = ["symbol", "option_type", "expiry_bucket", "delta_bucket"]
+        tolerance = pd.Timedelta(seconds=max(float(align_tolerance_seconds), 0.0))
+        cex_asof = cex.sort_values([*key_cols, "timestamp"])
+        defi_asof = defi.sort_values([*key_cols, "timestamp"])
+        merged = pd.merge_asof(
+            cex_asof,
+            defi_asof,
+            on="timestamp",
+            by=key_cols,
+            direction="nearest",
+            tolerance=tolerance,
+            suffixes=("_cex", "_defi"),
+        )
+        merged = merged.dropna(subset=["price_defi"])
+        if not merged.empty:
+            merged["ts_bucket"] = merged["timestamp"].dt.floor("min")
     if merged.empty:
         raise ValueError("No aligned CEX/DeFi rows after key-based merge")
 
     out = pd.DataFrame(
         {
-            "timestamp": merged["ts_bucket"],
+            "timestamp": (
+                merged["ts_bucket"] if "ts_bucket" in merged.columns else merged["timestamp"]
+            ),
             "symbol": merged["symbol"],
             "option_type": merged["option_type"],
             "maturity": merged["expiry_bucket"],
@@ -173,14 +199,23 @@ def _align_cex_defi_quotes(cex: pd.DataFrame, defi: pd.DataFrame) -> pd.DataFram
     return out.sort_values("timestamp")
 
 
-def build_cex_defi_deviation_dataset(cex_path: Path, defi_path: Path) -> pd.DataFrame:
+def build_cex_defi_deviation_dataset(
+    cex_path: Path,
+    defi_path: Path,
+    *,
+    align_tolerance_seconds: float = 60.0,
+) -> pd.DataFrame:
     """Build aligned CEX-vs-DeFi quote pairs for deviation analysis."""
     cex_raw = _load_table(cex_path)
     defi_raw = _load_table(defi_path)
 
     cex = _normalize_quotes(cex_raw, fallback_venue="cex")
     defi = _normalize_quotes(defi_raw, fallback_venue="defi")
-    return _align_cex_defi_quotes(cex, defi)
+    return _align_cex_defi_quotes(
+        cex,
+        defi,
+        align_tolerance_seconds=align_tolerance_seconds,
+    )
 
 
 async def build_cex_defi_deviation_dataset_live(
@@ -188,6 +223,7 @@ async def build_cex_defi_deviation_dataset_live(
     defi_path: Path,
     *,
     underlying: str = "BTC-USD",
+    align_tolerance_seconds: float = 60.0,
 ) -> pd.DataFrame:
     """Build CEX-vs-DeFi deviation dataset using a live CEX provider plus DeFi file source."""
     provider = cex_provider.strip().lower()
@@ -205,4 +241,8 @@ async def build_cex_defi_deviation_dataset_live(
     cex = _normalize_okx_option_summary(cex_raw_rows, underlying=underlying)
     defi_raw = _load_table(defi_path)
     defi = _normalize_quotes(defi_raw, fallback_venue="defi")
-    return _align_cex_defi_quotes(cex, defi)
+    return _align_cex_defi_quotes(
+        cex,
+        defi,
+        align_tolerance_seconds=align_tolerance_seconds,
+    )

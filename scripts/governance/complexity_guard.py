@@ -11,10 +11,9 @@ import argparse
 import ast
 import json
 import statistics
-import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Sequence
+from typing import Any, Dict, List, Sequence
 
 
 @dataclass
@@ -40,7 +39,9 @@ def _load_config(path: Path) -> Dict:
     return data
 
 
-def _iter_python_files(root: Path, include_dirs: Sequence[str], exclude_dirs: Sequence[str]) -> List[Path]:
+def _iter_python_files(
+    root: Path, include_dirs: Sequence[str], exclude_dirs: Sequence[str]
+) -> List[Path]:
     files: List[Path] = []
     exclude_set = set(exclude_dirs)
 
@@ -193,7 +194,11 @@ def _build_report(root: Path, config: Dict) -> Dict:
             thresholds.max_functions_over_soft_loc,
         ),
         ("max_function_args", metrics["max_function_args"], thresholds.max_function_args),
-        ("max_methods_per_class", metrics["max_methods_per_class"], thresholds.max_methods_per_class),
+        (
+            "max_methods_per_class",
+            metrics["max_methods_per_class"],
+            thresholds.max_methods_per_class,
+        ),
         (
             "classes_over_method_soft_limit",
             metrics["classes_over_method_soft_limit"],
@@ -221,7 +226,9 @@ def _build_report(root: Path, config: Dict) -> Dict:
         "violations": [r for r in check_rows if r["status"] == "FAIL"],
         "top_files_by_loc": sorted(file_rows, key=lambda x: x["physical_loc"], reverse=True)[:15],
         "top_functions_by_loc": sorted(func_rows, key=lambda x: x["length"], reverse=True)[:15],
-        "top_classes_by_methods": sorted(class_rows, key=lambda x: x["method_count"], reverse=True)[:15],
+        "top_classes_by_methods": sorted(class_rows, key=lambda x: x["method_count"], reverse=True)[
+            :15
+        ],
     }
 
 
@@ -255,22 +262,104 @@ def _to_markdown(report: Dict) -> str:
     lines.append("")
     lines.append("## Top Functions By LOC")
     lines.append("")
-    lines.append(_format_md_table(report["top_functions_by_loc"], ["path", "name", "length", "args"]))
+    lines.append(
+        _format_md_table(report["top_functions_by_loc"], ["path", "name", "length", "args"])
+    )
     lines.append("")
     lines.append("## Top Classes By Method Count")
     lines.append("")
-    lines.append(_format_md_table(report["top_classes_by_methods"], ["path", "name", "method_count"]))
+    lines.append(
+        _format_md_table(report["top_classes_by_methods"], ["path", "name", "method_count"])
+    )
     lines.append("")
+    if report.get("regressions"):
+        lines.append("## Regressions Vs Baseline")
+        lines.append("")
+        lines.append(
+            _format_md_table(
+                report["regressions"],
+                ["metric", "value", "threshold", "baseline_value", "reason"],
+            )
+        )
+        lines.append("")
     if report["violations"]:
         lines.append("## Violations")
         lines.append("")
-        lines.append(_format_md_table(report["violations"], ["metric", "value", "threshold", "status"]))
+        lines.append(
+            _format_md_table(report["violations"], ["metric", "value", "threshold", "status"])
+        )
     else:
         lines.append("## Violations")
         lines.append("")
         lines.append("No threshold violations.")
     lines.append("")
     return "\n".join(lines)
+
+
+def _compute_regressions(report: Dict, baseline_metrics: Dict[str, Any]) -> List[Dict[str, Any]]:
+    regressions: List[Dict[str, Any]] = []
+    for row in report.get("checks", []):
+        if row.get("status") != "FAIL":
+            continue
+
+        metric = str(row.get("metric"))
+        value = row.get("value")
+        threshold = row.get("threshold")
+        baseline_value = baseline_metrics.get(metric)
+        if baseline_value is None:
+            regressions.append(
+                {
+                    "metric": metric,
+                    "value": value,
+                    "threshold": threshold,
+                    "baseline_value": None,
+                    "reason": "missing_baseline_metric",
+                }
+            )
+            continue
+
+        try:
+            curr = float(value)
+            limit = float(threshold)
+            base = float(baseline_value)
+        except (TypeError, ValueError):
+            regressions.append(
+                {
+                    "metric": metric,
+                    "value": value,
+                    "threshold": threshold,
+                    "baseline_value": baseline_value,
+                    "reason": "non_numeric_baseline_or_value",
+                }
+            )
+            continue
+
+        if base <= limit and curr > limit:
+            reason = "new_violation"
+        elif base > limit and curr > base:
+            reason = "worsened_existing_violation"
+        else:
+            reason = ""
+
+        if reason:
+            regressions.append(
+                {
+                    "metric": metric,
+                    "value": value,
+                    "threshold": threshold,
+                    "baseline_value": baseline_value,
+                    "reason": reason,
+                }
+            )
+    return regressions
+
+
+def _load_baseline_metrics(path: Path) -> Dict[str, Any]:
+    with path.open("r", encoding="utf-8") as f:
+        payload = json.load(f)
+    if isinstance(payload, dict) and isinstance(payload.get("metrics"), dict):
+        return payload["metrics"]
+    raise ValueError(f"Baseline report must contain a 'metrics' object: {path}")
 
 
 def main() -> int:
@@ -296,6 +385,19 @@ def main() -> int:
         action="store_true",
         help="Exit non-zero when any threshold is violated.",
     )
+    parser.add_argument(
+        "--baseline-json",
+        default="",
+        help="Optional baseline complexity report JSON for regression-only strict mode.",
+    )
+    parser.add_argument(
+        "--strict-regression-only",
+        action="store_true",
+        help=(
+            "When used with --strict, fail only on regressions versus --baseline-json, "
+            "not on existing baseline violations."
+        ),
+    )
     args = parser.parse_args()
 
     root = Path(args.root).resolve()
@@ -305,11 +407,39 @@ def main() -> int:
 
     config = _load_config(config_path)
     report = _build_report(root, config)
+    report["baseline"] = ""
+    report["regressions"] = []
+
+    baseline_metrics: Dict[str, Any] = {}
+    if args.baseline_json:
+        baseline_path = (root / args.baseline_json).resolve()
+        baseline_metrics = _load_baseline_metrics(baseline_path)
+        report["baseline"] = str(baseline_path)
+        report["regressions"] = _compute_regressions(report, baseline_metrics)
 
     md_path.parent.mkdir(parents=True, exist_ok=True)
     json_path.parent.mkdir(parents=True, exist_ok=True)
     md_path.write_text(_to_markdown(report), encoding="utf-8")
     json_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    if args.strict_regression_only and not args.baseline_json:
+        print("Complexity check: --strict-regression-only requires --baseline-json.")
+        return 2
+
+    if args.strict and args.strict_regression_only:
+        if report["regressions"]:
+            print(
+                "Complexity check: " f"{len(report['regressions'])} regression(s) versus baseline."
+            )
+            return 2
+        if report["violations"]:
+            print(
+                "Complexity check: "
+                f"{len(report['violations'])} existing violation(s), no regressions."
+            )
+            return 0
+        print("Complexity check: all thresholds passed.")
+        return 0
 
     if report["violations"]:
         print(f"Complexity check: {len(report['violations'])} violation(s) found.")

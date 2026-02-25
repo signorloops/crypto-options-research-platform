@@ -82,10 +82,23 @@ cd corp
 make complexity-audit
 ```
 
+Regression-only strict mode (fail only on new/worsened violations vs baseline):
+
+```bash
+cd corp
+make complexity-audit-regression BASELINE_COMPLEXITY_JSON=artifacts/complexity-baseline.json
+```
+
 Outputs:
 
 - `artifacts/complexity-governance-report.md`
 - `artifacts/complexity-governance-report.json`
+
+Baseline file:
+
+- Reuse any historical `complexity-governance-report.json` as `--baseline-json`.
+- `--strict-regression-only` keeps existing debt visible while blocking new or worsened debt.
+- Repository baseline snapshot: [config/complexity_baseline.json](../config/complexity_baseline.json)
 
 ---
 
