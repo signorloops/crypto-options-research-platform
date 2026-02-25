@@ -10,6 +10,13 @@ cd corp
 make weekly-operating-audit
 ```
 
+日回归门禁入口：
+
+```bash
+cd corp
+make daily-regression
+```
+
 说明：该命令默认包含最小回归集（inverse/volatility/hawkes/dashboard）。
 并自动生成收益归因表（spread/adverse/inventory/hedging）。
 并自动生成灰度发布与 24h 观察清单（含 go/hold 建议）。
@@ -23,11 +30,14 @@ make weekly-operating-audit
 
 - `artifacts/weekly-operating-audit.md`
 - `artifacts/weekly-operating-audit.json`
+- `artifacts/daily-regression-gate.md`
+- `artifacts/daily-regression-gate.json`
 - `artifacts/weekly-pnl-attribution.md`
 - `artifacts/weekly-pnl-attribution.json`
 - `artifacts/weekly-canary-checklist.md`
 - `artifacts/weekly-canary-checklist.json`
 - `artifacts/weekly-adr-draft.md`
+- `docs/templates/weekly-replay-template.md`
 
 ---
 
@@ -72,9 +82,10 @@ make weekly-operating-audit
 ## 4. 周三（验证与审计）
 
 1. 运行回测回归与线上/离线一致性检查。  
-2. 生成风险例外（VaR/ES）报告。  
-3. 运行复杂度治理基线（`make complexity-audit`）并确认 CI changed-files lint/type gate 通过。  
-4. 对异常项进行归因与修复计划。  
+2. 运行日回归门禁（`make daily-regression`）。  
+3. 生成风险例外（VaR/ES）报告。  
+4. 运行复杂度治理基线（`make complexity-audit`）并确认 CI changed-files lint/type gate 通过。  
+5. 对异常项进行归因与修复计划。  
 
 完成标记：
 - [ ] 一致性检查完成  

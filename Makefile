@@ -1,4 +1,4 @@
-.PHONY: help install install-dev test test-unit test-integration test-cov lint lint-fix format format-check type-check quality complexity-audit weekly-operating-audit weekly-pnl-attribution weekly-canary-checklist weekly-adr-draft clean docs
+.PHONY: help install install-dev test test-unit test-integration test-cov lint lint-fix format format-check type-check quality complexity-audit daily-regression weekly-operating-audit weekly-pnl-attribution weekly-canary-checklist weekly-adr-draft clean docs
 
 # Detect Python interpreter with project minimum version (3.9+).
 PYTHON_CANDIDATES := ./venv/bin/python ./.venv/bin/python ./env/bin/python python3.13 python3.12 python3.11 python3.10 python3.9 python3 python
@@ -42,6 +42,7 @@ help:
 	@echo "  type-check       Run type checking (mypy)"
 	@echo "  quality          Run format-check + lint + type-check"
 	@echo "  complexity-audit Run strict complexity governance checks"
+	@echo "  daily-regression Run daily regression gate report"
 	@echo "  weekly-operating-audit Generate weekly KPI and risk exception report"
 	@echo "  weekly-pnl-attribution Generate weekly PnL attribution report"
 	@echo "  weekly-canary-checklist Generate weekly canary rollout checklist"
@@ -91,6 +92,13 @@ complexity-audit:
 		--config config/complexity_budget.json \
 		--report-md artifacts/complexity-governance-report.md \
 		--report-json artifacts/complexity-governance-report.json \
+		--strict
+
+daily-regression:
+	$(PYTHON) scripts/governance/daily_regression_gate.py \
+		--cmd "$(PYTHON) -m pytest -q tests/test_pricing_inverse.py tests/test_volatility.py tests/test_hawkes_comparison.py tests/test_research_dashboard.py" \
+		--output-md artifacts/daily-regression-gate.md \
+		--output-json artifacts/daily-regression-gate.json \
 		--strict
 
 weekly-operating-audit:

@@ -1,0 +1,71 @@
+name: Daily Regression Gate
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * *" # Daily 02:00 UTC
+  pull_request:
+    paths:
+      - "core/**/*.py"
+      - "data/**/*.py"
+      - "research/**/*.py"
+      - "strategies/**/*.py"
+      - "execution/**/*.py"
+      - "scripts/governance/daily_regression_gate.py"
+      - ".github/workflows/daily-regression.yml"
+  push:
+    paths:
+      - "core/**/*.py"
+      - "data/**/*.py"
+      - "research/**/*.py"
+      - "strategies/**/*.py"
+      - "execution/**/*.py"
+      - "scripts/governance/daily_regression_gate.py"
+      - ".github/workflows/daily-regression.yml"
+
+jobs:
+  daily-regression-gate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run daily regression gate (strict)
+        run: |
+          python scripts/governance/daily_regression_gate.py \
+            --cmd "python -m pytest -q tests/test_pricing_inverse.py tests/test_volatility.py tests/test_hawkes_comparison.py tests/test_research_dashboard.py" \
+            --output-md artifacts/daily-regression-gate.md \
+            --output-json artifacts/daily-regression-gate.json \
+            --strict
+
+      - name: Publish report to job summary
+        if: always()
+        run: |
+          if [ -f artifacts/daily-regression-gate.md ]; then
+            cat artifacts/daily-regression-gate.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Daily regression report not generated." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-regression-gate-report
+          path: |
+            artifacts/daily-regression-gate.md
+            artifacts/daily-regression-gate.json
