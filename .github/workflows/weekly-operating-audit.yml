@@ -36,7 +36,19 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.lock
+          python -m pip install \
+            pytest \
+            numpy \
+            pandas \
+            scipy \
+            matplotlib \
+            scikit-learn \
+            fastapi \
+            starlette \
+            httpx \
+            plotly \
+            pydantic \
+            pydantic-settings
 
       - name: Run weekly operating audit (strict)
         run: |
