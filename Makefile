@@ -96,7 +96,7 @@ weekly-operating-audit:
 		--thresholds config/weekly_operating_thresholds.json \
 		--output-md artifacts/weekly-operating-audit.md \
 		--output-json artifacts/weekly-operating-audit.json \
-		--regression-cmd "$(PYTHON) -m pytest -q tests/test_pricing_inverse.py tests/test_volatility.py tests/test_hawkes_comparison.py tests/test_research_dashboard.py" \
+		--regression-cmd "$(PYTHON) -m pytest -q --noconftest tests/test_pricing_inverse.py tests/test_volatility.py tests/test_hawkes_comparison.py tests/test_research_dashboard.py" \
 		--strict
 	$(PYTHON) scripts/governance/weekly_adr_draft.py \
 		--audit-json artifacts/weekly-operating-audit.json \
