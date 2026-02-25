@@ -1,8 +1,9 @@
 """
 Base strategy interface for market making and other trading strategies.
 """
+
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 import pandas as pd
 
@@ -71,47 +72,3 @@ class MarketMakingStrategy(ABC):
     def reset(self) -> None:
         """Reset strategy state for new episode/backtest."""
         pass
-
-
-class StrategyComparison:
-    """
-    Utility class for comparing multiple strategies on same data.
-    """
-
-    def __init__(self, strategies: List[MarketMakingStrategy]):
-        self.strategies = strategies
-        self.results: Dict[str, Dict] = {}
-
-    def run_comparison(self, market_data: pd.DataFrame) -> pd.DataFrame:
-        """
-        Run all strategies on same data and compare performance.
-
-        Args:
-            market_data: Historical market data for backtest
-
-        Returns:
-            DataFrame with performance metrics for each strategy
-        """
-        from research.backtest.engine import BacktestEngine
-
-        results = []
-        for strategy in self.strategies:
-            # Reset strategy
-            strategy.reset()
-
-            # Run backtest
-            engine = BacktestEngine(strategy)
-            result = engine.run(market_data)
-
-            results.append({
-                "strategy": strategy.name,
-                "total_pnl": result.total_pnl,
-                "sharpe_ratio": result.sharpe_ratio,
-                "max_drawdown": result.max_drawdown,
-                "trade_count": result.trade_count,
-                "avg_trade_pnl": result.avg_trade_pnl,
-                "inventory_cost": result.inventory_cost,
-                "adverse_selection_cost": result.adverse_selection_cost
-            })
-
-        return pd.DataFrame(results)
