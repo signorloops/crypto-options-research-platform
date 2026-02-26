@@ -12,12 +12,22 @@ make weekly-operating-audit
 
 说明：该命令默认包含最小回归集（inverse/volatility/hawkes/dashboard）。
 并自动生成近 7 天变更记录与回滚基线 tag（如存在）。
+并自动串联生成 canary、收益归因、决策日志与人工签字包。
 
 输出文件：
 
 - `artifacts/weekly-operating-audit.md`
 - `artifacts/weekly-operating-audit.json`
+- `artifacts/weekly-pnl-attribution.md`
+- `artifacts/weekly-pnl-attribution.json`
+- `artifacts/weekly-canary-checklist.md`
+- `artifacts/weekly-canary-checklist.json`
 - `artifacts/weekly-adr-draft.md`
+- `artifacts/weekly-decision-log.md`
+- `artifacts/weekly-decision-log.json`
+- `artifacts/weekly-signoff-pack.md`
+- `artifacts/weekly-signoff-pack.json`
+- `artifacts/weekly-manual-status.json`（首次运行自动生成模板）
 
 ---
 

@@ -1,4 +1,4 @@
-"""Shared runtime loop for container service entrypoints."""
+"""Shared runtime loop and CLI entrypoint for deployment services."""
 
 from __future__ import annotations
 
@@ -11,6 +11,16 @@ from core.health_server import HealthServer, default_checks
 
 
 logger = logging.getLogger(__name__)
+SERVICE_DEFAULTS = {
+    "trading-engine": ("TRADING_ENGINE_PORT", 8080),
+    "risk-monitor": ("RISK_MONITOR_PORT", 8081),
+    "market-data-collector": ("MARKET_DATA_COLLECTOR_PORT", 8082),
+}
+SERVICE_TYPE_TO_NAME = {
+    "trading": "trading-engine",
+    "risk": "risk-monitor",
+    "market_data": "market-data-collector",
+}
 
 
 def _health_port(default_port: int) -> int:
@@ -49,3 +59,20 @@ async def run_service(service_name: str, default_port: int = 8080) -> None:
         await stop_event.wait()
 
     logger.info("%s stopped", service_name)
+
+
+def _resolve_service_name() -> str:
+    if service_name := os.getenv("SERVICE_NAME"):
+        return service_name
+    return SERVICE_TYPE_TO_NAME.get(os.getenv("SERVICE_TYPE", "trading"), "trading-engine")
+
+
+def main() -> None:
+    service_name = _resolve_service_name()
+    env_key, default_port = SERVICE_DEFAULTS.get(service_name, ("HEALTH_PORT", 8080))
+    port = int(os.getenv(env_key, str(default_port)))
+    asyncio.run(run_service(service_name, default_port=port))
+
+
+if __name__ == "__main__":
+    main()

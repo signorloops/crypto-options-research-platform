@@ -26,6 +26,13 @@ venv\Scripts\activate  # Windows
 ### 步骤 3: 安装依赖
 ```bash
 pip install -e ".[dev]"
+# 或（精简档）
+pip install -r requirements.txt
+
+# 如需完整栈（ML + Notebook + 加速）
+pip install -e ".[dev,full]"
+# 或（完整档）
+pip install -r requirements-full.txt
 ```
 
 ### 步骤 4: 配置环境变量

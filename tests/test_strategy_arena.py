@@ -140,3 +140,18 @@ def test_run_tournament_with_mocked_engine(monkeypatch):
     assert len(comparison) == 2
     assert set(comparison["Strategy"]) == {"S1", "S2"}
     assert s1.reset_calls == 1 and s2.reset_calls == 1
+
+
+def test_rolling_sharpe_series_handles_short_and_long_inputs():
+    arena = StrategyArena(_market_data_frame(), initial_capital=100000.0)
+
+    short = pd.Series([100.0, 100.5], index=pd.date_range("2026-01-01", periods=2, freq="1D"))
+    short_roll = arena._rolling_sharpe_series(short, window=5)
+    assert short_roll.empty
+
+    long = pd.Series(
+        [100.0, 101.0, 102.0, 101.5, 103.0, 104.0, 103.8],
+        index=pd.date_range("2026-01-01", periods=7, freq="1D"),
+    )
+    long_roll = arena._rolling_sharpe_series(long, window=3)
+    assert len(long_roll) == len(long)

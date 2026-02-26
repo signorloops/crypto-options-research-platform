@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import subprocess
 from collections.abc import Sequence
 from datetime import datetime, timezone
@@ -16,6 +17,12 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "max_abs_drawdown": 0.25,
     "max_var_breach_rate": 0.05,
     "max_fill_calibration_error": 0.20,
+}
+
+DEFAULT_CONSISTENCY_THRESHOLDS: dict[str, float] = {
+    "max_abs_pnl_diff": 20000.0,
+    "max_abs_sharpe_diff": 1500.0,
+    "max_abs_max_drawdown_diff": 0.20,
 }
 
 MANUAL_CHECKLIST_ITEMS: list[str] = [
@@ -134,7 +141,7 @@ def _extract_strategy_rows(raw: dict[str, Any], source: Path) -> list[dict[str, 
 
 
 def _discover_input_files(results_dir: Path, pattern: str) -> list[Path]:
-    candidates = sorted(results_dir.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
+    candidates = sorted(results_dir.rglob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
     return [p for p in candidates if p.is_file()]
 
 
@@ -166,6 +173,21 @@ def _load_thresholds(path: Path) -> dict[str, float]:
             value = _to_float(raw[key])
             if value is None:
                 raise ValueError(f"Invalid threshold value for '{key}'")
+            thresholds[key] = float(value)
+    return thresholds
+
+
+def _load_consistency_thresholds(path: Path) -> dict[str, float]:
+    if not path.exists():
+        return dict(DEFAULT_CONSISTENCY_THRESHOLDS)
+
+    raw = _load_json(path)
+    thresholds = dict(DEFAULT_CONSISTENCY_THRESHOLDS)
+    for key in DEFAULT_CONSISTENCY_THRESHOLDS:
+        if key in raw:
+            value = _to_float(raw[key])
+            if value is None:
+                raise ValueError(f"Invalid consistency threshold value for '{key}'")
             thresholds[key] = float(value)
     return thresholds
 
@@ -271,12 +293,19 @@ def _evaluate_rows(
 def _build_report(
     input_files: Sequence[Path],
     thresholds: dict[str, float],
+    consistency_thresholds: dict[str, float] | None = None,
     regression_result: dict[str, Any] | None = None,
     change_log: dict[str, Any] | None = None,
     rollback_marker: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     latest_by_strategy: dict[str, dict[str, Any]] = {}
+    previous_by_strategy: dict[str, dict[str, Any]] = {}
     parse_errors: list[dict[str, str]] = []
+    consistency_thresholds_final = (
+        dict(consistency_thresholds)
+        if consistency_thresholds is not None
+        else dict(DEFAULT_CONSISTENCY_THRESHOLDS)
+    )
     files_sorted = sorted(input_files, key=lambda p: p.stat().st_mtime, reverse=True)
 
     for path in files_sorted:
@@ -291,6 +320,8 @@ def _build_report(
             strategy = row["strategy"]
             if strategy not in latest_by_strategy:
                 latest_by_strategy[strategy] = row
+            elif strategy not in previous_by_strategy:
+                previous_by_strategy[strategy] = row
 
     snapshot_rows = _evaluate_rows(
         sorted(latest_by_strategy.values(), key=lambda r: r["strategy"]), thresholds
@@ -305,6 +336,66 @@ def _build_report(
         if row["status"] == "FAIL"
     ]
 
+    consistency_checks: list[dict[str, Any]] = []
+    for strategy in sorted(set(latest_by_strategy).intersection(previous_by_strategy)):
+        latest = latest_by_strategy[strategy]
+        previous = previous_by_strategy[strategy]
+
+        latest_pnl = latest.get("pnl")
+        prev_pnl = previous.get("pnl")
+        latest_sharpe = latest.get("sharpe")
+        prev_sharpe = previous.get("sharpe")
+        latest_dd = latest.get("max_drawdown_abs")
+        prev_dd = previous.get("max_drawdown_abs")
+
+        abs_pnl_diff = (
+            abs(float(latest_pnl) - float(prev_pnl))
+            if latest_pnl is not None and prev_pnl is not None
+            else None
+        )
+        abs_sharpe_diff = (
+            abs(float(latest_sharpe) - float(prev_sharpe))
+            if latest_sharpe is not None and prev_sharpe is not None
+            else None
+        )
+        abs_max_drawdown_diff = (
+            abs(float(latest_dd) - float(prev_dd))
+            if latest_dd is not None and prev_dd is not None
+            else None
+        )
+
+        breaches: list[str] = []
+        if abs_pnl_diff is not None and abs_pnl_diff > consistency_thresholds_final["max_abs_pnl_diff"]:
+            breaches.append(f"abs_pnl_diff>{consistency_thresholds_final['max_abs_pnl_diff']}")
+        if (
+            abs_sharpe_diff is not None
+            and abs_sharpe_diff > consistency_thresholds_final["max_abs_sharpe_diff"]
+        ):
+            breaches.append(f"abs_sharpe_diff>{consistency_thresholds_final['max_abs_sharpe_diff']}")
+        if (
+            abs_max_drawdown_diff is not None
+            and abs_max_drawdown_diff > consistency_thresholds_final["max_abs_max_drawdown_diff"]
+        ):
+            breaches.append(
+                f"abs_max_drawdown_diff>{consistency_thresholds_final['max_abs_max_drawdown_diff']}"
+            )
+
+        consistency_checks.append(
+            {
+                "strategy": strategy,
+                "latest_source_file": latest.get("source_file", ""),
+                "previous_source_file": previous.get("source_file", ""),
+                "abs_pnl_diff": abs_pnl_diff,
+                "abs_sharpe_diff": abs_sharpe_diff,
+                "abs_max_drawdown_diff": abs_max_drawdown_diff,
+                "status": "FAIL" if breaches else "PASS",
+                "breached_rules": "; ".join(breaches),
+            }
+        )
+
+    consistency_exceptions = [row for row in consistency_checks if row["status"] == "FAIL"]
+    consistency_baseline_available = len(consistency_checks) > 0
+
     checklist = {
         "kpi_snapshot_updated": bool(snapshot_rows),
         "experiment_ids_assigned": bool(snapshot_rows)
@@ -317,7 +408,11 @@ def _build_report(
             if regression_result is not None and regression_result.get("executed")
             else None
         ),
-        "consistency_check_completed": len(parse_errors) == 0,
+        "consistency_check_completed": (
+            len(parse_errors) == 0
+            and consistency_baseline_available
+            and len(consistency_exceptions) == 0
+        ),
         "risk_exception_report_output": True,
         "anomalies_attributed": len(risk_exceptions) == 0,
     }
@@ -343,13 +438,18 @@ def _build_report(
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "inputs": [str(p) for p in files_sorted],
         "thresholds": thresholds,
+        "consistency_thresholds": consistency_thresholds_final,
         "summary": {
             "strategies": len(snapshot_rows),
             "exceptions": len(risk_exceptions),
+            "consistency_pairs": len(consistency_checks),
+            "consistency_exceptions": len(consistency_exceptions),
             "parse_errors": len(parse_errors),
         },
         "kpi_snapshot": snapshot_rows,
         "risk_exceptions": risk_exceptions,
+        "consistency_checks": consistency_checks,
+        "consistency_exceptions": consistency_exceptions,
         "checklist": checklist,
         "manual_checklist_items": MANUAL_CHECKLIST_ITEMS,
         "incomplete_tasks": incomplete_tasks,
@@ -386,6 +486,8 @@ def _to_markdown(report: dict[str, Any]) -> str:
     lines.append(f"- Input files: `{len(report['inputs'])}`")
     lines.append(f"- Strategies in snapshot: `{report['summary']['strategies']}`")
     lines.append(f"- Risk exceptions: `{report['summary']['exceptions']}`")
+    lines.append(f"- Consistency pairs: `{report['summary']['consistency_pairs']}`")
+    lines.append(f"- Consistency exceptions: `{report['summary']['consistency_exceptions']}`")
     lines.append("")
     lines.append("## Input Files")
     lines.append("")
@@ -435,6 +537,38 @@ def _to_markdown(report: dict[str, Any]) -> str:
         _format_table(
             report["risk_exceptions"],
             ["strategy", "source_file", "breached_rules"],
+        )
+    )
+    lines.append("")
+    lines.append("## Consistency Checks")
+    lines.append("")
+    consistency_rows = []
+    for row in report["consistency_checks"]:
+        consistency_rows.append(
+            {
+                "strategy": row["strategy"],
+                "latest_source_file": row["latest_source_file"],
+                "previous_source_file": row["previous_source_file"],
+                "abs_pnl_diff": _fmt(row.get("abs_pnl_diff")),
+                "abs_sharpe_diff": _fmt(row.get("abs_sharpe_diff"), digits=4),
+                "abs_max_drawdown_diff": _fmt(row.get("abs_max_drawdown_diff"), digits=4),
+                "status": row["status"],
+                "breached_rules": row["breached_rules"],
+            }
+        )
+    lines.append(
+        _format_table(
+            consistency_rows,
+            [
+                "strategy",
+                "latest_source_file",
+                "previous_source_file",
+                "abs_pnl_diff",
+                "abs_sharpe_diff",
+                "abs_max_drawdown_diff",
+                "status",
+                "breached_rules",
+            ],
         )
     )
     lines.append("")
@@ -527,6 +661,11 @@ def main() -> int:
         help="Path to thresholds JSON. Uses defaults when file is missing.",
     )
     parser.add_argument(
+        "--consistency-thresholds",
+        default="config/consistency_thresholds.json",
+        help="Path to consistency thresholds JSON. Uses defaults when file is missing.",
+    )
+    parser.add_argument(
         "--output-md",
         default="artifacts/weekly-operating-audit.md",
         help="Output markdown report path.",
@@ -557,6 +696,8 @@ def main() -> int:
     repo_root = Path(".").resolve()
     thresholds_path = (repo_root / args.thresholds).resolve()
     thresholds = _load_thresholds(thresholds_path)
+    consistency_thresholds_path = (repo_root / args.consistency_thresholds).resolve()
+    consistency_thresholds = _load_consistency_thresholds(consistency_thresholds_path)
 
     if args.inputs:
         input_files = [Path(p).resolve() for p in args.inputs]
@@ -570,10 +711,12 @@ def main() -> int:
 
     regression_result: dict[str, Any] | None = None
     if args.regression_cmd.strip():
+        regression_cmd = shlex.split(args.regression_cmd)
+        if not regression_cmd:
+            raise ValueError("Regression command is empty after parsing")
         completed = subprocess.run(
-            args.regression_cmd,
+            regression_cmd,
             cwd=repo_root,
-            shell=True,
             text=True,
             capture_output=True,
         )
@@ -593,6 +736,7 @@ def main() -> int:
     report = _build_report(
         input_files,
         thresholds,
+        consistency_thresholds=consistency_thresholds,
         regression_result=regression_result,
         change_log=change_log,
         rollback_marker=rollback_marker,
@@ -618,6 +762,13 @@ def main() -> int:
             return 2
     if report["summary"]["strategies"] == 0:
         print("Weekly operating audit: no strategy rows extracted.")
+        had_issue = True
+        if args.strict:
+            return 2
+    if report["summary"]["consistency_exceptions"] > 0:
+        print(
+            f"Weekly operating audit: {report['summary']['consistency_exceptions']} consistency exception(s)."
+        )
         had_issue = True
         if args.strict:
             return 2

@@ -14,6 +14,12 @@ cd <PROJECT_ROOT>/corp
 # 激活虚拟环境
 source venv/bin/activate
 
+# 安装精简开发依赖（推荐）
+pip install -e ".[dev]"
+
+# 如需完整栈（ML + Notebook + 加速）
+# pip install -e ".[dev,full]"
+
 # 验证安装
 python -c "import pandas, numpy; print('✅ 依赖就绪')"
 pytest tests/test_hawkes_comparison.py::TestHawkesMetricsCollector -v

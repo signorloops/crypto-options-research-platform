@@ -5,23 +5,7 @@ on:
   schedule:
     - cron: "0 2 * * *" # Daily 02:00 UTC
   pull_request:
-    paths:
-      - "core/**/*.py"
-      - "data/**/*.py"
-      - "research/**/*.py"
-      - "strategies/**/*.py"
-      - "execution/**/*.py"
-      - "scripts/governance/daily_regression_gate.py"
-      - ".github/workflows/daily-regression.yml"
   push:
-    paths:
-      - "core/**/*.py"
-      - "data/**/*.py"
-      - "research/**/*.py"
-      - "strategies/**/*.py"
-      - "execution/**/*.py"
-      - "scripts/governance/daily_regression_gate.py"
-      - ".github/workflows/daily-regression.yml"
 
 jobs:
   daily-regression-gate:

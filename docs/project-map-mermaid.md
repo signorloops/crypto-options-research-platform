@@ -101,7 +101,7 @@ flowchart LR
     strategy_as --> backtest["backtest.engine / arena"]
     strategy_hawkes --> backtest
     strategy_int --> backtest
-    risk --> execution["execution.risk_monitor / trading_engine"]
+    risk --> execution["execution.service_runner"]
 ```
 
 ---
@@ -139,4 +139,3 @@ flowchart LR
     S4 --> S5["Step 5<br/>risk.var + circuit_breaker + regime_detector"]
     S5 --> S6["Step 6<br/>tests + notebooks + dashboard"]
 ```
-

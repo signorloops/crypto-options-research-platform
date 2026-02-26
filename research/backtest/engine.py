@@ -1,7 +1,4 @@
-"""
-Event-driven backtest engine for market making strategies.
-Simulates realistic market conditions including latency, fill probability, and adverse selection.
-"""
+"""Event-driven backtest engine for coin-margined market making strategies."""
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -143,16 +140,7 @@ PnL Breakdown:
 
 
 class BacktestEngine:
-    """
-    Event-driven backtest engine for market making strategies (coin-margined).
-
-    Simulates:
-    - Real-time quote updates
-    - Fill probability based on queue position
-    - Inventory tracking and PnL calculation (in crypto units)
-    - Adverse selection effects
-    - Coin-margined specific: PnL calculated in cryptocurrency units
-    """
+    """Event-driven backtest engine for coin-margined strategies."""
 
     def __init__(
         self,
@@ -172,21 +160,18 @@ class BacktestEngine:
         self.random_seed = random_seed
         self.transaction_cost_bps = transaction_cost_bps
 
-        # State tracking - coin-margined: track crypto balance directly
         self.crypto_balance = initial_crypto_balance
         self.positions: Dict[str, Position] = {}
         self.trades: List[Fill] = []
         self.quotes: List[QuoteAction] = []
 
-        # Metrics tracking (PnL in crypto units)
         self._pnl_history: List[tuple] = []
         self._inventory_history: List[tuple] = []
         self._crypto_balance_history: List[tuple] = []
 
-        # Sampling configuration to limit memory usage
-        self._history_sampling_interval: int = 10  # Record every Nth tick
-        self._max_history_points: int = 1_000_000  # Limit to prevent memory exhaustion
-        self._tick_counter: int = 0  # Counter for sampling
+        self._history_sampling_interval: int = 10
+        self._max_history_points: int = 1_000_000
+        self._tick_counter: int = 0
 
     def _reset_run_state(self) -> None:
         """Reset runtime state before each backtest run."""
@@ -200,7 +185,6 @@ class BacktestEngine:
         self._tick_counter = 0
         self.strategy.reset()
 
-        # Reset isolated RNG for reproducible runs without touching global state.
         self.rng = np.random.default_rng(self.random_seed)
         if self.fill_simulator is not None:
             self.fill_simulator.rng = self.rng
@@ -264,20 +248,9 @@ class BacktestEngine:
         price_column: str = "price",
         timestamp_column: str = "timestamp",
     ) -> BacktestResult:
-        """
-        Run backtest on historical market data.
-
-        Args:
-            market_data: DataFrame with market data
-            price_column: Column name for price data
-            timestamp_column: Column name for timestamps
-
-        Returns:
-            BacktestResult with performance metrics
-        """
+        """Run backtest on historical market data."""
         self._reset_run_state()
 
-        # Pre-extract arrays to avoid per-row dict allocation (PERF-6)
         prices = market_data[price_column].to_numpy(dtype=np.float64)
         timestamps_arr = market_data[timestamp_column].to_numpy()
         n_events = len(prices)
@@ -285,7 +258,6 @@ class BacktestEngine:
         if n_events == 0:
             return self._compute_result(current_price=0.0)
 
-        # Pre-extract event volumes to avoid DataFrame -> list[dict] memory blow-up.
         event_volumes = self._prepare_event_volumes(market_data)
 
         current_ob = self._create_dummy_order_book(prices[0])
@@ -353,197 +325,26 @@ class BacktestEngine:
             asks=[OrderBookLevel(price=new_price + spread / 2, size=1.0)],
         )
 
-    def _apply_slippage(
-        self, quote_price: float, trade_size: float, order_book: OrderBook, side: OrderSide
-    ) -> float:
-        """Apply realistic slippage model based on order book depth.
-
-        Args:
-            quote_price: Original quote price
-            trade_size: Size of the trade
-            order_book: Current order book
-            side: Side of the fill (BUY or SELL)
-
-        Returns:
-            Slipped price
-        """
-        # Get relevant order book side
-        if side == OrderSide.BUY:
-            levels = order_book.asks
-        else:
-            levels = order_book.bids
-
-        if not levels:
-            return quote_price
-
-        # Calculate VWAP to fill the trade size
-        remaining = trade_size
-        total_cost = 0.0
-
-        for level in levels:
-            if remaining <= 0:
-                break
-            fill_at_level = min(remaining, level.size)
-            total_cost += fill_at_level * level.price
-            remaining -= fill_at_level
-
-        # If we couldn't fill full size at available levels, add penalty
-        if remaining > 0:
-            # Use last level price plus penalty for remaining
-            last_price = levels[-1].price
-            total_cost += remaining * (last_price * 1.001)  # 10 bps penalty
-            filled_size = trade_size
-        else:
-            filled_size = trade_size
-
-        vwap = total_cost / filled_size if filled_size > 0 else quote_price
-
-        # Add random slippage component (1 bps std)
-        random_slippage = self.rng.normal(0, quote_price * 0.0001)
-
-        return vwap + random_slippage
-
-    def _calculate_fill_probability(
-        self, quote: QuoteAction, order_book: OrderBook, side: OrderSide
-    ) -> float:
-        """Calculate probability of fill based on quote position in order book.
-
-        Args:
-            quote: Our quote
-            order_book: Current order book
-            side: Side of the quote
-
-        Returns:
-            Probability of fill (0-1)
-        """
-        if side == OrderSide.BUY:
-            our_price = quote.bid_price
-            our_size = quote.bid_size
-            levels = order_book.bids
-        else:
-            our_price = quote.ask_price
-            our_size = quote.ask_size
-            levels = order_book.asks
-
-        if not levels or our_size <= 0:
-            return 0.0
-
-        # Calculate queue position (volume ahead of us)
-        volume_ahead = 0.0
-        for level in levels:
-            if side == OrderSide.BUY:
-                if level.price > our_price:
-                    volume_ahead += level.size
-                elif level.price == our_price:
-                    # Assume random queue position at same price
-                    volume_ahead += level.size * 0.5
-                    break
-            else:  # SELL
-                if level.price < our_price:
-                    volume_ahead += level.size
-                elif level.price == our_price:
-                    volume_ahead += level.size * 0.5
-                    break
-
-        # Fill probability decreases with queue depth
-        # Base probability for being at front of queue
-        base_prob = 0.6
-
-        # Queue penalty: longer queue = lower probability
-        queue_penalty = min(0.4, volume_ahead / (volume_ahead + our_size))
-
-        # Size penalty: larger orders less likely to fully fill
-        size_penalty = min(0.2, our_size / 10.0)  # Assuming avg trade size ~1
-
-        return max(0.05, base_prob - queue_penalty - size_penalty)
-
-    def _simulate_fill_simple(
-        self, quote: QuoteAction, current_price: float, price_change: float, order_book: OrderBook
-    ) -> Optional[Fill]:
-        """Enhanced fill simulation with slippage and realistic fill probability."""
-        # Determine which side might get filled based on price movement
-        if price_change > current_price * 0.0005:  # 5 bps move up
-            side = OrderSide.SELL
-            if quote.ask_size <= 0:
-                return None
-        elif price_change < -current_price * 0.0005:  # 5 bps move down
-            side = OrderSide.BUY
-            if quote.bid_size <= 0:
-                return None
-        else:
-            # Small price move, check both sides with lower probability
-            side = None
-
-        if side is None:
-            # Small moves may still fill with lower probability
-            if abs(price_change) > current_price * 0.0002:  # 2 bps threshold
-                # Random side with 10% chance
-                if self.rng.random() < 0.1:
-                    side = OrderSide.SELL if self.rng.random() < 0.5 else OrderSide.BUY
-                else:
-                    return None
-            else:
-                return None
-
-        # Calculate fill probability
-        fill_prob = self._calculate_fill_probability(quote, order_book, side)
-
-        if self.rng.random() > fill_prob:
-            return None
-
-        # Determine fill size (may be partial for large orders)
-        if side == OrderSide.SELL:
-            base_size = min(quote.ask_size, 0.5)
-        else:
-            base_size = min(quote.bid_size, 0.5)
-
-        # Partial fill probability
-        if base_size > 0.3 and self.rng.random() < 0.3:
-            fill_size = base_size * self.rng.uniform(0.3, 0.7)
-        else:
-            fill_size = base_size
-
-        # Apply slippage
-        quote_price = quote.ask_price if side == OrderSide.SELL else quote.bid_price
-        fill_price = self._apply_slippage(quote_price, fill_size, order_book, side)
-
-        return Fill(
-            timestamp=datetime.now(timezone.utc),
-            instrument="SYNTHETIC",
-            side=side,
-            price=fill_price,
-            size=fill_size,
-        )
-
-    def _generate_synthetic_trades(
-        self, market_state: MarketState, volume: float = 1.0
-    ) -> List[Trade]:
-        """Generate synthetic trades based on current market activity (no look-ahead).
-
-        Uses current-event volume only (no future leakage).
-        """
+    def _generate_synthetic_trades(self, market_state: MarketState, volume: float = 1.0) -> List[Trade]:
+        """Generate synthetic trades from current event activity."""
         trades = []
         timestamp = market_state.timestamp
 
-        # Generate 0-3 trades based on volume
         num_trades = min(3, max(0, int(volume * self.rng.random())))
 
         for _ in range(num_trades):
-            # Random trade side (slight bias based on order book imbalance)
             imbalance = (
                 market_state.order_book.imbalance()
                 if hasattr(market_state.order_book, "imbalance")
                 else 0
             )
-            side_bias = 0.5 + imbalance * 0.2  # Small bias towards buy if bids are heavier
+            side_bias = 0.5 + imbalance * 0.2
             side = OrderSide.BUY if self.rng.random() < side_bias else OrderSide.SELL
 
-            # Trade price around mid with some randomness
             mid = market_state.spot_price
-            price_offset = self.rng.normal(0, mid * 0.0001)  # 1 bps std
+            price_offset = self.rng.normal(0, mid * 0.0001)
             trade_price = mid + price_offset
 
-            # Trade size proportional to volume
             trade_size = volume * self.rng.random() * 0.3
 
             trades.append(
@@ -559,82 +360,47 @@ class BacktestEngine:
         return trades
 
     def _process_fill(self, fill: Fill, current_position: Position, current_price: float) -> None:
-        """Process a fill and update portfolio (coin-margined).
-
-        Note: This tracks premium cash flows for market making strategies.
-        For complete PnL tracking including option position valuation,
-        additional Greeks-based mark-to-market should be implemented.
-
-        Args:
-            fill: The executed fill
-            current_position: Position before the fill
-            current_price: Current underlying price for crypto conversion
-        """
+        """Process a fill and update position plus crypto balance."""
         self.trades.append(fill)
 
-        # Update position
         new_position = current_position.apply_fill(fill)
         self.positions[fill.instrument] = new_position
 
-        # Coin-margined premium calculation:
-        # For coin-margined options, premium is paid/received in cryptocurrency
-        # If fill.price is in USD: premium_crypto = (option_price_usd * size) / underlying_price_usd
-        # If fill.price is already in crypto: premium_crypto = option_price_crypto * size
-        # Assuming fill.price is in USD and size is in USD notional
         premium_crypto = (fill.price * fill.size) / current_price
 
         if fill.side == OrderSide.BUY:
-            # Buying option: pay premium in crypto
             self.crypto_balance -= premium_crypto
         else:
-            # Selling option: receive premium in crypto
             self.crypto_balance += premium_crypto
 
     def _record_state(self, timestamp: datetime, current_price: float) -> None:
-        """Record current state for analysis with sampling to limit memory usage."""
+        """Record sampled state for analysis."""
         self._tick_counter += 1
 
-        # Only record every Nth tick to reduce memory usage
-        # But always record the first tick to ensure we have at least one data point
         if self._tick_counter % self._history_sampling_interval != 0 and self._tick_counter > 1:
             return
 
         position = self.positions.get("SYNTHETIC", Position("SYNTHETIC", 0, 0))
         self._inventory_history.append((timestamp, position.size))
 
-        # Calculate PnL in crypto units (coin-margined)
-        # For coin-margined: PnL = sum of (1/entry_price - 1/exit_price) * size for each trade
         crypto_pnl = self._calculate_crypto_pnl(current_price)
         self._pnl_history.append((timestamp, crypto_pnl))
         self._crypto_balance_history.append((timestamp, self.crypto_balance))
 
-        # Limit history size to prevent memory exhaustion
         if len(self._pnl_history) > self._max_history_points:
-            # Keep the most recent data, remove oldest 20%
             remove_count = self._max_history_points // 5
             self._pnl_history = self._pnl_history[remove_count:]
             self._inventory_history = self._inventory_history[remove_count:]
             self._crypto_balance_history = self._crypto_balance_history[remove_count:]
 
     def _calculate_crypto_pnl(self, current_price: Optional[float] = None) -> float:
-        """Calculate PnL in cryptocurrency units (coin-margined formula).
-
-        For coin-margined options:
-        - Unrealized PnL = position_size * (1/entry_price - 1/current_price)
-        - Plus realized PnL from premium cashflows (tracked in crypto_balance)
-
-        Args:
-            current_price: Current market price. If None, only realized PnL is returned.
-        """
-        # Start with realized PnL from cash balance
+        """Calculate realized + unrealized coin PnL."""
         realized_pnl = self.crypto_balance - self.initial_crypto_balance
 
-        # Add unrealized PnL from open positions (if current price available)
         unrealized_pnl = 0.0
         if current_price is not None and current_price > 0:
-            for instrument, position in self.positions.items():
+            for _, position in self.positions.items():
                 if position.size != 0 and position.avg_entry_price > 0:
-                    # Use inverse option PnL formula
                     unrealized_pnl += InverseOptionPricer.calculate_pnl(
                         entry_price=position.avg_entry_price,
                         exit_price=current_price,
@@ -647,9 +413,7 @@ class BacktestEngine:
     def _bootstrap_risk_ci(
         self, returns: pd.Series, n_bootstrap: int = 500, alpha: float = 0.05
     ) -> Tuple[Tuple[float, float], Tuple[float, float]]:
-        """
-        Bootstrap 95% CI for Sharpe and max drawdown.
-        """
+        """Bootstrap confidence intervals for Sharpe and drawdown."""
         if len(returns) < 10:
             return (0.0, 0.0), (0.0, 0.0)
 
@@ -686,12 +450,9 @@ class BacktestEngine:
 
     @staticmethod
     def _deflated_sharpe_ratio(sharpe: float, n_obs: int, n_trials: int = 1) -> float:
-        """
-        Simplified Deflated Sharpe Ratio approximation.
-        """
+        """Simplified deflated Sharpe ratio approximation."""
         if n_obs < 5:
             return 0.0
-        # Expected max SR from multiple testing under Gaussian null.
         expected_max_sr = norm.ppf(1.0 - 1.0 / max(n_trials, 2)) / np.sqrt(max(n_obs - 1, 1))
         denom = max(1e-12, np.sqrt(1.0 / max(n_obs - 1, 1)))
         z = (sharpe - expected_max_sr) / denom
@@ -734,9 +495,8 @@ class BacktestEngine:
         inventory_series = _history_to_series(self._inventory_history)
         crypto_balance_series = _history_to_series(self._crypto_balance_history)
 
-        # Calculate metrics (PnL in crypto units)
         total_pnl_crypto = float(pnl_series.iloc[-1]) if len(pnl_series) > 0 else 0.0
-        total_pnl_usd = total_pnl_crypto * current_price  # Convert to USD for reference
+        total_pnl_usd = total_pnl_crypto * current_price
 
         sharpe = self._calculate_sharpe_ratio(pnl_series)
         max_dd = _calculate_max_drawdown(pnl_series)
@@ -758,7 +518,7 @@ class BacktestEngine:
             strategy_name=self.strategy.name,
             total_pnl_crypto=total_pnl_crypto,
             total_pnl_usd=total_pnl_usd,
-            realized_pnl=total_pnl_crypto,  # Simplified
+            realized_pnl=total_pnl_crypto,
             unrealized_pnl=0,
             inventory_pnl=0,
             sharpe_ratio=sharpe,
