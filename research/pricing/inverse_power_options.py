@@ -17,6 +17,19 @@ import numpy as np
 
 
 @dataclass
+class InversePowerQuote:
+    """Input quote container for inverse-power pricing."""
+
+    spot: float
+    strike: float
+    maturity: float
+    rate: float
+    sigma: float
+    option_type: Literal["call", "put"]
+    power: float = 1.0
+
+
+@dataclass
 class InversePowerGreeks:
     """Finite-difference Greeks for inverse-power option."""
 
@@ -121,6 +134,25 @@ class InversePowerOptionPricer:
         st = InversePowerOptionPricer._terminal_prices(S, T, r, sigma, normals)
         payoff = InversePowerOptionPricer._payoff(st, K, power, option_type)
         return float(np.exp(-r * T) * np.mean(payoff))
+
+    @staticmethod
+    def calculate_price_from_quote(
+        quote: InversePowerQuote,
+        n_paths: int = 100_000,
+        seed: int | None = 42,
+    ) -> float:
+        """Price from an InversePowerQuote container."""
+        return InversePowerOptionPricer.calculate_price(
+            S=quote.spot,
+            K=quote.strike,
+            T=quote.maturity,
+            r=quote.rate,
+            sigma=quote.sigma,
+            option_type=quote.option_type,
+            power=quote.power,
+            n_paths=n_paths,
+            seed=seed,
+        )
 
     @staticmethod
     def calculate_price_and_greeks(

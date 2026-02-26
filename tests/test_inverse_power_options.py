@@ -3,7 +3,7 @@
 import numpy as np
 
 from research.pricing.inverse_options import InverseOptionPricer
-from research.pricing.inverse_power_options import InversePowerOptionPricer
+from research.pricing.inverse_power_options import InversePowerOptionPricer, InversePowerQuote
 
 
 def test_price_is_non_negative_and_deterministic():
@@ -91,3 +91,32 @@ def test_price_and_greeks_outputs_finite_values():
     assert np.isfinite(greeks.theta)
     assert np.isfinite(greeks.vega)
     assert np.isfinite(greeks.rho)
+
+
+def test_price_from_quote_matches_direct_call():
+    quote = InversePowerQuote(
+        spot=50000.0,
+        strike=51000.0,
+        maturity=30.0 / 365.0,
+        rate=0.02,
+        sigma=0.5,
+        option_type="call",
+        power=1.3,
+    )
+    from_quote = InversePowerOptionPricer.calculate_price_from_quote(
+        quote,
+        n_paths=20000,
+        seed=17,
+    )
+    direct = InversePowerOptionPricer.calculate_price(
+        S=quote.spot,
+        K=quote.strike,
+        T=quote.maturity,
+        r=quote.rate,
+        sigma=quote.sigma,
+        option_type=quote.option_type,
+        power=quote.power,
+        n_paths=20000,
+        seed=17,
+    )
+    assert np.isclose(from_quote, direct)
