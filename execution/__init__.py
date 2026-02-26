@@ -1,10 +1,12 @@
 """Runtime entrypoints for deployment services."""
 
 from __future__ import annotations
+
 import asyncio
 import os
 import sys
 from types import ModuleType
+
 from execution.service_runner import run_service
 
 
