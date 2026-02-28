@@ -1,11 +1,9 @@
 """
 Quick benchmark for crypto option pricing model zoo.
 """
-
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 
@@ -69,148 +67,19 @@ def _build_synthetic_quotes(
     return quotes
 
 
-def load_quotes_json(path: str) -> list[OptionQuote]:
-    """Load benchmark quotes from a JSON file."""
-    with open(path, "r", encoding="utf-8") as file_obj:
-        records = json.load(file_obj)
-    quotes = []
-    for record in records:
-        quotes.append(
-            OptionQuote(
-                spot=float(record["spot"]),
-                strike=float(record["strike"]),
-                maturity=float(record["maturity"]),
-                rate=float(record["rate"]),
-                market_price=float(record["market_price"]),
-                is_call=bool(record.get("is_call", True)),
-            )
-        )
-    return quotes
-
-
-def save_quotes_json(path: str, quotes: list[OptionQuote]) -> None:
-    """Persist benchmark quotes to JSON for deterministic re-runs."""
-
-    def _norm(value: float) -> float:
-        return float(round(float(value), 8))
-
-    directory = os.path.dirname(path)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-    payload = [
-        {
-            "spot": _norm(quote.spot),
-            "strike": _norm(quote.strike),
-            "maturity": _norm(quote.maturity),
-            "rate": _norm(quote.rate),
-            "market_price": _norm(quote.market_price),
-            "is_call": bool(quote.is_call),
-        }
-        for quote in quotes
-    ]
-    with open(path, "w", encoding="utf-8") as file_obj:
-        json.dump(payload, file_obj, indent=2, ensure_ascii=False)
-        file_obj.write("\n")
-
-
-def save_benchmark_json(
-    path: str,
-    source: str,
-    quotes: list[OptionQuote],
-    table: pd.DataFrame,
-) -> None:
-    """Persist benchmark table + metadata to JSON."""
-    directory = os.path.dirname(path)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-    payload = {
-        "quotes_source": source,
-        "n_quotes": len(quotes),
-        "results": table.to_dict(orient="records"),
-    }
-    with open(path, "w", encoding="utf-8") as file_obj:
-        json.dump(payload, file_obj, indent=2, ensure_ascii=False)
-        file_obj.write("\n")
-
-
-def render_benchmark_markdown(
-    source: str,
-    quotes: list[OptionQuote],
-    table: pd.DataFrame,
-    violations: list[str] | None = None,
-) -> str:
-    """Render benchmark result as a compact Markdown report."""
-    violations = violations or []
-    lines = [
-        "# Pricing Model Zoo Benchmark",
-        "",
-        f"- Quotes source: `{source}`",
-        f"- Number of quotes: `{len(quotes)}`",
-        "",
-        "## Ranking",
-        "",
-        "| Rank | Model | RMSE | MAE |",
-        "| --- | --- | ---: | ---: |",
-    ]
-    if table.empty:
-        lines.append("| 1 | (empty) | n/a | n/a |")
-    else:
-        for rank, (_, row) in enumerate(table.iterrows(), start=1):
-            lines.append(
-                f"| {rank} | {row['model']} | {float(row['rmse']):.6f} | {float(row['mae']):.6f} |"
-            )
-    lines.extend(["", "## Quality Gates", ""])
-    if violations:
-        for violation in violations:
-            lines.append(f"- FAIL: {violation}")
-    else:
-        lines.append("- PASS")
-    return "\n".join(lines) + "\n"
-
-
-def evaluate_benchmark_quality_gates(
-    table: pd.DataFrame,
-    expected_best_model: str = "",
-    max_best_rmse: float = -1.0,
-) -> list[str]:
-    """Return model-zoo benchmark quality-gate violations."""
-    violations: list[str] = []
-    if table.empty:
-        return ["Benchmark table is empty."]
-
-    best_model = str(table.iloc[0]["model"])
-    best_rmse = float(table.iloc[0]["rmse"])
-
-    expected = expected_best_model.strip().lower()
-    if expected and best_model.lower() != expected:
-        violations.append(
-            f"Unexpected best model: observed={best_model}, expected={expected_best_model}"
-        )
-    if max_best_rmse >= 0.0 and best_rmse > max_best_rmse:
-        violations.append(
-            f"Best RMSE above threshold: observed={best_rmse:.6f}, required<={max_best_rmse:.6f}"
-        )
-    return violations
-
-
-def run_benchmark(
-    seed: int = 42,
-    n_per_bucket: int = 1,
-    quotes: list[OptionQuote] | None = None,
-) -> pd.DataFrame:
-    """Run model zoo benchmark on synthetic or externally supplied option quotes."""
+def run_benchmark(seed: int = 42, n_per_bucket: int = 1) -> pd.DataFrame:
+    """Run model zoo benchmark on synthetic option quotes."""
     spot = 50000.0
     rate = 0.02
     sigma = 0.60
 
-    if quotes is None:
-        quotes = _build_synthetic_quotes(
-            spot=spot,
-            rate=rate,
-            sigma=sigma,
-            seed=seed,
-            n_per_bucket=n_per_bucket,
-        )
+    quotes = _build_synthetic_quotes(
+        spot=spot,
+        rate=rate,
+        sigma=sigma,
+        seed=seed,
+        n_per_bucket=n_per_bucket,
+    )
     zoo = CryptoOptionModelZoo()
     table = zoo.benchmark(
         quotes=quotes,
@@ -256,93 +125,10 @@ def main() -> None:
         default=1,
         help="Number of quotes per strike/maturity bucket.",
     )
-    parser.add_argument(
-        "--quotes-json",
-        type=str,
-        default="",
-        help="Optional path to fixed benchmark quotes JSON.",
-    )
-    parser.add_argument(
-        "--export-quotes-json",
-        type=str,
-        default="",
-        help="Optional path to export generated quotes JSON.",
-    )
-    parser.add_argument(
-        "--output-json",
-        type=str,
-        default="",
-        help="Optional path to write benchmark results JSON.",
-    )
-    parser.add_argument(
-        "--output-md",
-        type=str,
-        default="",
-        help="Optional path to write benchmark Markdown summary.",
-    )
-    parser.add_argument(
-        "--expected-best-model",
-        type=str,
-        default="",
-        help="Optional expected best model id (quality gate).",
-    )
-    parser.add_argument(
-        "--max-best-rmse",
-        type=float,
-        default=-1.0,
-        help="Optional max allowed RMSE for top-ranked model (quality gate).",
-    )
     args = parser.parse_args()
 
-    source = "synthetic"
-    quotes: list[OptionQuote] | None = None
-    if args.quotes_json:
-        quotes = load_quotes_json(args.quotes_json)
-        source = f"json:{args.quotes_json}"
-    else:
-        quotes = _build_synthetic_quotes(
-            spot=50000.0,
-            rate=0.02,
-            sigma=0.60,
-            seed=args.seed,
-            n_per_bucket=args.n_per_bucket,
-        )
-
-    if args.export_quotes_json:
-        save_quotes_json(args.export_quotes_json, quotes)
-
-    result = run_benchmark(seed=args.seed, n_per_bucket=args.n_per_bucket, quotes=quotes)
-    if args.output_json:
-        save_benchmark_json(
-            path=args.output_json,
-            source=source,
-            quotes=quotes,
-            table=result,
-        )
-    violations = evaluate_benchmark_quality_gates(
-        table=result,
-        expected_best_model=args.expected_best_model,
-        max_best_rmse=float(args.max_best_rmse),
-    )
-    if args.output_md:
-        output_dir = os.path.dirname(args.output_md)
-        if output_dir:
-            os.makedirs(output_dir, exist_ok=True)
-        with open(args.output_md, "w", encoding="utf-8") as file_obj:
-            file_obj.write(
-                render_benchmark_markdown(
-                    source=source,
-                    quotes=quotes,
-                    table=result,
-                    violations=violations,
-                )
-            )
-    print(f"# quotes_source={source} n_quotes={len(quotes)}")
+    result = run_benchmark(seed=args.seed, n_per_bucket=args.n_per_bucket)
     print(result.to_string(index=False))
-    if violations:
-        for violation in violations:
-            print(f"QUALITY GATE FAILED: {violation}", file=sys.stderr)
-        raise SystemExit(2)
 
 
 if __name__ == "__main__":

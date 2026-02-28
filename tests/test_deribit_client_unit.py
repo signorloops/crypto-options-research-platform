@@ -37,6 +37,8 @@ async def test_get_instruments_parses_option_contracts(monkeypatch):
     assert len(contracts) == 2
     assert contracts[0].option_type == OptionType.CALL
     assert contracts[1].option_type == OptionType.PUT
+    assert contracts[0].expiry.tzinfo == timezone.utc
+    assert contracts[1].expiry.tzinfo == timezone.utc
 
 
 @pytest.mark.asyncio
@@ -133,6 +135,7 @@ async def test_get_trades_paginates_and_applies_rate_limit(monkeypatch):
 
     assert len(trades) == 1
     assert trades[0].price == 100.0
+    assert trades[0].timestamp.tzinfo == timezone.utc
     sleep_mock.assert_awaited()
 
 

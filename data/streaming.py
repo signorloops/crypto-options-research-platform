@@ -282,7 +282,7 @@ class DeribitStream(WebSocketStream):
         from core.types import OrderSide
 
         return Trade(
-            timestamp=datetime.fromtimestamp(data.get('timestamp', 0) / 1000),
+            timestamp=datetime.fromtimestamp(data.get('timestamp', 0) / 1000, tz=timezone.utc),
             instrument=data.get('instrument_name', ''),
             price=data.get('price', 0),
             size=data.get('amount', 0),
@@ -293,7 +293,7 @@ class DeribitStream(WebSocketStream):
     def _parse_tick(self, data: Dict) -> Tick:
         """Parse tick data from Deribit format."""
         return Tick(
-            timestamp=datetime.fromtimestamp(data.get('timestamp', 0) / 1000),
+            timestamp=datetime.fromtimestamp(data.get('timestamp', 0) / 1000, tz=timezone.utc),
             instrument=data.get('instrument_name', ''),
             bid=data.get('best_bid_price', 0),
             ask=data.get('best_ask_price', 0),
@@ -304,7 +304,7 @@ class DeribitStream(WebSocketStream):
     def _parse_orderbook(self, data: Dict) -> Dict:
         """Parse order book data from Deribit format with reconstruction support."""
         instrument = data.get('instrument_name', '')
-        timestamp = datetime.fromtimestamp(data.get('timestamp', 0) / 1000, timezone.utc)
+        timestamp = datetime.fromtimestamp(data.get('timestamp', 0) / 1000, tz=timezone.utc)
 
         # Extract sequence numbers for gap detection
         change_id = data.get('change_id')
@@ -519,7 +519,7 @@ class OKXStream(WebSocketStream):
         from core.types import OrderSide
 
         return Trade(
-            timestamp=datetime.fromtimestamp(int(data.get("ts", 0)) / 1000),
+            timestamp=datetime.fromtimestamp(int(data.get("ts", 0)) / 1000, tz=timezone.utc),
             instrument=data.get("instId", ""),
             price=float(data.get("px", 0)),
             size=float(data.get("sz", 0)),
@@ -537,7 +537,7 @@ class OKXStream(WebSocketStream):
             Parsed Tick object
         """
         return Tick(
-            timestamp=datetime.fromtimestamp(int(data.get("ts", 0)) / 1000),
+            timestamp=datetime.fromtimestamp(int(data.get("ts", 0)) / 1000, tz=timezone.utc),
             instrument=data.get("instId", ""),
             bid=float(data.get("bidPx", 0)),
             ask=float(data.get("askPx", 0)),
@@ -638,6 +638,8 @@ class MultiExchangeStream:
             'trade': [],
             'orderbook': []
         }
+        # Python 3.8 compatibility: asyncio.Task is not subscriptable.
+        self._callback_tasks: Set[asyncio.Task] = set()
 
     def add_exchange(self, name: str, stream: WebSocketStream) -> None:
         """Add an exchange stream."""
@@ -648,13 +650,31 @@ class MultiExchangeStream:
         stream.add_callback('trade', lambda x, n=name: self._forward('trade', x, n))
         stream.add_callback('orderbook', lambda x, n=name: self._forward('orderbook', x, n))
 
-    def _forward(self, event_type: str, data: any, exchange: str) -> None:
+    def _track_callback_task(
+        self, task: asyncio.Task, event_type: str, exchange: str
+    ) -> None:
+        """Track async callback task and log failures."""
+        self._callback_tasks.add(task)
+
+        def _on_done(done_task: asyncio.Task) -> None:
+            self._callback_tasks.discard(done_task)
+            try:
+                done_task.result()
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:
+                logger.error(f"Async {event_type} callback failed for {exchange}: {exc}")
+
+        task.add_done_callback(_on_done)
+
+    def _forward(self, event_type: str, data: Any, exchange: str) -> None:
         """Forward event with exchange info."""
         for callback in self._callbacks.get(event_type, []):
             try:
                 result = callback(data, exchange)
                 if asyncio.iscoroutine(result):
-                    asyncio.create_task(result)
+                    task = asyncio.create_task(result)
+                    self._track_callback_task(task, event_type, exchange)
             except Exception as e:
                 logger.error(f"Error in {event_type} callback: {e}")
 
@@ -665,18 +685,38 @@ class MultiExchangeStream:
 
     async def connect_all(self, exchange_instruments: Dict[str, List[str]]) -> None:
         """Connect to all exchanges."""
-        tasks = []
+        task_map: Dict[str, asyncio.Task] = {}
         for exchange_name, instruments in exchange_instruments.items():
             if exchange_name in self.streams:
                 stream = self.streams[exchange_name]
-                tasks.append(stream.connect(instruments))
+                task_map[exchange_name] = asyncio.create_task(stream.connect(instruments))
 
-        await asyncio.gather(*tasks, return_exceptions=True)
+        if not task_map:
+            return
+
+        results = await asyncio.gather(*task_map.values(), return_exceptions=True)
+        failures: List[str] = []
+
+        for exchange_name, result in zip(task_map.keys(), results):
+            if isinstance(result, Exception):
+                failures.append(exchange_name)
+                logger.error(f"Exchange stream '{exchange_name}' failed: {result}")
+
+        if failures:
+            failed = ", ".join(failures)
+            raise RuntimeError(f"Failed to start exchange stream(s): {failed}")
 
     async def disconnect_all(self) -> None:
         """Disconnect from all exchanges."""
         for stream in self.streams.values():
             await stream.disconnect()
+
+        if self._callback_tasks:
+            pending = list(self._callback_tasks)
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            self._callback_tasks.clear()
 
     async def __aenter__(self):
         return self

@@ -347,7 +347,7 @@ class OKXClient(ExchangeInterface):
         trades = []
         for t in result.get("data", []):
             trades.append(Trade(
-                timestamp=datetime.fromtimestamp(int(t["ts"]) / 1000),
+                timestamp=datetime.fromtimestamp(int(t["ts"]) / 1000, tz=timezone.utc),
                 instrument=instrument,
                 price=float(t["px"]),
                 size=float(t["sz"]),

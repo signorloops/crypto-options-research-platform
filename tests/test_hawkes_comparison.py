@@ -259,6 +259,30 @@ class TestComprehensiveHawkesComparison(unittest.TestCase):
         self.assertEqual(self.comparison.transaction_cost_bps, 2.0)
         self.assertIsInstance(self.comparison.scenario_generator, ScenarioGenerator)
 
+    def test_jump_risk_premia_columns_attached_when_enabled(self):
+        """Comparison framework should attach jump risk premia columns in opt-in mode."""
+        comp = ComprehensiveHawkesComparison(
+            initial_capital=100000.0,
+            transaction_cost_bps=2.0,
+            enable_jump_risk_premia_signals=True,
+            jump_risk_window=20,
+            jump_risk_zscore=2.0,
+        )
+
+        idx = pd.date_range("2024-01-01", periods=80, freq="min")
+        rets = np.random.normal(0.0, 0.002, size=80)
+        rets[30] += 0.02
+        rets[50] -= 0.018
+        prices = 50000 * np.exp(np.cumsum(rets))
+        market_data = pd.DataFrame({"price": prices, "volume": np.full(80, 1.0)}, index=idx)
+
+        enriched = comp._attach_jump_risk_premia_signals(market_data)
+        self.assertIn("positive_jump_premium", enriched.columns)
+        self.assertIn("negative_jump_premium", enriched.columns)
+        self.assertIn("net_jump_premium", enriched.columns)
+        self.assertIn("jump_cluster_imbalance", enriched.columns)
+        self.assertTrue(np.isfinite(enriched["net_jump_premium"].iloc[-1]))
+
     def test_generate_default_scenarios(self):
         """Test default scenario generation."""
         scenarios = self.comparison._generate_default_scenarios()

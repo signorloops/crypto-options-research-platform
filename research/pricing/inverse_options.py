@@ -395,7 +395,11 @@ class InverseOptionPricer:
         r: float,
         option_type: Literal["call", "put"],
         tol: float = 1e-6,
-        max_iter: int = 50
+        max_iter: int = 50,
+        stabilize_short_maturity: bool = False,
+        short_maturity_threshold: float = 14.0 / 365.0,
+        anchor_sigma: Optional[float] = None,
+        max_anchor_deviation: float = 0.50,
     ) -> float:
         """
         通过牛顿-拉夫逊法计算隐含波动率。
@@ -435,6 +439,23 @@ class InverseOptionPricer:
         price_scale = max(abs(price), InverseOptionPricer.EPSILON)
         rel_tol = tol
 
+        def _stabilize_iv(raw_sigma: float) -> float:
+            if not stabilize_short_maturity:
+                return float(raw_sigma)
+            if T <= 0 or T > short_maturity_threshold:
+                return float(raw_sigma)
+            if anchor_sigma is None or not np.isfinite(anchor_sigma) or anchor_sigma <= 0:
+                return float(raw_sigma)
+
+            anchor = float(np.clip(anchor_sigma, 0.001, 5.0))
+            deviation = float(max(max_anchor_deviation, 1e-6))
+            bounded = float(np.clip(raw_sigma, anchor - deviation, anchor + deviation))
+
+            maturity_ratio = float(np.clip(T / max(short_maturity_threshold, InverseOptionPricer.EPSILON), 0.0, 1.0))
+            weight = 0.60 * (1.0 - maturity_ratio)
+            stabilized = (1.0 - weight) * bounded + weight * anchor
+            return float(np.clip(stabilized, 0.001, 5.0))
+
         for i in range(max_iter):
             try:
                 model_price = InverseOptionPricer.calculate_price(S, K, T, r, sigma, option_type)
@@ -442,7 +463,7 @@ class InverseOptionPricer:
 
                 # 使用相对误差检查收敛
                 if abs(diff) < rel_tol * price_scale:
-                    return sigma
+                    return _stabilize_iv(sigma)
 
                 # Vega作为导数（每单位波动率，不是每1%）
                 greeks = InverseOptionPricer.calculate_greeks(S, K, T, r, sigma, option_type)
@@ -463,7 +484,7 @@ class InverseOptionPricer:
                 sigma_new = max(0.001, min(5.0, sigma_new))
 
                 if abs(sigma_new - sigma) < 1e-6:
-                    return sigma_new
+                    return _stabilize_iv(sigma_new)
 
                 sigma = sigma_new
 
@@ -472,7 +493,8 @@ class InverseOptionPricer:
                 break
 
         # 如果牛顿法失败，使用二分法作为fallback
-        return InverseOptionPricer._iv_bisection(price, S, K, T, r, option_type, tol, max_iter)
+        raw_sigma = InverseOptionPricer._iv_bisection(price, S, K, T, r, option_type, tol, max_iter)
+        return _stabilize_iv(raw_sigma)
 
     @staticmethod
     def _iv_bisection(

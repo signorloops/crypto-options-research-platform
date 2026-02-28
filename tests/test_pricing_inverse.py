@@ -387,6 +387,33 @@ class TestImpliedVolatility:
         )
         assert iv == 0.0
 
+    def test_iv_short_maturity_anchor_stabilization_is_opt_in(self):
+        """Short-dated IV stabilization should keep result closer to anchor only when enabled."""
+        S, K, T, r = 50000, 60000, 1.0 / 365.0, 0.0
+        true_sigma = 0.55
+        anchor_sigma = 0.60
+
+        clean_price = InverseOptionPricer.calculate_price(S, K, T, r, true_sigma, "call")
+        noisy_price = clean_price * 1.8
+
+        iv_raw = InverseOptionPricer.calculate_implied_volatility(
+            noisy_price, S, K, T, r, "call"
+        )
+        iv_stabilized = InverseOptionPricer.calculate_implied_volatility(
+            noisy_price,
+            S,
+            K,
+            T,
+            r,
+            "call",
+            stabilize_short_maturity=True,
+            short_maturity_threshold=7.0 / 365.0,
+            anchor_sigma=anchor_sigma,
+            max_anchor_deviation=0.35,
+        )
+
+        assert abs(iv_stabilized - anchor_sigma) < abs(iv_raw - anchor_sigma)
+
 
 class TestEdgeCases:
     """Test edge cases and boundary conditions."""

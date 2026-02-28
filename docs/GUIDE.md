@@ -9,16 +9,10 @@
 ### 第一步：环境准备（2分钟）
 ```bash
 # 克隆并进入项目
-cd <PROJECT_ROOT>/corp
+cd /path/to/crypto-options-research-platform/corp
 
 # 激活虚拟环境
 source venv/bin/activate
-
-# 安装精简开发依赖（推荐）
-pip install -e ".[dev]"
-
-# 如需完整栈（ML + Notebook + 加速）
-# pip install -e ".[dev,full]"
 
 # 验证安装
 python -c "import pandas, numpy; print('✅ 依赖就绪')"
@@ -359,7 +353,7 @@ print(f"强度-价差相关性: {metrics.intensity_spread_correlation}")
 ### 项目内
 - [GitHub Issues](https://github.com/signorloops/crypto-options-research-platform/issues) - 问题讨论
 - [Tests](../tests/) - 学习代码的好材料
-- [Examples](examples.md) - 示例与上手参考
+- [Notebooks](../notebooks/) - 交互式学习
 - [Archive 索引](archive/README.md) - 历史文档说明
 
 ### 外部资源

@@ -1,7 +1,6 @@
 """
 Rough-volatility + jumps experiment runner.
 """
-
 from __future__ import annotations
 
 import argparse

@@ -20,6 +20,7 @@ from research.volatility import (
     rogers_satchell_volatility,
     yang_zhang_volatility,
 )
+from research.volatility.implied import VolatilityPoint
 
 
 class TestHistoricalVolatility:
@@ -364,3 +365,43 @@ class TestVolatilitySurface:
 
         for i in range(1, len(total_vars)):
             assert total_vars[i] + 1e-8 >= total_vars[i - 1]
+
+    def test_surface_short_maturity_skew_stabilization_reduces_atm_spike(self):
+        """Short-dated skew stabilization should reduce local ATM IV spikes when enabled."""
+        surface = VolatilitySurface()
+        S = 100.0
+        short_expiry = 3.0 / 365.0
+
+        points = [
+            (90.0, 0.62),
+            (95.0, 0.58),
+            (100.0, 1.40),  # noisy ATM spike
+            (105.0, 0.60),
+            (110.0, 0.64),
+        ]
+        for strike, vol in points:
+            surface.add_point(
+                VolatilityPoint(
+                    strike=strike,
+                    expiry=short_expiry,
+                    volatility=vol,
+                    underlying_price=S,
+                    is_call=True,
+                )
+            )
+
+        raw_skew = surface.get_skew(short_expiry)
+        stabilized_skew = surface.get_skew(
+            short_expiry,
+            stabilize_short_maturity=True,
+            short_maturity_threshold=7.0 / 365.0,
+        )
+
+        raw_vols = np.array([v for _, v in raw_skew], dtype=float)
+        stabilized_vols = np.array([v for _, v in stabilized_skew], dtype=float)
+
+        raw_max_jump = float(np.max(np.abs(np.diff(raw_vols))))
+        stabilized_max_jump = float(np.max(np.abs(np.diff(stabilized_vols))))
+
+        assert stabilized_max_jump < raw_max_jump
+        assert stabilized_vols[2] < raw_vols[2]

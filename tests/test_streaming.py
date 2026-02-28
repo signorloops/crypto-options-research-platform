@@ -3,6 +3,7 @@ Tests for WebSocket streaming functionality.
 """
 import asyncio
 import json
+from datetime import timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -262,6 +263,7 @@ class TestDeribitStream:
         assert trade.price == 50000.0
         assert trade.size == 1.5
         assert trade.side == OrderSide.BUY
+        assert trade.timestamp.tzinfo == timezone.utc
 
     def test_parse_tick(self, stream):
         """Test parsing tick message."""
@@ -288,6 +290,7 @@ class TestDeribitStream:
         assert tick.instrument == 'BTC-PERPETUAL'
         assert tick.bid == 49999.0
         assert tick.ask == 50001.0
+        assert tick.timestamp.tzinfo == timezone.utc
 
     def test_parse_orderbook(self, stream):
         """Test parsing orderbook message."""
@@ -360,6 +363,7 @@ class TestOKXStream:
         assert trade.instrument == 'BTC-USD-240628-50000-C'
         assert trade.price == 50000.0
         assert trade.side == OrderSide.BUY
+        assert trade.timestamp.tzinfo == timezone.utc
 
     def test_parse_trade_sell_side(self, okx_stream):
         """Test parsing sell trade from OKX."""
@@ -402,6 +406,7 @@ class TestOKXStream:
         assert tick.instrument == 'BTC-USD-240628-50000-C'
         assert tick.bid == 49999.0
         assert tick.ask == 50001.0
+        assert tick.timestamp.tzinfo == timezone.utc
 
     def test_parse_orderbook(self, okx_stream):
         """Test parsing order book message from OKX."""
@@ -502,6 +507,39 @@ class TestMultiExchangeStream:
         mock_okx_stream.connect.assert_called_once_with(['BTC-USD-240628-50000-C'])
 
     @pytest.mark.asyncio
+    async def test_connect_all_raises_on_exchange_failure(
+        self, multi_stream, mock_deribit_stream, mock_okx_stream
+    ):
+        """Test connect_all surfaces stream startup failures."""
+        mock_deribit_stream.connect = AsyncMock(side_effect=RuntimeError("deribit down"))
+        mock_okx_stream.connect = AsyncMock()
+
+        multi_stream.add_exchange('deribit', mock_deribit_stream)
+        multi_stream.add_exchange('okx', mock_okx_stream)
+
+        with pytest.raises(RuntimeError, match="deribit"):
+            await multi_stream.connect_all({
+                'deribit': ['BTC-PERPETUAL'],
+                'okx': ['BTC-USD-240628-50000-C']
+            })
+
+    @pytest.mark.asyncio
+    async def test_forward_logs_async_callback_errors(self, multi_stream, caplog):
+        """Test async callback exceptions are logged and cleaned up."""
+        async def broken_callback(data, exchange):
+            raise RuntimeError("boom")
+
+        multi_stream.add_callback('tick', broken_callback)
+
+        with caplog.at_level("ERROR"):
+            multi_stream._forward('tick', {'price': 1.0}, 'deribit')
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+
+        assert "Async tick callback failed for deribit: boom" in caplog.text
+        assert not multi_stream._callback_tasks
+
+    @pytest.mark.asyncio
     async def test_disconnect_all(self, multi_stream, mock_deribit_stream, mock_okx_stream):
         """Test disconnecting from all exchanges."""
         mock_deribit_stream.disconnect = AsyncMock()
@@ -514,6 +552,17 @@ class TestMultiExchangeStream:
 
         mock_deribit_stream.disconnect.assert_called_once()
         mock_okx_stream.disconnect.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_disconnect_all_cancels_pending_callback_tasks(self, multi_stream):
+        """Test disconnect cleans up background callback tasks."""
+        pending = asyncio.create_task(asyncio.sleep(10))
+        multi_stream._callback_tasks.add(pending)
+
+        await multi_stream.disconnect_all()
+
+        assert pending.cancelled()
+        assert not multi_stream._callback_tasks
 
     @pytest.mark.asyncio
     async def test_context_manager(self, multi_stream, mock_deribit_stream):

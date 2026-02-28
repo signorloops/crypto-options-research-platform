@@ -101,7 +101,7 @@ class DeribitClient(ExchangeInterface):
             contract = OptionContract(
                 underlying=inst["base_currency"],
                 strike=inst["strike"],
-                expiry=datetime.fromtimestamp(inst["expiration_timestamp"] / 1000),
+                expiry=datetime.fromtimestamp(inst["expiration_timestamp"] / 1000, tz=timezone.utc),
                 option_type=OptionType.CALL if inst["option_type"] == "call" else OptionType.PUT,
             )
             contracts.append(contract)
@@ -270,7 +270,7 @@ class DeribitClient(ExchangeInterface):
             for t in batch:
                 trades.append(
                     Trade(
-                        timestamp=datetime.fromtimestamp(t["timestamp"] / 1000),
+                        timestamp=datetime.fromtimestamp(t["timestamp"] / 1000, tz=timezone.utc),
                         instrument=instrument,
                         price=t["price"],
                         size=t["amount"],

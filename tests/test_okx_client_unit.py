@@ -149,6 +149,8 @@ async def test_get_trades_maps_side_and_fields(monkeypatch):
     assert len(trades) == 2
     assert trades[0].side == OrderSide.BUY
     assert trades[1].side == OrderSide.SELL
+    assert trades[0].timestamp.tzinfo == timezone.utc
+    assert trades[1].timestamp.tzinfo == timezone.utc
 
 
 @pytest.mark.asyncio
