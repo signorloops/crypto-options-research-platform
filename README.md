@@ -41,8 +41,15 @@ python -m venv venv
 source venv/bin/activate  # macOS/Linux
 # 或 venv\Scripts\activate  # Windows
 
-# 安装依赖
+# 安装依赖（默认精简开发栈）
 pip install -e ".[dev]"
+# 或
+pip install -r requirements.txt
+
+# 可选：安装完整栈（ML + Notebook + 加速器）
+pip install -e ".[dev,full]"
+# 或
+pip install -r requirements-full.txt
 
 # 可选：环境变量
 cp .env.example .env
@@ -121,8 +128,10 @@ corp/
 
 - [Hawkes 策略对比实验](docs/hawkes_comparison_experiment.md)
 - [缓存策略](docs/cache_strategy.md)
+- [工作区瘦身指南](docs/workspace-slimming.md)
 - [研究看板](docs/dashboard.md)
 - [部署指南](docs/deployment.md)
+- [计划文档索引](docs/plans/README.md)
 - [2026 Q2 长期执行路线图](docs/plans/2026-Q2-long-term-execution-roadmap.md)
 - [每周执行清单模板](docs/plans/weekly-operating-checklist.md)
 
@@ -142,6 +151,16 @@ pytest tests/ --cov=core --cov=data --cov=research --cov=strategies
 black .
 ruff check . --fix
 mypy .
+
+# 工作区瘦身（先看计划，再执行）
+make workspace-slim-report
+make workspace-slim-clean
+
+# 检查部署配置是否误用旧入口模块名
+make check-service-entrypoint
+
+# 检查分支命名是否包含禁用关键字
+make branch-name-guard
 ```
 
 ## 研究看板

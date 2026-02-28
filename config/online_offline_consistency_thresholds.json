@@ -1,0 +1,5 @@
+{
+  "max_offline_consistency_exceptions": 0,
+  "max_online_alerts": 0,
+  "max_online_abs_deviation_bps": 300.0
+}

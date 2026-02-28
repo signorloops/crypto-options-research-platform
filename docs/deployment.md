@@ -54,7 +54,7 @@ USER corp
 VOLUME ["/app/data/cache", "/app/logs"]
 
 # 入口
-CMD ["python", "-m", "execution.trading_engine"]
+CMD ["python", "-m", "execution.service_runner"]
 ```
 
 ### docker-compose.yml
@@ -109,6 +109,39 @@ volumes:
   redis-data:
 ```
 
+## 统一 Service 入口（Runbook）
+
+所有部署形态统一使用同一个 Python 入口：
+
+```bash
+python -m execution.service_runner
+```
+
+通过环境变量区分服务角色：
+
+| 服务角色 | `SERVICE_NAME` | 端口变量 | 默认端口 |
+|---|---|---|---|
+| 交易引擎 | `trading-engine` | `TRADING_ENGINE_PORT` | `8080` |
+| 风控服务 | `risk-monitor` | `RISK_MONITOR_PORT` | `8081` |
+| 行情采集 | `market-data-collector` | `MARKET_DATA_COLLECTOR_PORT` | `8082` |
+
+示例：
+
+```bash
+# 交易引擎
+SERVICE_NAME=trading-engine TRADING_ENGINE_PORT=8080 python -m execution.service_runner
+
+# 风控
+SERVICE_NAME=risk-monitor RISK_MONITOR_PORT=8081 python -m execution.service_runner
+
+# 行情采集
+SERVICE_NAME=market-data-collector MARKET_DATA_COLLECTOR_PORT=8082 python -m execution.service_runner
+```
+
+说明：
+- `execution.trading_engine` / `execution.risk_monitor` / `execution.market_data_collector` 仅保留兼容导入，不再作为部署入口。
+- 提交前可执行 `make check-service-entrypoint`，防止部署脚本误用旧入口。
+
 ## 系统服务 (systemd)
 
 ### /etc/systemd/system/corp.service
@@ -124,7 +157,7 @@ Group=corp
 WorkingDirectory=/opt/corp
 Environment=PYTHONPATH=/opt/corp
 EnvironmentFile=/opt/corp/.env
-ExecStart=/opt/corp/venv/bin/python -m execution.trading_engine
+ExecStart=/opt/corp/venv/bin/python -m execution.service_runner
 Restart=always
 RestartSec=10
 

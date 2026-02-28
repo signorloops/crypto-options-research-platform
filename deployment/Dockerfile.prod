@@ -61,4 +61,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD python -c "import requests; requests.get('http://localhost:8080/health', timeout=2).raise_for_status()"
 
 # Default command
-CMD ["python", "-m", "execution.trading_engine"]
+CMD ["python", "-m", "execution.service_runner"]

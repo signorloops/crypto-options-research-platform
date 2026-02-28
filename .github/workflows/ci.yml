@@ -66,7 +66,7 @@ jobs:
           echo "No usable base SHA; skipping ruff."
           exit 0
         fi
-        CHANGED_PY="$(git diff --name-only "$BASE_SHA" "$GITHUB_SHA" | grep -E '\.py$' || true)"
+        CHANGED_PY="$(git diff --name-only --diff-filter=ACMRT "$BASE_SHA" "$GITHUB_SHA" | grep -E '\.py$' || true)"
         if [ -z "$CHANGED_PY" ]; then
           echo "No Python files changed; skipping ruff."
           exit 0
@@ -90,7 +90,7 @@ jobs:
           echo "No usable base SHA; skipping black."
           exit 0
         fi
-        CHANGED_PY="$(git diff --name-only "$BASE_SHA" "$GITHUB_SHA" | grep -E '\.py$' || true)"
+        CHANGED_PY="$(git diff --name-only --diff-filter=ACMRT "$BASE_SHA" "$GITHUB_SHA" | grep -E '\.py$' || true)"
         if [ -z "$CHANGED_PY" ]; then
           echo "No Python files changed; skipping black."
           exit 0
@@ -113,7 +113,7 @@ jobs:
           exit 0
         fi
 
-        CHANGED_STRICT="$(git diff --name-only "$BASE_SHA" "$GITHUB_SHA" | grep -E '^(core/types\.py|core/validation/validators\.py|strategies/arbitrage/(basis|conversion|option_box)\.py)$' || true)"
+        CHANGED_STRICT="$(git diff --name-only --diff-filter=ACMRT "$BASE_SHA" "$GITHUB_SHA" | grep -E '^(core/types\.py|core/validation/validators\.py|strategies/arbitrage/(basis|conversion|option_box)\.py)$' || true)"
         if [ -z "$CHANGED_STRICT" ]; then
           echo "No strict-typed modules changed; skipping mypy."
           exit 0

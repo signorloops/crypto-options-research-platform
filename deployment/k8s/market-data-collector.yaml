@@ -25,7 +25,7 @@ spec:
         - name: market-data-collector
           image: ghcr.io/your-org/corp-market-data:latest
           imagePullPolicy: Always
-          command: ["python", "-m", "execution.market_data_collector"]
+          command: ["python", "-m", "execution.service_runner"]
           ports:
             - containerPort: 8082
               name: http
@@ -36,6 +36,8 @@ spec:
               value: "INFO"
             - name: MARKET_DATA_COLLECTOR_PORT
               value: "8082"
+            - name: SERVICE_NAME
+              value: "market-data-collector"
             - name: HEALTH_PORT
               value: "8082"
             - name: REDIS_URL

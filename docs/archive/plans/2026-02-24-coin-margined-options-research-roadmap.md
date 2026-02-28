@@ -17,10 +17,10 @@
 - [x] 周度自动审计（KPI 快照/风险例外）脚本 + CI 工作流
 
 仍需人工闭环（不可完全自动化）：
-- [ ] 灰度发布与 24h 观察（已自动生成 canary checklist，待实盘执行）
-- [ ] 收益归因表（spread/adverse/inventory/hedging，模板 + 回测输出字段已补齐，待生产周数据人工确认）
+- [ ] 灰度发布与 24h 观察
+- [ ] 收益归因表（spread/adverse/inventory/hedging）
 - [ ] 异常项归因与修复计划确认（若周审计出现风险例外）
-- [ ] ADR 决策沉淀与回滚决策记录（已自动生成 decision log，待人工签字）
+- [ ] ADR 决策沉淀与回滚决策记录
 
 ---
 

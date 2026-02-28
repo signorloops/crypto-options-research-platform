@@ -1,3 +1,3 @@
 # Dependency source of truth: pyproject.toml
-# Install runtime + developer tooling consistently.
+# Lean profile: runtime + developer tooling (without heavy optional stacks).
 -e .[dev]

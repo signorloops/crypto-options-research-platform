@@ -25,7 +25,7 @@ spec:
         - name: risk-monitor
           image: ghcr.io/your-org/corp-risk-monitor:latest
           imagePullPolicy: Always
-          command: ["python", "-m", "execution.risk_monitor"]
+          command: ["python", "-m", "execution.service_runner"]
           ports:
             - containerPort: 8081
               name: http
@@ -36,6 +36,8 @@ spec:
               value: "INFO"
             - name: RISK_MONITOR_PORT
               value: "8081"
+            - name: SERVICE_NAME
+              value: "risk-monitor"
             - name: HEALTH_PORT
               value: "8081"
             - name: REDIS_URL

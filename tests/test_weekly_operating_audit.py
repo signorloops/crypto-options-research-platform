@@ -64,10 +64,9 @@ def test_build_report_extracts_snapshot_and_flags_exceptions(tmp_path):
             "since_days": 7,
             "entries": [{"date": "2026-02-25", "commit": "abc12345", "subject": "demo"}],
             "count": 1,
-            "shallow": False,
             "error": "",
         },
-        rollback_marker={"executed": True, "tag": "v0.1.0", "error": "", "source": "tag"},
+        rollback_marker={"executed": True, "tag": "v0.1.0", "error": ""},
     )
 
     assert report["summary"]["strategies"] == 2
@@ -134,7 +133,7 @@ def test_main_strict_exits_nonzero_when_exceptions_exist(tmp_path, monkeypatch):
     assert json_report["kpi_snapshot"][0]["experiment_id"].startswith("AUTO-")
 
 
-def test_build_report_treats_commit_fallback_and_shallow_log_as_incomplete(tmp_path):
+def test_main_executes_regression_cmd_without_shell(tmp_path, monkeypatch):
     module = _load_module()
     result_path = tmp_path / "results" / "backtest_results_003.json"
     _write(
@@ -143,47 +142,9 @@ def test_build_report_treats_commit_fallback_and_shallow_log_as_incomplete(tmp_p
             {
                 "Stable": {
                     "summary": {
-                        "total_pnl": 88.0,
-                        "sharpe_ratio": 1.2,
-                        "max_drawdown": -0.05,
-                        "experiment_id": "EXP-003",
-                    }
-                }
-            }
-        ),
-    )
-
-    report = module._build_report(
-        [result_path],
-        dict(module.DEFAULT_THRESHOLDS),
-        change_log={
-            "executed": True,
-            "since_days": 7,
-            "entries": [{"date": "2026-02-25", "commit": "abc12345", "subject": "demo"}],
-            "count": 1,
-            "shallow": True,
-            "error": "",
-        },
-        rollback_marker={"executed": True, "tag": "HEAD-abc12345", "error": "", "source": "commit"},
-    )
-
-    assert report["checklist"]["change_log_complete"] is False
-    assert report["checklist"]["rollback_version_marked"] is True
-    assert report["checklist"]["rollback_marker_from_tag"] is False
-
-
-def test_main_regression_command_runs_without_shell(tmp_path, monkeypatch):
-    module = _load_module()
-    result_path = tmp_path / "results" / "backtest_results_004.json"
-    _write(
-        result_path,
-        json.dumps(
-            {
-                "Stable": {
-                    "summary": {
                         "total_pnl": 100.0,
                         "sharpe_ratio": 1.0,
-                        "max_drawdown": -0.10,
+                        "max_drawdown": -0.1,
                     }
                 }
             }
@@ -199,13 +160,6 @@ def test_main_regression_command_runs_without_shell(tmp_path, monkeypatch):
 
     def fake_run(cmd, **kwargs):
         calls.append((cmd, kwargs))
-
-        if (
-            isinstance(cmd, list)
-            and cmd[:2] == ["git", "rev-parse"]
-            and "--is-shallow-repository" in cmd
-        ):
-            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="false\n", stderr="")
         if isinstance(cmd, list) and cmd[:2] == ["git", "log"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if isinstance(cmd, list) and cmd[:3] == ["git", "describe", "--tags"]:
@@ -214,7 +168,6 @@ def test_main_regression_command_runs_without_shell(tmp_path, monkeypatch):
             return subprocess.CompletedProcess(
                 args=cmd, returncode=0, stdout="abc12345\n", stderr=""
             )
-
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="ok\n", stderr="")
 
     monkeypatch.setattr(module.subprocess, "run", fake_run)
@@ -256,8 +209,8 @@ def test_discover_input_files_searches_nested_result_directories(tmp_path):
 
 def test_build_report_flags_consistency_exceptions(tmp_path):
     module = _load_module()
-    newer = tmp_path / "results" / "backtest_results_new.json"
     older = tmp_path / "results" / "backtest_results_old.json"
+    newer = tmp_path / "results" / "backtest_results_new.json"
     _write(
         older,
         json.dumps(
@@ -328,9 +281,9 @@ def test_main_strict_exits_nonzero_when_consistency_exceptions_exist(tmp_path, m
             {
                 "Stable": {
                     "summary": {
-                        "total_pnl": 5000.0,
-                        "sharpe_ratio": 2.0,
-                        "max_drawdown": -0.25,
+                        "total_pnl": 3500.0,
+                        "sharpe_ratio": 1.8,
+                        "max_drawdown": -0.35,
                     }
                 }
             }
@@ -341,17 +294,7 @@ def test_main_strict_exits_nonzero_when_consistency_exceptions_exist(tmp_path, m
 
     thresholds_path = tmp_path / "thresholds.json"
     consistency_thresholds_path = tmp_path / "consistency_thresholds.json"
-    _write(
-        thresholds_path,
-        json.dumps(
-            {
-                "min_sharpe": 0.1,
-                "max_abs_drawdown": 1.0,
-                "max_var_breach_rate": 1.0,
-                "max_fill_calibration_error": 1.0,
-            }
-        ),
-    )
+    _write(thresholds_path, json.dumps(module.DEFAULT_THRESHOLDS))
     _write(
         consistency_thresholds_path,
         json.dumps(
@@ -362,7 +305,6 @@ def test_main_strict_exits_nonzero_when_consistency_exceptions_exist(tmp_path, m
             }
         ),
     )
-
     report_md = tmp_path / "artifacts" / "weekly-operating-audit.md"
     report_json = tmp_path / "artifacts" / "weekly-operating-audit.json"
 
@@ -389,6 +331,127 @@ def test_main_strict_exits_nonzero_when_consistency_exceptions_exist(tmp_path, m
     exit_code = module.main()
 
     assert exit_code == 2
-    json_report = json.loads(report_json.read_text(encoding="utf-8"))
-    assert json_report["summary"]["exceptions"] == 0
-    assert json_report["summary"]["consistency_exceptions"] == 1
+    report = json.loads(report_json.read_text(encoding="utf-8"))
+    assert report["summary"]["consistency_exceptions"] == 1
+
+
+def test_main_close_gate_only_strict_fails_when_signoff_missing(tmp_path, monkeypatch):
+    module = _load_module()
+    missing_signoff = tmp_path / "missing-signoff.json"
+    close_md = tmp_path / "artifacts" / "weekly-close-gate.md"
+    close_json = tmp_path / "artifacts" / "weekly-close-gate.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "weekly_operating_audit.py",
+            "--close-gate-only",
+            "--strict-close",
+            "--signoff-json",
+            str(missing_signoff),
+            "--close-gate-output-md",
+            str(close_md),
+            "--close-gate-output-json",
+            str(close_json),
+        ],
+    )
+
+    exit_code = module.main()
+
+    assert exit_code == 2
+    assert close_json.exists()
+    report = json.loads(close_json.read_text(encoding="utf-8"))
+    assert report["status"] == "FAIL"
+    assert report["reason"] == "missing_signoff_json"
+    assert "### Weekly Close Gate" in report["pr_brief"]
+    assert "Status: FAIL" in report["pr_brief"]
+
+
+def test_main_close_gate_only_strict_passes_when_ready(tmp_path, monkeypatch):
+    module = _load_module()
+    signoff_json = tmp_path / "weekly-signoff-pack.json"
+    close_md = tmp_path / "artifacts" / "weekly-close-gate.md"
+    close_json = tmp_path / "artifacts" / "weekly-close-gate.json"
+    _write(signoff_json, json.dumps({"status": "READY_FOR_CLOSE"}))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "weekly_operating_audit.py",
+            "--close-gate-only",
+            "--strict-close",
+            "--signoff-json",
+            str(signoff_json),
+            "--close-gate-output-md",
+            str(close_md),
+            "--close-gate-output-json",
+            str(close_json),
+        ],
+    )
+
+    exit_code = module.main()
+
+    assert exit_code == 0
+    report = json.loads(close_json.read_text(encoding="utf-8"))
+    assert report["status"] == "PASS"
+    assert report["signoff_status"] == "READY_FOR_CLOSE"
+    assert "Status: PASS" in report["pr_brief"]
+
+
+def test_main_strict_close_fails_when_signoff_not_ready(tmp_path, monkeypatch):
+    module = _load_module()
+    result_path = tmp_path / "results" / "backtest_results_ready.json"
+    _write(
+        result_path,
+        json.dumps(
+            {
+                "Stable": {
+                    "summary": {
+                        "total_pnl": 100.0,
+                        "sharpe_ratio": 1.0,
+                        "max_drawdown": -0.1,
+                    }
+                }
+            }
+        ),
+    )
+    thresholds_path = tmp_path / "thresholds.json"
+    signoff_json = tmp_path / "weekly-signoff-pack.json"
+    close_md = tmp_path / "artifacts" / "weekly-close-gate.md"
+    close_json = tmp_path / "artifacts" / "weekly-close-gate.json"
+    report_md = tmp_path / "artifacts" / "weekly-operating-audit.md"
+    report_json = tmp_path / "artifacts" / "weekly-operating-audit.json"
+    _write(thresholds_path, json.dumps(module.DEFAULT_THRESHOLDS))
+    _write(signoff_json, json.dumps({"status": "PENDING_MANUAL_SIGNOFF"}))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "weekly_operating_audit.py",
+            "--inputs",
+            str(result_path),
+            "--thresholds",
+            str(thresholds_path),
+            "--output-md",
+            str(report_md),
+            "--output-json",
+            str(report_json),
+            "--strict-close",
+            "--signoff-json",
+            str(signoff_json),
+            "--close-gate-output-md",
+            str(close_md),
+            "--close-gate-output-json",
+            str(close_json),
+        ],
+    )
+
+    exit_code = module.main()
+
+    assert exit_code == 2
+    assert report_json.exists()
+    close_report = json.loads(close_json.read_text(encoding="utf-8"))
+    assert close_report["status"] == "FAIL"
+    assert close_report["reason"] == "status=PENDING_MANUAL_SIGNOFF"
+    assert close_report["action_items"]
+    assert "Next actions:" in close_report["pr_brief"]

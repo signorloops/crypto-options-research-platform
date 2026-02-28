@@ -1,0 +1,6 @@
+{
+  "min_sharpe": 0.5,
+  "max_abs_drawdown": 0.25,
+  "max_var_breach_rate": 0.05,
+  "max_fill_calibration_error": 0.2
+}

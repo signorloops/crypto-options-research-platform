@@ -1,7 +1,4 @@
-"""
-Strategy Arena - Comprehensive backtesting and comparison framework.
-Compare multiple strategies head-to-head on the same data with fair metrics.
-"""
+"""Strategy arena for fair backtest comparison across multiple strategies."""
 
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -95,15 +92,7 @@ Market Making:
 
 
 class StrategyArena:
-    """
-    Fair comparison framework for market making strategies.
-
-    Ensures:
-    - Same market data for all strategies
-    - Same random seeds where applicable
-    - Consistent transaction cost models
-    - Comparable metrics calculation
-    """
+    """Fair comparison framework for market making strategies."""
 
     def __init__(
         self,
@@ -121,16 +110,7 @@ class StrategyArena:
     def run_tournament(
         self, strategies: List[MarketMakingStrategy], verbose: bool = True
     ) -> pd.DataFrame:
-        """
-        Run all strategies and compare results.
-
-        Args:
-            strategies: List of strategies to compare
-            verbose: Whether to print progress
-
-        Returns:
-            DataFrame with comparison metrics
-        """
+        """Run all strategies and return a comparison DataFrame."""
         self.results = {}
         self.scorecards = {}
 
@@ -138,10 +118,7 @@ class StrategyArena:
             if verbose:
                 logger.info("Running strategy", extra=log_extra(strategy=strategy.name))
 
-            # Reset strategy
             strategy.reset()
-
-            # Run backtest
             engine = BacktestEngine(
                 strategy=strategy,
                 initial_crypto_balance=self.initial_capital,
@@ -151,7 +128,6 @@ class StrategyArena:
 
             self.results[strategy.name] = result
 
-            # Calculate scorecard
             scorecard = self._calculate_scorecard(result)
             self.scorecards[strategy.name] = scorecard
 
@@ -166,10 +142,7 @@ class StrategyArena:
                     ),
                 )
 
-        # Multi-strategy correction: deflate Sharpe by number of tested strategies.
         self._apply_deflated_sharpe()
-
-        # Create comparison DataFrame
         return self._create_comparison_df()
 
     def _apply_deflated_sharpe(self) -> None:
@@ -215,28 +188,22 @@ class StrategyArena:
                 best_day=0,
             )
 
-        # Return metrics
         total_pnl = result.total_pnl_usd
         total_return_pct = total_pnl / self.initial_capital
 
-        # Estimate annualized return (assuming data covers full period)
         days = max(1, (pnl_series.index[-1] - pnl_series.index[0]).days)
-        # Handle negative returns properly to avoid complex numbers
         if total_return_pct > -1:
             annualized_return = (1 + total_return_pct) ** (365 / days) - 1
         else:
-            annualized_return = -1.0  # Total loss or worse
+            annualized_return = -1.0
 
-        # Risk metrics
         daily_returns = pnl_series.diff().dropna()
         sharpe = result.sharpe_ratio
         deflated_sharpe = getattr(result, "deflated_sharpe_ratio", 0.0)
 
-        # Sortino (downside deviation only) with proper target
-        target_return = 0.0  # Minimum acceptable return (MAR)
+        target_return = 0.0
         downside_returns = daily_returns[daily_returns < target_return]
         if len(downside_returns) > 0:
-            # Calculate downside deviation using target return as benchmark
             downside_deviation = np.sqrt(np.mean((downside_returns - target_return) ** 2))
             if downside_deviation > 0:
                 excess_return = daily_returns.mean() - target_return
@@ -246,28 +213,23 @@ class StrategyArena:
         else:
             sortino = 0.0
 
-        # Calmar with minimum drawdown threshold
-        min_drawdown_threshold = 0.001  # 0.1% minimum
+        min_drawdown_threshold = 0.001
         if abs(result.max_drawdown) > min_drawdown_threshold:
             calmar = annualized_return / abs(result.max_drawdown)
         else:
-            calmar = 0.0  # Cannot calculate meaningful Calmar
+            calmar = 0.0
 
-        # Win rate and trade metrics
         if result.trade_count > 0 and len(daily_returns) > 0:
-            # Calculate win rate from daily returns
             wins = (daily_returns > 0).sum()
             total_days = len(daily_returns)
             win_rate = wins / total_days
 
-            # Calculate avg win/loss
             wins_pnl = daily_returns[daily_returns > 0]
             losses_pnl = daily_returns[daily_returns < 0]
 
             avg_win = wins_pnl.mean() if len(wins_pnl) > 0 else 0
             avg_loss = abs(losses_pnl.mean()) if len(losses_pnl) > 0 else 0
 
-            # Calculate profit factor
             total_gains = wins_pnl.sum() if len(wins_pnl) > 0 else 0
             total_losses = abs(losses_pnl.sum()) if len(losses_pnl) > 0 else 0
             profit_factor = total_gains / total_losses if total_losses > 0 else float("inf")
@@ -277,12 +239,10 @@ class StrategyArena:
             avg_loss = 0.0
             profit_factor = 0.0
 
-        # Daily stats
         daily_pnl_std = daily_returns.std()
         worst_day = daily_returns.min() if len(daily_returns) > 0 else 0
         best_day = daily_returns.max() if len(daily_returns) > 0 else 0
 
-        # Drawdown series
         running_max = pnl_series.expanding().max()
         drawdown_series = (pnl_series - running_max) / (running_max + self.initial_capital)
 
@@ -305,7 +265,7 @@ class StrategyArena:
             spread_capture=result.total_spread_captured or 0,
             adverse_selection_cost=result.adverse_selection_cost or 0,
             inventory_cost=result.inventory_cost or 0,
-            fill_rate=0.3,  # Placeholder
+            fill_rate=0.3,
             daily_pnl_std=daily_pnl_std,
             worst_day=worst_day,
             best_day=best_day,
@@ -337,17 +297,7 @@ class StrategyArena:
 
         return pd.DataFrame(rows)
 
-    def plot_comparison(self, figsize: Tuple[int, int] = (16, 12)) -> plt.Figure:
-        """
-        Generate comprehensive comparison plots.
-
-        Returns:
-            Matplotlib figure with subplots
-        """
-        fig, axes = plt.subplots(3, 3, figsize=figsize)
-
-        # 1. Cumulative PnL
-        ax = axes[0, 0]
+    def _plot_cumulative_pnl(self, ax: plt.Axes) -> None:
         for name, sc in self.scorecards.items():
             if len(sc.pnl_series) > 0:
                 ax.plot(sc.pnl_series.index, sc.pnl_series.values, label=name)
@@ -356,8 +306,7 @@ class StrategyArena:
         ax.legend()
         ax.grid(True, alpha=0.3)
 
-        # 2. Drawdown
-        ax = axes[0, 1]
+    def _plot_drawdown(self, ax: plt.Axes) -> None:
         for name, sc in self.scorecards.items():
             if len(sc.drawdown_series) > 0:
                 ax.fill_between(
@@ -368,8 +317,7 @@ class StrategyArena:
         ax.legend()
         ax.grid(True, alpha=0.3)
 
-        # 3. Inventory
-        ax = axes[0, 2]
+    def _plot_inventory(self, ax: plt.Axes) -> None:
         for name, sc in self.scorecards.items():
             if len(sc.inventory_series) > 0:
                 ax.plot(
@@ -381,8 +329,7 @@ class StrategyArena:
         ax.legend()
         ax.grid(True, alpha=0.3)
 
-        # 4. Return comparison bar chart
-        ax = axes[1, 0]
+    def _plot_total_return_bars(self, ax: plt.Axes) -> None:
         strategies = list(self.scorecards.keys())
         returns = [self.scorecards[s].total_return_pct * 100 for s in strategies]
         colors = ["green" if r > 0 else "red" for r in returns]
@@ -392,8 +339,7 @@ class StrategyArena:
         ax.axhline(y=0, color="k", linestyle="-", linewidth=0.5)
         plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
 
-        # 5. Risk-Return scatter
-        ax = axes[1, 1]
+    def _plot_risk_return_scatter(self, ax: plt.Axes) -> None:
         for name, sc in self.scorecards.items():
             ax.scatter(
                 sc.max_drawdown * 100, sc.annualized_return * 100, s=200, alpha=0.6, label=name
@@ -406,8 +352,8 @@ class StrategyArena:
         ax.legend()
         ax.grid(True, alpha=0.3)
 
-        # 6. Sharpe comparison
-        ax = axes[1, 2]
+    def _plot_sharpe_bars(self, ax: plt.Axes) -> None:
+        strategies = list(self.scorecards.keys())
         sharpes = [self.scorecards[s].sharpe_ratio for s in strategies]
         colors = ["green" if s > 1 else "orange" if s > 0 else "red" for s in sharpes]
         ax.bar(strategies, sharpes, color=colors, alpha=0.7)
@@ -416,45 +362,48 @@ class StrategyArena:
         ax.set_title("Sharpe Ratio")
         plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
 
-        # 7. PnL distribution
-        ax = axes[2, 0]
+    def _plot_pnl_distribution(self, ax: plt.Axes) -> None:
         for name, sc in self.scorecards.items():
-            if len(sc.pnl_series) > 1:
-                daily_pnls = sc.pnl_series.diff().dropna()
-                values = daily_pnls.to_numpy(dtype=float)
-                values = values[np.isfinite(values)]
-                if len(values) == 0:
-                    continue
-                if np.ptp(values) <= 1e-12:
-                    center = float(values[0])
-                    span = max(1e-6, abs(center) * 0.01)
-                    bins = [center - span, center + span]
-                else:
-                    bins = 30
-                ax.hist(values, bins=bins, alpha=0.5, label=name, density=True)
+            if len(sc.pnl_series) <= 1:
+                continue
+            daily_pnls = sc.pnl_series.diff().dropna()
+            values = daily_pnls.to_numpy(dtype=float)
+            values = values[np.isfinite(values)]
+            if len(values) == 0:
+                continue
+            if np.ptp(values) <= 1e-12:
+                center = float(values[0])
+                span = max(1e-6, abs(center) * 0.01)
+                bins = [center - span, center + span]
+            else:
+                bins = 30
+            ax.hist(values, bins=bins, alpha=0.5, label=name, density=True)
         ax.set_title("Daily PnL Distribution")
         ax.set_xlabel("Daily PnL ($)")
         ax.legend()
 
-        # 8. Rolling Sharpe
-        ax = axes[2, 1]
-        window = min(50, len(self.market_data) // 10)
+    def _rolling_sharpe_series(self, pnl_series: pd.Series, window: int) -> pd.Series:
+        if len(pnl_series) <= window:
+            return pd.Series(dtype=float)
+        daily_returns = pnl_series.diff()
+        return (
+            daily_returns.rolling(window).mean()
+            / daily_returns.rolling(window).std()
+            * np.sqrt(365)
+        )
+
+    def _plot_rolling_sharpe(self, ax: plt.Axes, window: int) -> None:
         for name, sc in self.scorecards.items():
-            if len(sc.pnl_series) > window:
-                daily_returns = sc.pnl_series.diff()
-                rolling_sharpe = (
-                    daily_returns.rolling(window).mean()
-                    / daily_returns.rolling(window).std()
-                    * np.sqrt(365)
-                )
-                ax.plot(rolling_sharpe.index, rolling_sharpe.values, label=name, alpha=0.7)
+            rolling_sharpe = self._rolling_sharpe_series(sc.pnl_series, window=window)
+            if rolling_sharpe.empty:
+                continue
+            ax.plot(rolling_sharpe.index, rolling_sharpe.values, label=name, alpha=0.7)
         ax.set_title(f"Rolling Sharpe ({window} periods)")
         ax.axhline(y=1, color="g", linestyle="--", alpha=0.5)
         ax.legend()
         ax.grid(True, alpha=0.3)
 
-        # 9. Metrics table
-        ax = axes[2, 2]
+    def _plot_metrics_table(self, ax: plt.Axes) -> None:
         ax.axis("off")
 
         comparison = self._create_comparison_df()
@@ -481,19 +430,25 @@ class StrategyArena:
         table.set_fontsize(9)
         table.scale(1, 2)
 
+    def plot_comparison(self, figsize: Tuple[int, int] = (16, 12)) -> plt.Figure:
+        """Generate comparison plots."""
+        fig, axes = plt.subplots(3, 3, figsize=figsize)
+        window = min(50, len(self.market_data) // 10)
+        self._plot_cumulative_pnl(axes[0, 0])
+        self._plot_drawdown(axes[0, 1])
+        self._plot_inventory(axes[0, 2])
+        self._plot_total_return_bars(axes[1, 0])
+        self._plot_risk_return_scatter(axes[1, 1])
+        self._plot_sharpe_bars(axes[1, 2])
+        self._plot_pnl_distribution(axes[2, 0])
+        self._plot_rolling_sharpe(axes[2, 1], window=window)
+        self._plot_metrics_table(axes[2, 2])
+
         plt.tight_layout()
         return fig
 
     def get_winner(self, metric: str = "sharpe_ratio") -> str:
-        """
-        Get the best performing strategy by a given metric.
-
-        Args:
-            metric: Metric to use for ranking
-
-        Returns:
-            Name of winning strategy
-        """
+        """Get the best-performing strategy by a given metric."""
         if not self.scorecards:
             raise ValueError("No results available. Run tournament first.")
 
@@ -506,15 +461,7 @@ class StrategyArena:
         return rankings[0][0]
 
     def statistical_comparison(self, correction: str = "bonferroni") -> pd.DataFrame:
-        """
-        Perform statistical tests between strategies with multiple comparison correction.
-
-        Args:
-            correction: Method for multiple comparison correction ('bonferroni' or 'fdr')
-
-        Returns:
-            DataFrame with p-values for pairwise comparisons
-        """
+        """Perform pairwise statistical tests between strategies."""
         from scipy import stats
 
         names = list(self.scorecards.keys())
@@ -536,34 +483,23 @@ class StrategyArena:
                     returns1 = sc1.pnl_series.diff().dropna()
                     returns2 = sc2.pnl_series.diff().dropna()
 
-                    # Welch's t-test (does not assume equal variance)
                     _, p_value = stats.ttest_ind(returns1, returns2, equal_var=False)
                     p_values[i, j] = p_value
                     p_values[j, i] = p_value
                     raw_p_values.append(p_value)
                     indices.append((i, j))
 
-        # Apply multiple comparison correction
         n_tests = len(raw_p_values)
         if n_tests > 1 and correction == "bonferroni":
-            # Bonferroni correction: multiply by number of tests
             for (i, j), p in zip(indices, raw_p_values):
-                corrected_p = min(p * n_tests, 1.0)  # Cap at 1.0
+                corrected_p = min(p * n_tests, 1.0)
                 p_values[i, j] = corrected_p
                 p_values[j, i] = corrected_p
 
         return pd.DataFrame(p_values, index=names, columns=names)
 
     def generate_report(self, output_file: Optional[str] = None) -> str:
-        """
-        Generate comprehensive text report.
-
-        Args:
-            output_file: Optional file to save report
-
-        Returns:
-            Report string
-        """
+        """Generate a text report and optionally persist it to disk."""
         lines = []
         lines.append("=" * 70)
         lines.append("STRATEGY ARENA - BACKTEST REPORT")
@@ -571,7 +507,6 @@ class StrategyArena:
         lines.append(f"\nBacktest Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         lines.append(f"Initial Capital: ${self.initial_capital:,.2f}")
         lines.append(f"Transaction Cost: {self.transaction_cost_bps} bps")
-        # Safely get date range
         if len(self.market_data) > 0:
             start_date = self.market_data.index[0]
             end_date = self.market_data.index[-1]

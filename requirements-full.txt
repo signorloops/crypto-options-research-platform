@@ -1,0 +1,2 @@
+# Full dependency profile (includes heavy optional stacks).
+-e .[dev,full]

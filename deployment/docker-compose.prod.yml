@@ -50,10 +50,11 @@ services:
       dockerfile: deployment/Dockerfile.prod
     container_name: mm-risk-monitor
     restart: unless-stopped
-    command: python -m execution.risk_monitor
+    command: python -m execution.service_runner
     environment:
       - ENV=production
       - SERVICE_TYPE=risk
+      - SERVICE_NAME=risk-monitor
       - RISK_MONITOR_PORT=${RISK_MONITOR_PORT:-8081}
       - HEALTH_PORT=${RISK_MONITOR_PORT:-8081}
     env_file:
@@ -82,10 +83,11 @@ services:
       dockerfile: deployment/Dockerfile.prod
     container_name: mm-market-data
     restart: unless-stopped
-    command: python -m execution.market_data_collector
+    command: python -m execution.service_runner
     environment:
       - ENV=production
       - SERVICE_TYPE=market_data
+      - SERVICE_NAME=market-data-collector
       - MARKET_DATA_COLLECTOR_PORT=${MARKET_DATA_COLLECTOR_PORT:-8082}
       - HEALTH_PORT=${MARKET_DATA_COLLECTOR_PORT:-8082}
     env_file:

@@ -73,7 +73,7 @@ jobs:
             exit 0
           fi
 
-          CHANGED_PY="$(git diff --name-only "$BASE_SHA" "$GITHUB_SHA" | grep -E '^(core|data|research|strategies|execution|utils)/.*\.py$' || true)"
+          CHANGED_PY="$(git diff --name-only --diff-filter=ACMRT "$BASE_SHA" "$GITHUB_SHA" | grep -E '^(core|data|research|strategies|execution|utils)/.*\.py$' || true)"
           if [ -z "$CHANGED_PY" ]; then
             echo "No governed Python files changed; skipping changed-files gate."
             exit 0

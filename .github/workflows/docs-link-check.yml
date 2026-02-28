@@ -1,0 +1,23 @@
+name: Docs Link Check
+
+on:
+  pull_request:
+    branches: [ master, main ]
+  push:
+    branches: [ master, main ]
+
+jobs:
+  docs-link-check:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Run markdown link check
+      run: |
+        python scripts/docs/check_markdown_links.py \
+          --paths README.md docs/GUIDE.md docs/plans docs/archive/README.md docs/archive/plans/README.md
