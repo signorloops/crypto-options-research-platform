@@ -24,6 +24,20 @@ ROLE_SIGNOFF_ITEMS: list[tuple[str, str]] = [
     ("risk", "Risk 签字"),
 ]
 
+TASK_TO_MANUAL_KEY: dict[str, str] = {
+    "灰度发布完成": "gray_release_completed",
+    "24h 观察完成": "observation_24h_completed",
+    "是否触发回滚已决策": "rollback_decision_recorded",
+    "收益归因表": "pnl_attribution_confirmed",
+    "收益归因表确认": "pnl_attribution_confirmed",
+    "变更与回滚记录": "change_and_rollback_recorded",
+    "ADR": "adr_signed",
+}
+
+TASK_CANONICAL_LABEL: dict[str, str] = {
+    "收益归因表": "收益归因表确认",
+}
+
 
 def _load_json(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as f:
@@ -87,12 +101,15 @@ def _build_report(
     decision: dict[str, Any],
     attribution: dict[str, Any],
     manual_status: dict[str, Any],
+    consistency_replay: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     status = _normalize_manual_status(manual_status)
     checklist = audit.get("checklist", {})
     summary = audit.get("summary", {})
     recommendation = str(canary.get("recommendation", "")).strip()
     decision_value = str(decision.get("decision", "")).strip()
+    replay = consistency_replay if isinstance(consistency_replay, dict) else {}
+    consistency_replay_status = str(replay.get("status", "")).strip().upper()
 
     auto_checks = [
         {
@@ -119,9 +136,15 @@ def _build_report(
             "label": "decision is APPROVE_CANARY",
             "passed": decision_value == "APPROVE_CANARY",
         },
+        {
+            "label": "online/offline replay status != FAIL",
+            "passed": consistency_replay_status != "FAIL",
+        },
     ]
 
     auto_blockers = [item["label"] for item in auto_checks if not item["passed"]]
+    if consistency_replay_status == "FAIL":
+        auto_blockers.append("online_offline_replay_status=FAIL")
 
     manual_items: list[dict[str, Any]] = []
     pending_items: list[str] = []
@@ -140,7 +163,16 @@ def _build_report(
             pending_items.append(label)
 
     for task in list(audit.get("incomplete_tasks", [])) + list(decision.get("follow_up_tasks", [])):
-        pending_items.append(str(task))
+        task_text = str(task).strip()
+        if not task_text:
+            continue
+        manual_key = TASK_TO_MANUAL_KEY.get(task_text)
+        if manual_key and bool(status.get(manual_key)):
+            continue
+        pending_items.append(TASK_CANONICAL_LABEL.get(task_text, task_text))
+    replay_pending = consistency_replay_status in {"", "PENDING_DATA"}
+    if replay_pending:
+        pending_items.append("线上/线下一致性回放数据待联调")
 
     pending_items = _dedupe_keep_order(pending_items)
     if auto_blockers:
@@ -165,6 +197,7 @@ def _build_report(
             "canary_recommendation": recommendation,
             "decision": decision_value,
             "attribution_rows": attribution_count,
+            "online_offline_replay_status": consistency_replay_status,
         },
         "summary": {
             "auto_blockers": len(auto_blockers),
@@ -188,7 +221,8 @@ def _to_markdown(report: dict[str, Any]) -> str:
         "- Inputs: "
         f"canary=`{report['inputs']['canary_recommendation'] or 'n/a'}`, "
         f"decision=`{report['inputs']['decision'] or 'n/a'}`, "
-        f"attribution_rows=`{report['inputs']['attribution_rows']}`"
+        f"attribution_rows=`{report['inputs']['attribution_rows']}`, "
+        f"online_offline_replay=`{report['inputs']['online_offline_replay_status'] or 'n/a'}`"
     )
     lines.append("")
     lines.append("## Auto Checks")
@@ -249,6 +283,11 @@ def main() -> int:
         help="Path to manual confirmation JSON. Defaults to all-unchecked when file is missing.",
     )
     parser.add_argument(
+        "--consistency-replay-json",
+        default="artifacts/online-offline-consistency-replay.json",
+        help="Path to online/offline consistency replay JSON.",
+    )
+    parser.add_argument(
         "--output-md",
         default="artifacts/weekly-signoff-pack.md",
         help="Output markdown path.",
@@ -270,6 +309,7 @@ def main() -> int:
     decision = _load_json(Path(args.decision_json).resolve())
     attribution = _load_json(Path(args.attribution_json).resolve())
     manual_status_path = Path(args.manual_status_json).resolve()
+    consistency_replay = _load_optional_json(Path(args.consistency_replay_json).resolve())
     if not manual_status_path.exists():
         manual_status_path.parent.mkdir(parents=True, exist_ok=True)
         manual_status_path.write_text(
@@ -284,6 +324,7 @@ def main() -> int:
         decision=decision,
         attribution=attribution,
         manual_status=manual_status,
+        consistency_replay=consistency_replay,
     )
 
     output_md = Path(args.output_md).resolve()

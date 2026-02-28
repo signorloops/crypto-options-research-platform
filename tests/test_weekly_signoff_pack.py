@@ -52,6 +52,167 @@ def test_build_report_marks_pending_manual_items():
     assert report["status"] == "PENDING_MANUAL_SIGNOFF"
     assert "24h 观察完成" in report["pending_items"]
     assert "收益归因表确认" in report["pending_items"]
+    assert "灰度发布完成" not in report["pending_items"]
+
+
+def test_build_report_skips_followup_alias_when_manual_item_already_done():
+    module = _load_module()
+    report = module._build_report(
+        audit={
+            "summary": {"exceptions": 0, "consistency_exceptions": 0},
+            "checklist": {"minimum_regression_passed": True, "rollback_version_marked": True},
+            "incomplete_tasks": ["收益归因表"],
+        },
+        canary={"recommendation": "PROCEED_CANARY", "blockers": []},
+        decision={"decision": "APPROVE_CANARY", "follow_up_tasks": ["收益归因表确认"]},
+        attribution={"attribution_snapshot": [{"strategy": "demo"}]},
+        manual_status={
+            "gray_release_completed": False,
+            "observation_24h_completed": False,
+            "rollback_decision_recorded": False,
+            "pnl_attribution_confirmed": True,
+            "change_and_rollback_recorded": False,
+            "adr_signed": False,
+            "signoffs": {},
+        },
+    )
+
+    assert "收益归因表" not in report["pending_items"]
+    assert "收益归因表确认" not in report["pending_items"]
+
+
+def test_build_report_collapses_followup_alias_to_canonical_label():
+    module = _load_module()
+    report = module._build_report(
+        audit={
+            "summary": {"exceptions": 0, "consistency_exceptions": 0},
+            "checklist": {"minimum_regression_passed": True, "rollback_version_marked": True},
+            "incomplete_tasks": ["收益归因表"],
+        },
+        canary={"recommendation": "PROCEED_CANARY", "blockers": []},
+        decision={"decision": "APPROVE_CANARY", "follow_up_tasks": ["收益归因表确认"]},
+        attribution={"attribution_snapshot": [{"strategy": "demo"}]},
+        manual_status={
+            "gray_release_completed": False,
+            "observation_24h_completed": False,
+            "rollback_decision_recorded": False,
+            "pnl_attribution_confirmed": False,
+            "change_and_rollback_recorded": False,
+            "adr_signed": False,
+            "signoffs": {},
+        },
+    )
+
+    assert report["pending_items"].count("收益归因表确认") == 1
+    assert "收益归因表" not in report["pending_items"]
+
+
+def test_build_report_auto_blocked_when_online_offline_replay_fails():
+    module = _load_module()
+    report = module._build_report(
+        audit={
+            "summary": {"exceptions": 0, "consistency_exceptions": 0},
+            "checklist": {"minimum_regression_passed": True, "rollback_version_marked": True},
+            "incomplete_tasks": [],
+        },
+        canary={"recommendation": "PROCEED_CANARY", "blockers": []},
+        decision={"decision": "APPROVE_CANARY", "follow_up_tasks": []},
+        attribution={"attribution_snapshot": [{"strategy": "demo"}]},
+        manual_status={
+            "gray_release_completed": True,
+            "observation_24h_completed": True,
+            "rollback_decision_recorded": True,
+            "pnl_attribution_confirmed": True,
+            "change_and_rollback_recorded": True,
+            "adr_signed": True,
+            "signoffs": {"research": "r", "engineering": "e", "risk": "k"},
+        },
+        consistency_replay={"status": "FAIL"},
+    )
+
+    assert report["status"] == "AUTO_BLOCKED"
+    assert "online_offline_replay_status=FAIL" in report["auto_blockers"]
+
+
+def test_build_report_treats_lowercase_online_offline_fail_as_blocking():
+    module = _load_module()
+    report = module._build_report(
+        audit={
+            "summary": {"exceptions": 0, "consistency_exceptions": 0},
+            "checklist": {"minimum_regression_passed": True, "rollback_version_marked": True},
+            "incomplete_tasks": [],
+        },
+        canary={"recommendation": "PROCEED_CANARY", "blockers": []},
+        decision={"decision": "APPROVE_CANARY", "follow_up_tasks": []},
+        attribution={"attribution_snapshot": [{"strategy": "demo"}]},
+        manual_status={
+            "gray_release_completed": True,
+            "observation_24h_completed": True,
+            "rollback_decision_recorded": True,
+            "pnl_attribution_confirmed": True,
+            "change_and_rollback_recorded": True,
+            "adr_signed": True,
+            "signoffs": {"research": "r", "engineering": "e", "risk": "k"},
+        },
+        consistency_replay={"status": "fail"},
+    )
+
+    assert report["status"] == "AUTO_BLOCKED"
+    assert "online_offline_replay_status=FAIL" in report["auto_blockers"]
+
+
+def test_build_report_adds_pending_item_when_online_offline_data_is_pending():
+    module = _load_module()
+    report = module._build_report(
+        audit={
+            "summary": {"exceptions": 0, "consistency_exceptions": 0},
+            "checklist": {"minimum_regression_passed": True, "rollback_version_marked": True},
+            "incomplete_tasks": [],
+        },
+        canary={"recommendation": "PROCEED_CANARY", "blockers": []},
+        decision={"decision": "APPROVE_CANARY", "follow_up_tasks": []},
+        attribution={"attribution_snapshot": [{"strategy": "demo"}]},
+        manual_status={
+            "gray_release_completed": True,
+            "observation_24h_completed": True,
+            "rollback_decision_recorded": True,
+            "pnl_attribution_confirmed": True,
+            "change_and_rollback_recorded": True,
+            "adr_signed": True,
+            "signoffs": {"research": "r", "engineering": "e", "risk": "k"},
+        },
+        consistency_replay={"status": "PENDING_DATA"},
+    )
+
+    assert report["status"] == "PENDING_MANUAL_SIGNOFF"
+    assert "线上/线下一致性回放数据待联调" in report["pending_items"]
+
+
+def test_build_report_adds_pending_item_when_online_offline_status_is_missing():
+    module = _load_module()
+    report = module._build_report(
+        audit={
+            "summary": {"exceptions": 0, "consistency_exceptions": 0},
+            "checklist": {"minimum_regression_passed": True, "rollback_version_marked": True},
+            "incomplete_tasks": [],
+        },
+        canary={"recommendation": "PROCEED_CANARY", "blockers": []},
+        decision={"decision": "APPROVE_CANARY", "follow_up_tasks": []},
+        attribution={"attribution_snapshot": [{"strategy": "demo"}]},
+        manual_status={
+            "gray_release_completed": True,
+            "observation_24h_completed": True,
+            "rollback_decision_recorded": True,
+            "pnl_attribution_confirmed": True,
+            "change_and_rollback_recorded": True,
+            "adr_signed": True,
+            "signoffs": {"research": "r", "engineering": "e", "risk": "k"},
+        },
+        consistency_replay={},
+    )
+
+    assert report["status"] == "PENDING_MANUAL_SIGNOFF"
+    assert "线上/线下一致性回放数据待联调" in report["pending_items"]
 
 
 def test_main_strict_returns_nonzero_when_pending(tmp_path, monkeypatch):
@@ -61,6 +222,7 @@ def test_main_strict_returns_nonzero_when_pending(tmp_path, monkeypatch):
     decision_json = tmp_path / "decision.json"
     attribution_json = tmp_path / "attribution.json"
     manual_json = tmp_path / "manual.json"
+    consistency_json = tmp_path / "consistency.json"
 
     _write(
         audit_json,
@@ -76,6 +238,7 @@ def test_main_strict_returns_nonzero_when_pending(tmp_path, monkeypatch):
     _write(decision_json, json.dumps({"decision": "APPROVE_CANARY", "follow_up_tasks": []}))
     _write(attribution_json, json.dumps({"attribution_snapshot": []}))
     _write(manual_json, json.dumps({"gray_release_completed": False}))
+    _write(consistency_json, json.dumps({"status": "PASS"}))
 
     output_md = tmp_path / "weekly-signoff-pack.md"
     output_json = tmp_path / "weekly-signoff-pack.json"
@@ -94,6 +257,8 @@ def test_main_strict_returns_nonzero_when_pending(tmp_path, monkeypatch):
             str(attribution_json),
             "--manual-status-json",
             str(manual_json),
+            "--consistency-replay-json",
+            str(consistency_json),
             "--output-md",
             str(output_md),
             "--output-json",
@@ -116,6 +281,7 @@ def test_main_strict_returns_zero_when_all_confirmed(tmp_path, monkeypatch):
     decision_json = tmp_path / "decision.json"
     attribution_json = tmp_path / "attribution.json"
     manual_json = tmp_path / "manual.json"
+    consistency_json = tmp_path / "consistency.json"
 
     _write(
         audit_json,
@@ -148,6 +314,7 @@ def test_main_strict_returns_zero_when_all_confirmed(tmp_path, monkeypatch):
             }
         ),
     )
+    _write(consistency_json, json.dumps({"status": "PASS"}))
 
     output_md = tmp_path / "weekly-signoff-pack.md"
     output_json = tmp_path / "weekly-signoff-pack.json"
@@ -166,6 +333,8 @@ def test_main_strict_returns_zero_when_all_confirmed(tmp_path, monkeypatch):
             str(attribution_json),
             "--manual-status-json",
             str(manual_json),
+            "--consistency-replay-json",
+            str(consistency_json),
             "--output-md",
             str(output_md),
             "--output-json",
@@ -188,6 +357,7 @@ def test_main_creates_manual_template_when_missing(tmp_path, monkeypatch):
     decision_json = tmp_path / "decision.json"
     attribution_json = tmp_path / "attribution.json"
     manual_json = tmp_path / "manual.json"
+    consistency_json = tmp_path / "consistency.json"
 
     _write(
         audit_json,
@@ -202,6 +372,7 @@ def test_main_creates_manual_template_when_missing(tmp_path, monkeypatch):
     _write(canary_json, json.dumps({"recommendation": "PROCEED_CANARY", "blockers": []}))
     _write(decision_json, json.dumps({"decision": "APPROVE_CANARY", "follow_up_tasks": []}))
     _write(attribution_json, json.dumps({"attribution_snapshot": []}))
+    _write(consistency_json, json.dumps({"status": "PASS"}))
 
     output_md = tmp_path / "weekly-signoff-pack.md"
     output_json = tmp_path / "weekly-signoff-pack.json"
@@ -220,6 +391,8 @@ def test_main_creates_manual_template_when_missing(tmp_path, monkeypatch):
             str(attribution_json),
             "--manual-status-json",
             str(manual_json),
+            "--consistency-replay-json",
+            str(consistency_json),
             "--output-md",
             str(output_md),
             "--output-json",

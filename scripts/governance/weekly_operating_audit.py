@@ -43,6 +43,166 @@ def _load_json(path: Path) -> dict[str, Any]:
     return data
 
 
+def _to_text_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    items: list[str] = []
+    for entry in value:
+        text = str(entry).strip()
+        if text:
+            items.append(text)
+    return items
+
+
+def _summarize_items(items: list[str], limit: int = 4) -> str:
+    if not items:
+        return "None"
+    visible = items[:limit]
+    summary = " / ".join(visible)
+    remaining = len(items) - len(visible)
+    if remaining > 0:
+        return f"{summary} (+{remaining} more)"
+    return summary
+
+
+def _load_close_gate_snapshot(signoff_json_path: Path) -> tuple[dict[str, Any], str]:
+    if not signoff_json_path.exists():
+        return {}, "missing_signoff_json"
+    try:
+        payload = _load_json(signoff_json_path)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {}, "invalid_signoff_json"
+    return payload, ""
+
+
+def _evaluate_close_gate(signoff_json_path: Path) -> tuple[bool, str, dict[str, Any]]:
+    payload, load_error = _load_close_gate_snapshot(signoff_json_path)
+    if load_error:
+        return False, load_error, {}
+    status = str(payload.get("status", "")).strip().upper()
+    if status == "READY_FOR_CLOSE":
+        return True, status, payload
+    if status:
+        return False, f"status={status}", payload
+    return False, "status=UNKNOWN", payload
+
+
+def _build_close_gate_report(
+    *,
+    signoff_json_path: Path,
+    close_ready: bool,
+    close_detail: str,
+    signoff_payload: dict[str, Any],
+) -> dict[str, Any]:
+    manual_items = signoff_payload.get("manual_items")
+    role_signoffs = signoff_payload.get("role_signoffs")
+    manual_missing = [
+        str(item.get("label", "")).strip()
+        for item in (manual_items if isinstance(manual_items, list) else [])
+        if isinstance(item, dict) and not bool(item.get("done"))
+    ]
+    role_signoffs_missing = [
+        str(item.get("label", "")).strip()
+        for item in (role_signoffs if isinstance(role_signoffs, list) else [])
+        if isinstance(item, dict) and not bool(item.get("done"))
+    ]
+    manual_missing = [x for x in manual_missing if x]
+    role_signoffs_missing = [x for x in role_signoffs_missing if x]
+    signoff_status = str(signoff_payload.get("status", "")).strip().upper()
+    auto_blockers = _to_text_list(signoff_payload.get("auto_blockers"))
+    pending_items = _to_text_list(signoff_payload.get("pending_items"))
+    action_items: list[str] = []
+    if signoff_status == "AUTO_BLOCKED":
+        action_items.append("Resolve auto blockers to clear AUTO_BLOCKED status.")
+    if manual_missing:
+        action_items.append("Complete remaining manual checks.")
+    if role_signoffs_missing:
+        action_items.append("Collect all role sign-offs (Research/Engineering/Risk).")
+    if not action_items and not close_ready:
+        action_items.append("Review sign-off payload and set status to READY_FOR_CLOSE.")
+    pr_brief_lines = [
+        "### Weekly Close Gate",
+        f"- Status: {'PASS' if close_ready else 'FAIL'} (`{close_detail}`)",
+        f"- Signoff status: `{signoff_status or 'UNKNOWN'}`",
+        f"- Auto blockers: {_summarize_items(auto_blockers)}",
+        f"- Pending items: {_summarize_items(pending_items)}",
+        f"- Next actions: {_summarize_items(action_items, limit=3)}",
+    ]
+    pr_brief = "\n".join(pr_brief_lines)
+    return {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "status": "PASS" if close_ready else "FAIL",
+        "gate": "READY_FOR_CLOSE",
+        "reason": close_detail,
+        "signoff_json": str(signoff_json_path),
+        "signoff_status": signoff_status or "UNKNOWN",
+        "auto_blockers": auto_blockers,
+        "pending_items": pending_items,
+        "manual_missing": manual_missing,
+        "role_signoffs_missing": role_signoffs_missing,
+        "action_items": action_items,
+        "pr_brief": pr_brief,
+        "summary": {
+            "auto_blockers": len(auto_blockers),
+            "pending_items": len(pending_items),
+            "manual_missing": len(manual_missing),
+            "role_signoffs_missing": len(role_signoffs_missing),
+        },
+    }
+
+
+def _close_gate_to_markdown(report: dict[str, Any]) -> str:
+    lines: list[str] = []
+    lines.append("# Weekly Close Gate")
+    lines.append("")
+    lines.append(f"- Generated (UTC): `{report['generated_at_utc']}`")
+    lines.append(f"- Status: `{report['status']}`")
+    lines.append(f"- Gate: `{report['gate']}`")
+    lines.append(f"- Reason: `{report['reason']}`")
+    lines.append(f"- Signoff Status: `{report['signoff_status']}`")
+    lines.append(f"- Signoff JSON: `{report['signoff_json']}`")
+    lines.append("")
+    lines.append("## Auto Blockers")
+    lines.append("")
+    if report["auto_blockers"]:
+        for item in report["auto_blockers"]:
+            lines.append(f"- [ ] {item}")
+    else:
+        lines.append("- [x] None")
+    lines.append("")
+    lines.append("## Pending Items")
+    lines.append("")
+    if report["pending_items"]:
+        for item in report["pending_items"]:
+            lines.append(f"- [ ] {item}")
+    else:
+        lines.append("- [x] None")
+    lines.append("")
+    lines.append("## Missing Manual Checks")
+    lines.append("")
+    if report["manual_missing"]:
+        for item in report["manual_missing"]:
+            lines.append(f"- [ ] {item}")
+    else:
+        lines.append("- [x] None")
+    lines.append("")
+    lines.append("## Missing Role Sign-offs")
+    lines.append("")
+    if report["role_signoffs_missing"]:
+        for item in report["role_signoffs_missing"]:
+            lines.append(f"- [ ] {item}")
+    else:
+        lines.append("- [x] None")
+    lines.append("")
+    lines.append("## PR Brief (Copy/Paste)")
+    lines.append("")
+    lines.append("```markdown")
+    lines.append(report["pr_brief"])
+    lines.append("```")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def _to_float(value: Any) -> float | None:
     if value is None:
         return None
@@ -681,6 +841,31 @@ def main() -> int:
         help="Exit non-zero when risk exceptions exist or no strategy rows can be extracted.",
     )
     parser.add_argument(
+        "--strict-close",
+        action="store_true",
+        help="Exit non-zero unless weekly sign-off status is READY_FOR_CLOSE.",
+    )
+    parser.add_argument(
+        "--signoff-json",
+        default="artifacts/weekly-signoff-pack.json",
+        help="Path to weekly sign-off JSON used by --strict-close.",
+    )
+    parser.add_argument(
+        "--close-gate-only",
+        action="store_true",
+        help="Only validate close gate status from --signoff-json.",
+    )
+    parser.add_argument(
+        "--close-gate-output-md",
+        default="artifacts/weekly-close-gate.md",
+        help="Output markdown path for close gate summary.",
+    )
+    parser.add_argument(
+        "--close-gate-output-json",
+        default="artifacts/weekly-close-gate.json",
+        help="Output JSON path for close gate summary.",
+    )
+    parser.add_argument(
         "--regression-cmd",
         default="",
         help="Optional regression command to execute and include in the audit report.",
@@ -694,6 +879,34 @@ def main() -> int:
     args = parser.parse_args()
 
     repo_root = Path(".").resolve()
+    signoff_json_path = (repo_root / args.signoff_json).resolve()
+    close_gate_md = (repo_root / args.close_gate_output_md).resolve()
+    close_gate_json = (repo_root / args.close_gate_output_json).resolve()
+
+    def _write_close_gate_report(close_ready: bool, close_detail: str, signoff_payload: dict[str, Any]) -> None:
+        close_report = _build_close_gate_report(
+            signoff_json_path=signoff_json_path,
+            close_ready=close_ready,
+            close_detail=close_detail,
+            signoff_payload=signoff_payload,
+        )
+        close_gate_md.parent.mkdir(parents=True, exist_ok=True)
+        close_gate_json.parent.mkdir(parents=True, exist_ok=True)
+        close_gate_md.write_text(_close_gate_to_markdown(close_report), encoding="utf-8")
+        close_gate_json.write_text(
+            json.dumps(close_report, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+    if args.close_gate_only:
+        close_ready, close_detail, signoff_payload = _evaluate_close_gate(signoff_json_path)
+        _write_close_gate_report(close_ready, close_detail, signoff_payload)
+        if close_ready:
+            print("Weekly close gate: READY_FOR_CLOSE.")
+            return 0
+        print(f"Weekly close gate: not ready ({close_detail}).")
+        return 2 if args.strict_close else 0
+
     thresholds_path = (repo_root / args.thresholds).resolve()
     thresholds = _load_thresholds(thresholds_path)
     consistency_thresholds_path = (repo_root / args.consistency_thresholds).resolve()
@@ -707,7 +920,7 @@ def main() -> int:
 
     if not input_files:
         print("Weekly operating audit: no input files found.")
-        return 2 if args.strict else 0
+        return 2 if (args.strict or args.strict_close) else 0
 
     regression_result: dict[str, Any] | None = None
     if args.regression_cmd.strip():
@@ -771,6 +984,12 @@ def main() -> int:
         )
         had_issue = True
         if args.strict:
+            return 2
+    if args.strict_close:
+        close_ready, close_detail, signoff_payload = _evaluate_close_gate(signoff_json_path)
+        _write_close_gate_report(close_ready, close_detail, signoff_payload)
+        if not close_ready:
+            print(f"Weekly operating audit: close gate not ready ({close_detail}).")
             return 2
     if not had_issue:
         print("Weekly operating audit: no threshold exceptions.")

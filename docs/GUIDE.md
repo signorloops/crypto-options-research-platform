@@ -54,6 +54,7 @@ pytest tests/test_hawkes_comparison.py::TestHawkesMetricsCollector -v
 📄 docs/算法与模型深度讲解.md           ← 算法/模型系统化详解
 📄 docs/deployment.md            ← 部署与运维
 📄 docs/examples.md              ← 使用示例合集
+📄 docs/plans/README.md          ← 计划文档索引（主入口）
 📄 docs/plans/2026-Q2-long-term-execution-roadmap.md ← 季度执行路线图（12周）
 📄 docs/plans/weekly-operating-checklist.md ← 每周执行清单模板
 ```
@@ -358,7 +359,7 @@ print(f"强度-价差相关性: {metrics.intensity_spread_correlation}")
 ### 项目内
 - [GitHub Issues](https://github.com/signorloops/crypto-options-research-platform/issues) - 问题讨论
 - [Tests](../tests/) - 学习代码的好材料
-- [Notebooks](../notebooks/) - 交互式学习
+- [Examples](examples.md) - 示例与上手参考
 - [Archive 索引](archive/README.md) - 历史文档说明
 
 ### 外部资源

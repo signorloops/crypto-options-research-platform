@@ -10,9 +10,16 @@ cd corp
 make weekly-operating-audit
 ```
 
+发布前一键硬门禁（要求 `READY_FOR_CLOSE`）：
+
+```bash
+make weekly-close-gate
+```
+
 说明：该命令默认包含最小回归集（inverse/volatility/hawkes/dashboard）。
 并自动生成近 7 天变更记录与回滚基线 tag（如存在）。
-并自动串联生成 canary、收益归因、决策日志与人工签字包。
+并自动串联生成 canary、收益归因、决策日志、人工签字包与线上/线下一致性回放报告。
+其中签字包会读取一致性回放结果：`FAIL` 自动阻断，`PENDING_DATA` 或缺失状态进入待办项。
 
 输出文件：
 
@@ -28,6 +35,11 @@ make weekly-operating-audit
 - `artifacts/weekly-signoff-pack.md`
 - `artifacts/weekly-signoff-pack.json`
 - `artifacts/weekly-manual-status.json`（首次运行自动生成模板）
+- `artifacts/online-offline-consistency-replay.md`
+- `artifacts/online-offline-consistency-replay.json`
+- `artifacts/weekly-close-gate.md`（执行 `make weekly-close-gate` 时生成）
+- `artifacts/weekly-close-gate.json`（执行 `make weekly-close-gate` 时生成）
+  - 包含可直接复制到 PR 描述的 `PR Brief (Copy/Paste)` 段落与 `pr_brief` 字段
 
 ---
 

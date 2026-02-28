@@ -131,6 +131,7 @@ corp/
 - [工作区瘦身指南](docs/workspace-slimming.md)
 - [研究看板](docs/dashboard.md)
 - [部署指南](docs/deployment.md)
+- [计划文档索引](docs/plans/README.md)
 - [2026 Q2 长期执行路线图](docs/plans/2026-Q2-long-term-execution-roadmap.md)
 - [每周执行清单模板](docs/plans/weekly-operating-checklist.md)
 
@@ -158,7 +159,7 @@ make workspace-slim-clean
 # 检查部署配置是否误用旧入口模块名
 make check-service-entrypoint
 
-# 检查分支命名是否包含禁用关键字（如 codex）
+# 检查分支命名是否包含禁用关键字
 make branch-name-guard
 ```
 

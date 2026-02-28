@@ -21,9 +21,17 @@
 
 旧的阶段性修复记录与临时分析文档已移除；如需追溯，请查看 Git 历史。
 
+### 3) 历史计划文档
+
+- `plans/README.md`
+- `plans/2026-02-20-algorithm-upgrades.md`
+- `plans/2026-02-24-coin-margined-options-research-roadmap.md`
+- `plans/2026-03-complexity-reduction-sprint.md`
+
 ## 当前主文档入口
 
 - `../GUIDE.md`
+- `../plans/README.md`
 - `../quickstart.md`
 - `../theory.md`
 - `../architecture.md`

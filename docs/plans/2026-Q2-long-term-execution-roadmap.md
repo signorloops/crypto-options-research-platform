@@ -20,8 +20,8 @@
 
 - [x] W1 KPI 口径与基线快照自动化入口（`make weekly-operating-audit`）
 - [ ] W2 日级看板阈值告警完整上线（仍需生产数据源联调）
-- [ ] W3 线上/离线一致性框架（已补统一差异阈值配置并接入周审计 consistency gate，待线上数据源联调）
-- [ ] W4 日回归 + 周回放模板（`daily-regression` + `weekly-operating-audit` 工作流已覆盖；`daily-regression-gate` 已改为全 PR 触发，待仓库设置启用 required checks）
+- [ ] W3 线上/离线一致性框架（已补统一差异阈值配置并接入周审计 consistency gate；2026-02-28 新增 `online-offline-consistency-replay` 产物并接入 `weekly-signoff-pack` 自动阻断，待线上数据源联调）
+- [ ] W4 日回归 + 周回放模板（`daily-regression` + `weekly-operating-audit` 工作流已覆盖；`master` required checks 已于 2026-02-28 启用 `daily-regression-gate`，待首周线上回放闭环）
 
 ### Phase A：观测与一致性（W1-W4）
 

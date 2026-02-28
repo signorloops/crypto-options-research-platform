@@ -333,3 +333,125 @@ def test_main_strict_exits_nonzero_when_consistency_exceptions_exist(tmp_path, m
     assert exit_code == 2
     report = json.loads(report_json.read_text(encoding="utf-8"))
     assert report["summary"]["consistency_exceptions"] == 1
+
+
+def test_main_close_gate_only_strict_fails_when_signoff_missing(tmp_path, monkeypatch):
+    module = _load_module()
+    missing_signoff = tmp_path / "missing-signoff.json"
+    close_md = tmp_path / "artifacts" / "weekly-close-gate.md"
+    close_json = tmp_path / "artifacts" / "weekly-close-gate.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "weekly_operating_audit.py",
+            "--close-gate-only",
+            "--strict-close",
+            "--signoff-json",
+            str(missing_signoff),
+            "--close-gate-output-md",
+            str(close_md),
+            "--close-gate-output-json",
+            str(close_json),
+        ],
+    )
+
+    exit_code = module.main()
+
+    assert exit_code == 2
+    assert close_json.exists()
+    report = json.loads(close_json.read_text(encoding="utf-8"))
+    assert report["status"] == "FAIL"
+    assert report["reason"] == "missing_signoff_json"
+    assert "### Weekly Close Gate" in report["pr_brief"]
+    assert "Status: FAIL" in report["pr_brief"]
+
+
+def test_main_close_gate_only_strict_passes_when_ready(tmp_path, monkeypatch):
+    module = _load_module()
+    signoff_json = tmp_path / "weekly-signoff-pack.json"
+    close_md = tmp_path / "artifacts" / "weekly-close-gate.md"
+    close_json = tmp_path / "artifacts" / "weekly-close-gate.json"
+    _write(signoff_json, json.dumps({"status": "READY_FOR_CLOSE"}))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "weekly_operating_audit.py",
+            "--close-gate-only",
+            "--strict-close",
+            "--signoff-json",
+            str(signoff_json),
+            "--close-gate-output-md",
+            str(close_md),
+            "--close-gate-output-json",
+            str(close_json),
+        ],
+    )
+
+    exit_code = module.main()
+
+    assert exit_code == 0
+    report = json.loads(close_json.read_text(encoding="utf-8"))
+    assert report["status"] == "PASS"
+    assert report["signoff_status"] == "READY_FOR_CLOSE"
+    assert "Status: PASS" in report["pr_brief"]
+
+
+def test_main_strict_close_fails_when_signoff_not_ready(tmp_path, monkeypatch):
+    module = _load_module()
+    result_path = tmp_path / "results" / "backtest_results_ready.json"
+    _write(
+        result_path,
+        json.dumps(
+            {
+                "Stable": {
+                    "summary": {
+                        "total_pnl": 100.0,
+                        "sharpe_ratio": 1.0,
+                        "max_drawdown": -0.1,
+                    }
+                }
+            }
+        ),
+    )
+    thresholds_path = tmp_path / "thresholds.json"
+    signoff_json = tmp_path / "weekly-signoff-pack.json"
+    close_md = tmp_path / "artifacts" / "weekly-close-gate.md"
+    close_json = tmp_path / "artifacts" / "weekly-close-gate.json"
+    report_md = tmp_path / "artifacts" / "weekly-operating-audit.md"
+    report_json = tmp_path / "artifacts" / "weekly-operating-audit.json"
+    _write(thresholds_path, json.dumps(module.DEFAULT_THRESHOLDS))
+    _write(signoff_json, json.dumps({"status": "PENDING_MANUAL_SIGNOFF"}))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "weekly_operating_audit.py",
+            "--inputs",
+            str(result_path),
+            "--thresholds",
+            str(thresholds_path),
+            "--output-md",
+            str(report_md),
+            "--output-json",
+            str(report_json),
+            "--strict-close",
+            "--signoff-json",
+            str(signoff_json),
+            "--close-gate-output-md",
+            str(close_md),
+            "--close-gate-output-json",
+            str(close_json),
+        ],
+    )
+
+    exit_code = module.main()
+
+    assert exit_code == 2
+    assert report_json.exists()
+    close_report = json.loads(close_json.read_text(encoding="utf-8"))
+    assert close_report["status"] == "FAIL"
+    assert close_report["reason"] == "status=PENDING_MANUAL_SIGNOFF"
+    assert close_report["action_items"]
+    assert "Next actions:" in close_report["pr_brief"]

@@ -1,4 +1,4 @@
-.PHONY: help install install-dev install-dev-full workspace-slim-report workspace-slim-clean workspace-slim-clean-venv test test-unit test-integration test-cov lint lint-fix format format-check type-check quality branch-name-guard check-service-entrypoint complexity-audit daily-regression weekly-operating-audit weekly-pnl-attribution weekly-canary-checklist weekly-decision-log weekly-signoff-pack weekly-adr-draft clean docs
+.PHONY: help install install-dev install-dev-full workspace-slim-report workspace-slim-clean workspace-slim-clean-venv test test-unit test-integration test-cov lint lint-fix format format-check type-check quality branch-name-guard check-service-entrypoint docs-link-check complexity-audit daily-regression weekly-operating-audit weekly-close-gate weekly-pnl-attribution weekly-canary-checklist weekly-decision-log weekly-manual-prefill weekly-signoff-pack weekly-consistency-replay weekly-adr-draft clean docs
 
 # Detect Python interpreter with project minimum version (3.9+).
 PYTHON_CANDIDATES := ./venv/bin/python ./.venv/bin/python ./env/bin/python python3.13 python3.12 python3.11 python3.10 python3.9 python3 python
@@ -47,13 +47,17 @@ help:
 	@echo "  quality          Run format-check + lint + type-check"
 	@echo "  branch-name-guard Fail if local/remote branch names include forbidden keywords"
 	@echo "  check-service-entrypoint Fail if deployment docs/scripts use legacy execution modules"
+	@echo "  docs-link-check  Validate local markdown links"
 	@echo "  complexity-audit Run strict complexity governance checks"
 	@echo "  daily-regression Run daily regression gate report"
 	@echo "  weekly-operating-audit Generate weekly KPI and risk exception report"
+	@echo "  weekly-close-gate Run weekly governance chain and enforce READY_FOR_CLOSE gate"
 	@echo "  weekly-pnl-attribution Generate weekly PnL attribution report"
 	@echo "  weekly-canary-checklist Generate weekly canary rollout checklist"
 	@echo "  weekly-decision-log Generate weekly decision and rollback log"
+	@echo "  weekly-manual-prefill Auto-prefill objective fields in weekly manual status"
 	@echo "  weekly-signoff-pack Generate weekly manual sign-off package"
+	@echo "  weekly-consistency-replay Generate online/offline consistency replay report"
 	@echo "  weekly-adr-draft Generate ADR draft from weekly audit JSON"
 	@echo "  clean            Clean build artifacts"
 	@echo "  docs             Build documentation"
@@ -119,6 +123,10 @@ check-service-entrypoint:
 		echo "Service entrypoint check passed."; \
 	fi
 
+docs-link-check:
+	$(PYTHON) scripts/docs/check_markdown_links.py \
+		--paths README.md docs/GUIDE.md docs/plans docs/archive/README.md docs/archive/plans/README.md
+
 complexity-audit:
 	$(PYTHON) scripts/governance/complexity_guard.py \
 		--config config/complexity_budget.json \
@@ -158,14 +166,32 @@ weekly-operating-audit:
 		--canary-json artifacts/weekly-canary-checklist.json \
 		--output-md artifacts/weekly-decision-log.md \
 		--output-json artifacts/weekly-decision-log.json
+	$(PYTHON) scripts/governance/weekly_manual_status_prefill.py \
+		--decision-json artifacts/weekly-decision-log.json \
+		--attribution-json artifacts/weekly-pnl-attribution.json \
+		--manual-status-json artifacts/weekly-manual-status.json
+	$(PYTHON) scripts/governance/online_offline_consistency_replay.py \
+		--audit-json artifacts/weekly-operating-audit.json \
+		--live-json artifacts/live-deviation-snapshot.json \
+		--thresholds config/online_offline_consistency_thresholds.json \
+		--output-md artifacts/online-offline-consistency-replay.md \
+		--output-json artifacts/online-offline-consistency-replay.json
 	$(PYTHON) scripts/governance/weekly_signoff_pack.py \
 		--audit-json artifacts/weekly-operating-audit.json \
 		--canary-json artifacts/weekly-canary-checklist.json \
 		--decision-json artifacts/weekly-decision-log.json \
 		--attribution-json artifacts/weekly-pnl-attribution.json \
 		--manual-status-json artifacts/weekly-manual-status.json \
+		--consistency-replay-json artifacts/online-offline-consistency-replay.json \
 		--output-md artifacts/weekly-signoff-pack.md \
 		--output-json artifacts/weekly-signoff-pack.json
+
+weekly-close-gate:
+	$(MAKE) weekly-operating-audit
+	$(PYTHON) scripts/governance/weekly_operating_audit.py \
+		--close-gate-only \
+		--strict-close \
+		--signoff-json artifacts/weekly-signoff-pack.json
 
 weekly-pnl-attribution:
 	$(PYTHON) scripts/governance/weekly_pnl_attribution.py \
@@ -186,6 +212,12 @@ weekly-decision-log:
 		--output-md artifacts/weekly-decision-log.md \
 		--output-json artifacts/weekly-decision-log.json
 
+weekly-manual-prefill:
+	$(PYTHON) scripts/governance/weekly_manual_status_prefill.py \
+		--decision-json artifacts/weekly-decision-log.json \
+		--attribution-json artifacts/weekly-pnl-attribution.json \
+		--manual-status-json artifacts/weekly-manual-status.json
+
 weekly-signoff-pack:
 	$(PYTHON) scripts/governance/weekly_signoff_pack.py \
 		--audit-json artifacts/weekly-operating-audit.json \
@@ -193,8 +225,17 @@ weekly-signoff-pack:
 		--decision-json artifacts/weekly-decision-log.json \
 		--attribution-json artifacts/weekly-pnl-attribution.json \
 		--manual-status-json artifacts/weekly-manual-status.json \
+		--consistency-replay-json artifacts/online-offline-consistency-replay.json \
 		--output-md artifacts/weekly-signoff-pack.md \
 		--output-json artifacts/weekly-signoff-pack.json
+
+weekly-consistency-replay:
+	$(PYTHON) scripts/governance/online_offline_consistency_replay.py \
+		--audit-json artifacts/weekly-operating-audit.json \
+		--live-json artifacts/live-deviation-snapshot.json \
+		--thresholds config/online_offline_consistency_thresholds.json \
+		--output-md artifacts/online-offline-consistency-replay.md \
+		--output-json artifacts/online-offline-consistency-replay.json
 
 weekly-adr-draft:
 	$(PYTHON) scripts/governance/weekly_adr_draft.py \
