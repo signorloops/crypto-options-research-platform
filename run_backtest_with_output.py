@@ -32,7 +32,10 @@ RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ============ 数据类型 ============
-@dataclass(slots=True)
+_DATACLASS_KWARGS = {"slots": True} if sys.version_info >= (3, 10) else {}
+
+
+@dataclass(**_DATACLASS_KWARGS)
 class Tick:
     timestamp: datetime
     price: float
@@ -40,7 +43,7 @@ class Tick:
     ask: float
 
 
-@dataclass(slots=True)
+@dataclass(**_DATACLASS_KWARGS)
 class BacktestState:
     """精简回测状态"""
 
