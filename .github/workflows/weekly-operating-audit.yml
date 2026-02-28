@@ -62,7 +62,8 @@ jobs:
             httpx \
             plotly \
             pydantic \
-            pydantic-settings
+            pydantic-settings \
+            prometheus-client
 
       - name: Run weekly operating audit (strict)
         run: |

@@ -54,11 +54,11 @@ Scope: `docs/plans/weekly-operating-checklist.md` + weekly governance automation
 ## Verification Executed
 
 ```bash
-/Users/linus/Documents/vibe-coding/crypto-options-research-platform/venv/bin/python -m pytest -q tests/test_weekly_signoff_pack.py tests/test_weekly_operating_audit.py tests/test_weekly_canary_checklist.py tests/test_weekly_decision_log.py tests/test_weekly_pnl_attribution.py tests/test_weekly_adr_draft.py
-/Users/linus/Documents/vibe-coding/crypto-options-research-platform/venv/bin/python -m pytest -q tests/test_workspace_slimmer.py
+venv/bin/python -m pytest -q tests/test_weekly_signoff_pack.py tests/test_weekly_operating_audit.py tests/test_weekly_canary_checklist.py tests/test_weekly_decision_log.py tests/test_weekly_pnl_attribution.py tests/test_weekly_adr_draft.py
+venv/bin/python -m pytest -q tests/test_workspace_slimmer.py
 make -n weekly-operating-audit
 make -n weekly-signoff-pack
 make help | rg "daily-regression|weekly-pnl-attribution|weekly-canary-checklist|weekly-decision-log|weekly-signoff-pack"
-/Users/linus/Documents/vibe-coding/crypto-options-research-platform/venv/bin/python -m pytest -q tests/test_weekly_operating_audit.py
+venv/bin/python -m pytest -q tests/test_weekly_operating_audit.py
 make workspace-slim-report
 ```
