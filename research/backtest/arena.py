@@ -320,7 +320,9 @@ class StrategyArena:
     def _plot_inventory(self, ax: plt.Axes) -> None:
         for name, sc in self.scorecards.items():
             if len(sc.inventory_series) > 0:
-                ax.plot(sc.inventory_series.index, sc.inventory_series.values, label=name, alpha=0.7)
+                ax.plot(
+                    sc.inventory_series.index, sc.inventory_series.values, label=name, alpha=0.7
+                )
         ax.axhline(y=0, color="k", linestyle="--", alpha=0.3)
         ax.set_title("Inventory Position")
         ax.set_ylabel("Position")

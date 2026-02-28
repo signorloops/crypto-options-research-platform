@@ -325,7 +325,9 @@ class BacktestEngine:
             asks=[OrderBookLevel(price=new_price + spread / 2, size=1.0)],
         )
 
-    def _generate_synthetic_trades(self, market_state: MarketState, volume: float = 1.0) -> List[Trade]:
+    def _generate_synthetic_trades(
+        self, market_state: MarketState, volume: float = 1.0
+    ) -> List[Trade]:
         """Generate synthetic trades from current event activity."""
         trades = []
         timestamp = market_state.timestamp

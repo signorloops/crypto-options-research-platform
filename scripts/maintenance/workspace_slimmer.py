@@ -89,7 +89,9 @@ def _build_cleanup_plan(
 
     for pycache in root.rglob("__pycache__"):
         if pycache.is_dir():
-            plan.append(CleanupItem(path=str(pycache.resolve()), kind="dir", bytes=_path_size(pycache)))
+            plan.append(
+                CleanupItem(path=str(pycache.resolve()), kind="dir", bytes=_path_size(pycache))
+            )
 
     if include_venv:
         for name in VENV_DIR_TARGETS:
@@ -100,7 +102,9 @@ def _build_cleanup_plan(
     if include_results:
         for file_path in _list_untracked_results(root):
             if file_path.is_file():
-                plan.append(CleanupItem(path=str(file_path), kind="file", bytes=file_path.stat().st_size))
+                plan.append(
+                    CleanupItem(path=str(file_path), kind="file", bytes=file_path.stat().st_size)
+                )
 
     dedup: dict[str, CleanupItem] = {}
     for item in plan:

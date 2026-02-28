@@ -97,7 +97,9 @@ def test_main_non_strict_allows_missing_live_snapshot(tmp_path, monkeypatch):
     output_md = tmp_path / "online-offline-consistency-replay.md"
     output_json = tmp_path / "online-offline-consistency-replay.json"
 
-    _write(audit_json, json.dumps({"summary": {"consistency_exceptions": 0, "consistency_pairs": 0}}))
+    _write(
+        audit_json, json.dumps({"summary": {"consistency_exceptions": 0, "consistency_pairs": 0}})
+    )
     _write(
         thresholds_json,
         json.dumps(
@@ -142,7 +144,9 @@ def test_main_strict_fails_when_pending_data(tmp_path, monkeypatch):
     output_md = tmp_path / "online-offline-consistency-replay.md"
     output_json = tmp_path / "online-offline-consistency-replay.json"
 
-    _write(audit_json, json.dumps({"summary": {"consistency_exceptions": 0, "consistency_pairs": 0}}))
+    _write(
+        audit_json, json.dumps({"summary": {"consistency_exceptions": 0, "consistency_pairs": 0}})
+    )
 
     monkeypatch.setattr(
         sys,

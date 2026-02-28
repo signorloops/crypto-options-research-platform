@@ -9,7 +9,6 @@ import signal
 
 from core.health_server import HealthServer, default_checks
 
-
 logger = logging.getLogger(__name__)
 SERVICE_DEFAULTS = {
     "trading-engine": ("TRADING_ENGINE_PORT", 8080),

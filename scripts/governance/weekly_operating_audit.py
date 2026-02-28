@@ -525,13 +525,18 @@ def _build_report(
         )
 
         breaches: list[str] = []
-        if abs_pnl_diff is not None and abs_pnl_diff > consistency_thresholds_final["max_abs_pnl_diff"]:
+        if (
+            abs_pnl_diff is not None
+            and abs_pnl_diff > consistency_thresholds_final["max_abs_pnl_diff"]
+        ):
             breaches.append(f"abs_pnl_diff>{consistency_thresholds_final['max_abs_pnl_diff']}")
         if (
             abs_sharpe_diff is not None
             and abs_sharpe_diff > consistency_thresholds_final["max_abs_sharpe_diff"]
         ):
-            breaches.append(f"abs_sharpe_diff>{consistency_thresholds_final['max_abs_sharpe_diff']}")
+            breaches.append(
+                f"abs_sharpe_diff>{consistency_thresholds_final['max_abs_sharpe_diff']}"
+            )
         if (
             abs_max_drawdown_diff is not None
             and abs_max_drawdown_diff > consistency_thresholds_final["max_abs_max_drawdown_diff"]
@@ -883,7 +888,9 @@ def main() -> int:
     close_gate_md = (repo_root / args.close_gate_output_md).resolve()
     close_gate_json = (repo_root / args.close_gate_output_json).resolve()
 
-    def _write_close_gate_report(close_ready: bool, close_detail: str, signoff_payload: dict[str, Any]) -> None:
+    def _write_close_gate_report(
+        close_ready: bool, close_detail: str, signoff_payload: dict[str, Any]
+    ) -> None:
         close_report = _build_close_gate_report(
             signoff_json_path=signoff_json_path,
             close_ready=close_ready,

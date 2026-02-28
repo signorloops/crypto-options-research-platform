@@ -98,8 +98,7 @@ def _build_report(
             and online_max_abs_deviation_bps > thresholds["max_online_abs_deviation_bps"]
         ):
             breaches.append(
-                "online_max_abs_deviation_bps>"
-                f"{thresholds['max_online_abs_deviation_bps']}"
+                "online_max_abs_deviation_bps>" f"{thresholds['max_online_abs_deviation_bps']}"
             )
 
     if breaches:
@@ -209,7 +208,9 @@ def _to_markdown(report: dict[str, Any]) -> str:
     lines.append("")
     lines.append("## Top Alerts")
     lines.append("")
-    lines.append(_format_table(report["top_alerts"], ["venue", "maturity", "delta", "deviation_bps"]))
+    lines.append(
+        _format_table(report["top_alerts"], ["venue", "maturity", "delta", "deviation_bps"])
+    )
     lines.append("")
     lines.append("## Root-Cause Candidates")
     lines.append("")
@@ -223,7 +224,9 @@ def _to_markdown(report: dict[str, Any]) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Generate online/offline consistency replay report.")
+    parser = argparse.ArgumentParser(
+        description="Generate online/offline consistency replay report."
+    )
     parser.add_argument(
         "--audit-json",
         default="artifacts/weekly-operating-audit.json",

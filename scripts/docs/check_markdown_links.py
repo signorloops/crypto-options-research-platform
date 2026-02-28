@@ -56,9 +56,7 @@ def _check_file(md_file: Path) -> list[str]:
         resolved = (md_file.parent / link_path).resolve()
         if not resolved.exists():
             line_no = text.count("\n", 0, match.start()) + 1
-            errors.append(
-                f"{md_file}:{line_no}: broken link -> {target_raw}"
-            )
+            errors.append(f"{md_file}:{line_no}: broken link -> {target_raw}")
     return errors
 
 

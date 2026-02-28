@@ -87,7 +87,9 @@ def _derive_autofill(decision: dict[str, Any], attribution: dict[str, Any]) -> d
     }
 
 
-def _apply_prefill(status: dict[str, Any], prefill: dict[str, bool]) -> tuple[dict[str, Any], list[str]]:
+def _apply_prefill(
+    status: dict[str, Any], prefill: dict[str, bool]
+) -> tuple[dict[str, Any], list[str]]:
     updated = _normalize_status(status)
     changed_keys: list[str] = []
     for key, flag in prefill.items():
@@ -100,7 +102,9 @@ def _apply_prefill(status: dict[str, Any], prefill: dict[str, bool]) -> tuple[di
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Auto-prefill objective weekly manual-status fields.")
+    parser = argparse.ArgumentParser(
+        description="Auto-prefill objective weekly manual-status fields."
+    )
     parser.add_argument(
         "--decision-json",
         default="artifacts/weekly-decision-log.json",
@@ -135,13 +139,12 @@ def main() -> int:
     updated_status, changed_keys = _apply_prefill(status, prefill)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(updated_status, indent=2, ensure_ascii=False), encoding="utf-8")
+    output_path.write_text(
+        json.dumps(updated_status, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
 
     changed_text = ", ".join(changed_keys) if changed_keys else "none"
-    print(
-        "Weekly manual status prefill: "
-        f"updated_keys={changed_text}, output={output_path}"
-    )
+    print("Weekly manual status prefill: " f"updated_keys={changed_text}, output={output_path}")
     return 0
 
 
