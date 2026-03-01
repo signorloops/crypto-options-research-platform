@@ -1,0 +1,58 @@
+{
+  "Naive MM": {
+    "summary": {
+      "position": -2.600000000000001,
+      "cash": 237754.91967523692,
+      "total_pnl": 1665.6857752858164,
+      "sharpe_ratio": 710.0511292401973,
+      "max_drawdown": -0.10022010353566442,
+      "trade_count": 322,
+      "buy_count": 148,
+      "sell_count": 174,
+      "spread_capture": 1962.9994481883284,
+      "adverse_selection_cost": 178.94393023291377,
+      "inventory_cost": 28.897777553141363,
+      "hedging_cost": 89.47196511645689
+    },
+    "pnl_history": [
+      [
+        "2024-01-01T00:05:00",
+        5.004685875745054
+      ]
+    ],
+    "position_history": [
+      [
+        "2024-01-01T00:05:00",
+        -0.1
+      ]
+    ]
+  },
+  "A-S Model": {
+    "summary": {
+      "position": -2.600000000000001,
+      "cash": 236110.42935375735,
+      "total_pnl": 21.19545380625643,
+      "sharpe_ratio": 1788.4569506036653,
+      "max_drawdown": -0.10725722270831727,
+      "trade_count": 322,
+      "buy_count": 148,
+      "sell_count": 174,
+      "spread_capture": 318.50912670876846,
+      "adverse_selection_cost": 178.94393023291377,
+      "inventory_cost": 28.897777553141363,
+      "hedging_cost": 89.47196511645689
+    },
+    "pnl_history": [
+      [
+        "2024-01-01T00:05:00",
+        0.06578852113743779
+      ]
+    ],
+    "position_history": [
+      [
+        "2024-01-01T00:05:00",
+        -0.1
+      ]
+    ]
+  }
+}
