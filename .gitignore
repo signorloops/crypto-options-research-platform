@@ -66,6 +66,9 @@ data/cache/*.parquet
 data/cache/*.csv
 data/cache/*.json
 
+# Generated local performance reports
+tests/performance/*_report*.md
+
 # Jupyter
 .ipynb_checkpoints/
 *.ipynb
