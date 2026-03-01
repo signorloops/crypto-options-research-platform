@@ -8,8 +8,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-WITH_OUTPUT_PATH = ROOT / "run_backtest_with_output.py"
-FULL_HISTORY_PATH = ROOT / "run_backtest_full_history.py"
+WITH_OUTPUT_PATH = ROOT / "scripts" / "backtest" / "run_backtest_with_output.py"
+FULL_HISTORY_PATH = ROOT / "scripts" / "backtest" / "run_backtest_full_history.py"
 
 
 def _load_module(path: Path, name: str):

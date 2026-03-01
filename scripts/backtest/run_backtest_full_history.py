@@ -16,7 +16,8 @@ from datetime import datetime, timedelta
 import warnings
 
 warnings.filterwarnings("ignore")
-sys.path.insert(0, str(Path(__file__).parent))
+# Ensure project root is importable when running from scripts/backtest/.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import numpy as np
 import matplotlib
