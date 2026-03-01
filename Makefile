@@ -74,13 +74,13 @@ install-dev-full:
 	$(PYTHON) -m pre_commit install
 
 workspace-slim-report:
-	$(PYTHON) scripts/maintenance/workspace_slimmer.py
+	$(PYTHON) scripts/maintenance/workspace_slimmer.py --all-worktrees
 
 workspace-slim-clean:
-	$(PYTHON) scripts/maintenance/workspace_slimmer.py --include-results --apply
+	$(PYTHON) scripts/maintenance/workspace_slimmer.py --all-worktrees --include-results --apply
 
 workspace-slim-clean-venv:
-	$(PYTHON) scripts/maintenance/workspace_slimmer.py --include-results --include-venv --apply
+	$(PYTHON) scripts/maintenance/workspace_slimmer.py --all-worktrees --include-results --include-venv --apply
 
 test:
 	$(PYTEST) -v

@@ -73,38 +73,77 @@ def _list_untracked_results(repo_root: Path) -> list[Path]:
     return paths
 
 
+def _list_worktree_roots(repo_root: Path) -> list[Path]:
+    completed = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return [repo_root.resolve()]
+
+    roots: list[Path] = []
+    for line in completed.stdout.splitlines():
+        if not line.startswith("worktree "):
+            continue
+        raw_path = line.split(" ", 1)[1].strip()
+        if not raw_path:
+            continue
+        candidate = Path(raw_path).resolve()
+        if candidate.exists():
+            roots.append(candidate)
+
+    if not roots:
+        return [repo_root.resolve()]
+
+    dedup: dict[str, Path] = {}
+    for item in roots:
+        dedup[str(item)] = item
+    return list(dedup.values())
+
+
 def _build_cleanup_plan(
     *,
     repo_root: Path,
     include_results: bool,
     include_venv: bool,
+    include_all_worktrees: bool,
 ) -> list[dict[str, Any]]:
     plan: list[CleanupItem] = []
-    root = repo_root.resolve()
+    roots = (
+        _list_worktree_roots(repo_root)
+        if include_all_worktrees
+        else [repo_root.resolve()]
+    )
 
-    for name in SAFE_DIR_TARGETS:
-        target = (root / name).resolve()
-        if target.exists():
-            plan.append(CleanupItem(path=str(target), kind="dir", bytes=_path_size(target)))
-
-    for pycache in root.rglob("__pycache__"):
-        if pycache.is_dir():
-            plan.append(
-                CleanupItem(path=str(pycache.resolve()), kind="dir", bytes=_path_size(pycache))
-            )
-
-    if include_venv:
-        for name in VENV_DIR_TARGETS:
+    for root in roots:
+        for name in SAFE_DIR_TARGETS:
             target = (root / name).resolve()
             if target.exists():
                 plan.append(CleanupItem(path=str(target), kind="dir", bytes=_path_size(target)))
 
-    if include_results:
-        for file_path in _list_untracked_results(root):
-            if file_path.is_file():
+        for pycache in root.rglob("__pycache__"):
+            if pycache.is_dir():
                 plan.append(
-                    CleanupItem(path=str(file_path), kind="file", bytes=file_path.stat().st_size)
+                    CleanupItem(path=str(pycache.resolve()), kind="dir", bytes=_path_size(pycache))
                 )
+
+        if include_venv:
+            for name in VENV_DIR_TARGETS:
+                target = (root / name).resolve()
+                if target.exists():
+                    plan.append(
+                        CleanupItem(path=str(target), kind="dir", bytes=_path_size(target))
+                    )
+
+        if include_results:
+            for file_path in _list_untracked_results(root):
+                if file_path.is_file():
+                    plan.append(
+                        CleanupItem(path=str(file_path), kind="file", bytes=file_path.stat().st_size)
+                    )
 
     dedup: dict[str, CleanupItem] = {}
     for item in plan:
@@ -146,6 +185,11 @@ def main() -> int:
         action="store_true",
         help="Apply cleanup plan. Default is dry-run report only.",
     )
+    parser.add_argument(
+        "--all-worktrees",
+        action="store_true",
+        help="Scan all worktrees in the same repository, not only --root.",
+    )
     args = parser.parse_args()
 
     root = Path(args.root).resolve()
@@ -153,6 +197,7 @@ def main() -> int:
         repo_root=root,
         include_results=args.include_results,
         include_venv=args.include_venv,
+        include_all_worktrees=args.all_worktrees,
     )
 
     total_bytes = sum(int(item["bytes"]) for item in plan)
