@@ -84,4 +84,6 @@ make live-deviation-snapshot
 - 治理手册：`governance-operations.md`
 - 治理时间线摘要：`archive/reports/2026-Q1-governance-timeline-summary.md`
 - 数学验证摘要：`archive/reports/2026-Q1-math-validation-summary.md`
-- 历史归档：`archive/README.md`
+- 历史计划摘要：`archive/plans/2026-Q1-archived-plans-summary.md`
+- 历史学习摘要：`archive/learning/learning-materials-summary.md`
+- 历史报告摘要：`archive/reports/2026-Q1-governance-timeline-summary.md`

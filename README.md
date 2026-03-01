@@ -112,7 +112,9 @@ corp/
 - [Q2 执行路线图](docs/plans/2026-Q2-long-term-execution-roadmap.md)
 - [周执行清单](docs/plans/weekly-operating-checklist.md)
 - [治理时间线摘要](docs/archive/reports/2026-Q1-governance-timeline-summary.md)
-- [历史归档索引](docs/archive/README.md)
+- [历史计划摘要](docs/archive/plans/2026-Q1-archived-plans-summary.md)
+- [历史学习摘要](docs/archive/learning/learning-materials-summary.md)
+- [历史报告摘要](docs/archive/reports/2026-Q1-governance-timeline-summary.md)
 
 常用专题：
 
