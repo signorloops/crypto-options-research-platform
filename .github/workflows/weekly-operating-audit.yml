@@ -16,19 +16,6 @@ on:
       - "config/consistency_thresholds.json"
       - "docs/plans/weekly-operating-checklist.md"
       - ".github/workflows/weekly-operating-audit.yml"
-  push:
-    branches: [ master, main ]
-    paths:
-      - "results/**/*.json"
-      - "scripts/governance/weekly_operating_audit.py"
-      - "scripts/governance/weekly_pnl_attribution.py"
-      - "scripts/governance/weekly_canary_checklist.py"
-      - "scripts/governance/weekly_decision_log.py"
-      - "scripts/governance/weekly_signoff_pack.py"
-      - "config/weekly_operating_thresholds.json"
-      - "config/consistency_thresholds.json"
-      - "docs/plans/weekly-operating-checklist.md"
-      - ".github/workflows/weekly-operating-audit.yml"
 
 jobs:
   weekly-operating-audit:

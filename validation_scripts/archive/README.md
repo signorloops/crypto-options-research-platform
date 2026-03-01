@@ -10,6 +10,7 @@ Archived in 2026-03 simplification batch:
 - gamma_sign_analysis.py
 - greeks_conversion_analysis.py
 - inverse_options_math_validation.py
+- inverse_pnl_math_validation.py
 - iv_convergence_analysis.py
 - long_term_algorithms_benchmark.py
 - put_call_parity_verification.py
