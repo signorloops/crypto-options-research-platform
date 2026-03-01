@@ -352,7 +352,21 @@ def _load_consistency_thresholds(path: Path) -> dict[str, float]:
     return thresholds
 
 
+def _is_shallow_repository(repo_root: Path) -> bool:
+    completed = subprocess.run(
+        ["git", "rev-parse", "--is-shallow-repository"],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return False
+    return completed.stdout.strip().lower() == "true"
+
+
 def _collect_recent_changes(repo_root: Path, since_days: int) -> dict[str, Any]:
+    shallow = _is_shallow_repository(repo_root)
     completed = subprocess.run(
         [
             "git",
@@ -372,6 +386,7 @@ def _collect_recent_changes(repo_root: Path, since_days: int) -> dict[str, Any]:
             "since_days": since_days,
             "entries": [],
             "count": 0,
+            "shallow": shallow,
             "error": completed.stderr.strip(),
         }
 
@@ -388,6 +403,7 @@ def _collect_recent_changes(repo_root: Path, since_days: int) -> dict[str, Any]:
         "since_days": since_days,
         "entries": entries,
         "count": len(entries),
+        "shallow": shallow,
         "error": "",
     }
 
@@ -566,8 +582,15 @@ def _build_report(
         "experiment_ids_assigned": bool(snapshot_rows)
         and all(bool(row.get("experiment_id")) for row in snapshot_rows),
         "risk_thresholds_confirmed": True,
-        "change_log_complete": bool(change_log and change_log.get("count", 0) > 0),
-        "rollback_version_marked": bool(rollback_marker and rollback_marker.get("tag")),
+        "change_log_complete": bool(
+            change_log
+            and change_log.get("executed")
+            and not change_log.get("shallow", False)
+            and change_log.get("count", 0) > 0
+        ),
+        "rollback_version_marked": bool(
+            rollback_marker and rollback_marker.get("source") == "tag" and rollback_marker.get("tag")
+        ),
         "minimum_regression_passed": (
             bool(regression_result["passed"])
             if regression_result is not None and regression_result.get("executed")
@@ -633,7 +656,14 @@ def _build_report(
         "change_log": (
             change_log
             if change_log is not None
-            else {"executed": False, "since_days": 0, "entries": [], "count": 0, "error": ""}
+            else {
+                "executed": False,
+                "since_days": 0,
+                "entries": [],
+                "count": 0,
+                "shallow": False,
+                "error": "",
+            }
         ),
         "rollback_marker": (
             rollback_marker
@@ -777,6 +807,8 @@ def _to_markdown(report: dict[str, Any]) -> str:
     change_log = report["change_log"]
     if change_log.get("executed"):
         lines.append(f"- Window: last `{change_log['since_days']}` day(s)")
+        if change_log.get("shallow"):
+            lines.append("- Repository clone is shallow; change log may be incomplete.")
         lines.append("")
         lines.append(_format_table(change_log["entries"], ["date", "commit", "subject"]))
     else:

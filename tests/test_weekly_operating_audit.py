@@ -64,9 +64,10 @@ def test_build_report_extracts_snapshot_and_flags_exceptions(tmp_path):
             "since_days": 7,
             "entries": [{"date": "2026-02-25", "commit": "abc12345", "subject": "demo"}],
             "count": 1,
+            "shallow": False,
             "error": "",
         },
-        rollback_marker={"executed": True, "tag": "v0.1.0", "error": ""},
+        rollback_marker={"executed": True, "tag": "v0.1.0", "error": "", "source": "tag"},
     )
 
     assert report["summary"]["strategies"] == 2
@@ -78,6 +79,43 @@ def test_build_report_extracts_snapshot_and_flags_exceptions(tmp_path):
     assert report["checklist"]["change_log_complete"] is True
     assert report["checklist"]["rollback_version_marked"] is True
     assert "异常项已归因" in report["incomplete_tasks"]
+
+
+def test_build_report_treats_commit_fallback_and_shallow_log_as_incomplete(tmp_path):
+    module = _load_module()
+    result_path = tmp_path / "results" / "backtest_results_001b.json"
+    _write(
+        result_path,
+        json.dumps(
+            {
+                "Stable": {
+                    "summary": {
+                        "total_pnl": 88.0,
+                        "sharpe_ratio": 1.2,
+                        "max_drawdown": -0.05,
+                        "experiment_id": "EXP-003",
+                    }
+                }
+            }
+        ),
+    )
+
+    report = module._build_report(
+        [result_path],
+        dict(module.DEFAULT_THRESHOLDS),
+        change_log={
+            "executed": True,
+            "since_days": 7,
+            "entries": [{"date": "2026-02-25", "commit": "abc12345", "subject": "demo"}],
+            "count": 1,
+            "shallow": True,
+            "error": "",
+        },
+        rollback_marker={"executed": True, "tag": "HEAD-abc12345", "error": "", "source": "commit"},
+    )
+
+    assert report["checklist"]["change_log_complete"] is False
+    assert report["checklist"]["rollback_version_marked"] is False
 
 
 def test_main_strict_exits_nonzero_when_exceptions_exist(tmp_path, monkeypatch):
@@ -160,6 +198,13 @@ def test_main_executes_regression_cmd_without_shell(tmp_path, monkeypatch):
 
     def fake_run(cmd, **kwargs):
         calls.append((cmd, kwargs))
+        if (
+            isinstance(cmd, list)
+            and cmd[:3] == ["git", "rev-parse", "--is-shallow-repository"]
+        ):
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="false\n", stderr=""
+            )
         if isinstance(cmd, list) and cmd[:2] == ["git", "log"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if isinstance(cmd, list) and cmd[:3] == ["git", "describe", "--tags"]:
