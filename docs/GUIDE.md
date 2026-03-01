@@ -32,6 +32,12 @@ pytest -q -m "not integration"
 | 缓存与性能策略 | [`cache_strategy.md`](cache_strategy.md) |
 | 研究看板说明 | [`dashboard.md`](dashboard.md) |
 | 部署与运维 | [`deployment.md`](deployment.md) |
+| 研究审计守门 | [`research-audit.md`](research-audit.md) |
+| 复杂度治理规则 | [`complexity-governance.md`](complexity-governance.md) |
+| 工作区瘦身流程 | [`workspace-slimming.md`](workspace-slimming.md) |
+| 项目全景图 | [`project-map-mermaid.md`](project-map-mermaid.md) |
+| 算法学习（入门） | [`算法与模型入门学习版.md`](算法与模型入门学习版.md) |
+| 算法学习（深度） | [`算法与模型深度讲解.md`](算法与模型深度讲解.md) |
 | 计划与执行状态 | [`plans/README.md`](plans/README.md) |
 
 ## 3. 按角色推荐路径
