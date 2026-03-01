@@ -29,7 +29,7 @@ pytest -q -m "not integration"
 | API/模块速查 | [`api.md`](api.md) |
 | 部署与运维 | [`deployment.md`](deployment.md) |
 | 治理审计与瘦身 | [`governance-operations.md`](governance-operations.md) |
-| 算法学习扩展（归档） | [`archive/learning/learning-materials-summary.md`](archive/learning/learning-materials-summary.md) |
+| 历史归档总览 | [`archive/2026-Q1-archive-summary.md`](archive/2026-Q1-archive-summary.md) |
 | 计划与执行状态 | [`plans/weekly-operating-checklist.md`](plans/weekly-operating-checklist.md) |
 
 ## 3. 按角色推荐路径
@@ -54,7 +54,7 @@ pytest -q -m "not integration"
 ## 4. 计划文档入口
 
 - 在执行计划：[`plans/weekly-operating-checklist.md`](plans/weekly-operating-checklist.md)
-- 历史计划：[`archive/plans/2026-Q1-archived-plans-summary.md`](archive/plans/2026-Q1-archived-plans-summary.md)
+- 历史计划与报告：[`archive/2026-Q1-archive-summary.md`](archive/2026-Q1-archive-summary.md)
 
 ## 5. 常用命令
 
@@ -76,5 +76,5 @@ make live-deviation-snapshot
 
 1. 本文件只做导航，不复制大段教程。
 2. 深入内容统一维护在专题文档，避免多处更新。
-3. `docs/plans/` 只保留在执行计划，历史内容移入 `docs/archive/plans/`。
+3. `docs/plans/` 只保留在执行计划，历史内容统一收敛到 `docs/archive/2026-Q1-archive-summary.md`。
 4. 修改导航后，执行 `make docs-link-check` 验证链接。

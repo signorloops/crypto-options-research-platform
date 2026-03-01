@@ -110,9 +110,7 @@ corp/
 
 - [导航总入口](docs/GUIDE.md)
 - [周执行清单](docs/plans/weekly-operating-checklist.md)
-- [归档报告摘要](docs/archive/reports/2026-Q1-reports-summary.md)
-- [历史计划摘要](docs/archive/plans/2026-Q1-archived-plans-summary.md)
-- [历史学习摘要](docs/archive/learning/learning-materials-summary.md)
+- [Q1 历史归档总览](docs/archive/2026-Q1-archive-summary.md)
 
 常用专题：
 
