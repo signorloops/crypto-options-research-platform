@@ -1,398 +1,89 @@
-# CORP 项目完全指南 - All in One
+# CORP 项目指南（精简导航版）
 
-> **一站式导航文档** | 根据你的背景选择学习路径 | 5分钟找到正确的起点
+本文件是项目文档导航中心。
+原则：先定位目标，再跳转到对应文档；避免在多个文档重复维护同一段说明。
 
----
+## 1. 5 分钟起步
 
-## 🚀 快速开始（5分钟）
-
-### 第一步：环境准备（2分钟）
 ```bash
-# 克隆并进入项目
 cd /path/to/crypto-options-research-platform/corp
-
-# 激活虚拟环境
 source venv/bin/activate
-
-# 验证安装
-python -c "import pandas, numpy; print('✅ 依赖就绪')"
-pytest tests/test_hawkes_comparison.py::TestHawkesMetricsCollector -v
+pip install -e ".[dev]"
+pytest -q -m "not integration"
 ```
 
-### 第二步：选择你的起点
+完成后按目标阅读：
 
-| 我想... | 直接运行 | 预计时间 |
-|---------|---------|---------|
-| **快速体验** | `jupyter notebook notebooks/06_hawkes_backtest_comparison.ipynb` | 15分钟 |
-| **了解架构** | 阅读本文档的 [架构概览](#-架构概览) 部分 | 10分钟 |
-| **跑回测** | `python run_backtest_cli.py --help` | 5分钟 |
-| **看API** | 跳到 [API速查](#-api速查) | 3分钟 |
-| **深入理解** | 阅读 [学习路线图](#-学习路线图) | 按路径规划 |
+- 快速上手：[`quickstart.md`](quickstart.md)
+- 全局认知：[`../README.md`](../README.md)
+- 系统结构：[`architecture.md`](architecture.md)
 
----
+## 2. 按任务找文档
 
-## 📚 文档地图
+| 任务 | 入口文档 |
+|---|---|
+| 项目总览与能力边界 | [`../README.md`](../README.md) |
+| 环境安装与第一个运行 | [`quickstart.md`](quickstart.md) |
+| 架构与模块关系 | [`architecture.md`](architecture.md) |
+| 理论与模型推导 | [`theory.md`](theory.md) |
+| API/模块速查 | [`api.md`](api.md) |
+| 运行示例 | [`examples.md`](examples.md) |
+| Hawkes 对比实验 | [`hawkes_comparison_experiment.md`](hawkes_comparison_experiment.md) |
+| 缓存与性能策略 | [`cache_strategy.md`](cache_strategy.md) |
+| 研究看板说明 | [`dashboard.md`](dashboard.md) |
+| 部署与运维 | [`deployment.md`](deployment.md) |
+| 计划与执行状态 | [`plans/README.md`](plans/README.md) |
 
-### 核心文档（必读）
+## 3. 按角色推荐路径
 
-```
-📄 README.md                    ← 从这里开始，项目总览
-📄 docs/GUIDE.md (本文档)        ← 你现在在这里，导航中心
-📄 docs/project-map-mermaid.md   ← 项目全景图（Mermaid 学习版）
-📄 docs/quickstart.md            ← 安装和第一个程序（5分钟）
-📄 docs/theory.md                ← 理论手册：币本位+数学+参数标定
-📄 docs/architecture.md          ← 系统架构详解
-📄 docs/api.md                   ← API文档速查
-📄 docs/hawkes_comparison_experiment.md  ← Hawkes实验指南
-📄 docs/算法与模型入门学习版.md         ← 初学者算法学习路径
-📄 docs/算法与模型深度讲解.md           ← 算法/模型系统化详解
-📄 docs/deployment.md            ← 部署与运维
-📄 docs/examples.md              ← 使用示例合集
-📄 docs/plans/README.md          ← 计划文档索引（主入口）
-📄 docs/plans/2026-Q2-long-term-execution-roadmap.md ← 季度执行路线图（12周）
-📄 docs/plans/weekly-operating-checklist.md ← 每周执行清单模板
-```
+### 量化研究
 
-### 文档分类速查
+1. [`../README.md`](../README.md)
+2. [`quickstart.md`](quickstart.md)
+3. [`hawkes_comparison_experiment.md`](hawkes_comparison_experiment.md)
+4. [`theory.md`](theory.md)
 
-| 主题 | 推荐文档 | 难度 |
-|------|---------|------|
-| **快速开始** | quickstart.md | ⭐ |
-| **理论基础** | theory.md / 算法与模型入门学习版.md | ⭐⭐-⭐⭐⭐ |
-| **实验指南** | hawkes_comparison_experiment.md | ⭐⭐⭐ |
-| **API参考** | api.md | ⭐⭐ |
-| **架构设计** | architecture.md | ⭐⭐⭐ |
-| **部署运维** | deployment.md | ⭐⭐⭐ |
-| **代码示例** | examples.md | ⭐⭐ |
+### 工程开发
 
-### 已归档文档
+1. [`../README.md`](../README.md)
+2. [`architecture.md`](architecture.md)
+3. [`api.md`](api.md)
+4. [`examples.md`](examples.md)
 
-原手册与历史记录已归档至 `docs/archive/`（索引见 `docs/archive/README.md`）：
-- 项目深度学习手册（第1-4册，历史版本）
-- 修复记录、评审记录（历史记录）
-- 数据库选型记录（历史记录）
+### 运维发布
 
-*默认请优先阅读核心文档，archive 内容仅用于历史追溯。*
+1. [`deployment.md`](deployment.md)
+2. [`dashboard.md`](dashboard.md)
+3. [`plans/weekly-operating-checklist.md`](plans/weekly-operating-checklist.md)
 
----
+## 4. 计划文档入口
 
-## 🎯 根据背景选择学习路径
+- 计划索引：[`plans/README.md`](plans/README.md)
+- 当前执行计划：
+  - [`plans/2026-Q2-long-term-execution-roadmap.md`](plans/2026-Q2-long-term-execution-roadmap.md)
+  - [`plans/weekly-operating-checklist.md`](plans/weekly-operating-checklist.md)
+  - [`plans/2026-02-25-inverse-options-arxiv-implementation-plan.md`](plans/2026-02-25-inverse-options-arxiv-implementation-plan.md)
+- 历史计划：[`archive/plans/README.md`](archive/plans/README.md)
 
-### 路径A：量化研究员（有金融背景，要快速上手）
+## 5. 常用命令
 
-**目标**：2周内能运行和修改策略
+```bash
+# 测试
+pytest -q -m "not integration"
 
-```
-Week 1:
-├── Day 1-2: README.md + quickstart.md
-├── Day 3-4: notebooks/06_hawkes_backtest_comparison.ipynb（跑通）
-├── Day 5-7: docs/hawkes_comparison_experiment.md + 策略代码
+# 文档与治理
+make docs-link-check
+make complexity-audit
+make weekly-operating-audit
+make weekly-close-gate
 
-Week 2:
-├── Day 8-10: docs/theory.md第3章（AS模型数学推导）
-├── Day 11-12: docs/theory.md第3.3节（Hawkes公式）
-├── Day 13-14: 修改参数，跑对比实验，看结果
+# 偏离快照
+make live-deviation-snapshot
 ```
 
-**关键文档阅读顺序**：
-1. `README.md`（10分钟）
-2. `docs/quickstart.md`（15分钟）
-3. `notebooks/06_hawkes_backtest_comparison.ipynb`（2小时，边跑边读）
-4. `docs/hawkes_comparison_experiment.md`（30分钟）
-5. `docs/theory.md`第3章（数学推导，2天）
-
----
-
-### 路径B：软件工程师（有编程背景，要学金融业务）
-
-**目标**：1个月内能理解并实现策略
-
-```
-Week 1: 代码熟悉
-├── Day 1-2: README.md + architecture.md
-├── Day 3-4: docs/theory.md第2章（代码架构导读）
-├── Day 5-7: 跑通所有notebooks和tests
-
-Week 2: 业务学习
-├── Day 8-10: docs/theory.md第1章（币本位基础）
-├── Day 11-14: docs/theory.md第2-3章（架构+数学推导）
-
-Week 3-4: 实战
-├── 跑Hawkes对比实验
-├── 尝试修改策略逻辑
-├── 添加日志和监控
-```
-
-**关键文档阅读顺序**：
-1. `README.md` → `docs/architecture.md`（30分钟）
-2. `docs/quickstart.md`（实际操作，1小时）
-3. `docs/theory.md`第2章（代码架构，配合代码阅读）
-4. `docs/theory.md`第1章（币本位基础，1天）
-5. `notebooks/06_hawkes_backtest_comparison.ipynb`（2天，理解业务逻辑）
-
----
-
-### 路径C：算法工程师（要理解数学并优化）
-
-**目标**：深入理解数学推导，能改进算法
-
-```
-Month 1: 数学基础
-├── Week 1: docs/theory.md第3章（策略数学推导，含Hawkes）
-├── Week 2: docs/theory.md第4章（参数标定）
-├── Week 3: 对照论文深化理解
-├── Week 4: 对比实验 + 参数敏感性分析
-
-Month 2: 优化与实现
-├── 实现新的变体策略
-├── 优化回测性能
-├── 改进参数估计算法
-```
-
-**关键文档阅读顺序**：
-1. `docs/theory.md`（完整阅读，2周）
-2. `docs/hawkes_comparison_experiment.md`（实验设计，3天）
-3. 代码实现 + 论文对照（持续）
-
----
-
-### 路径D：运维/DevOps（关注部署和监控）
-
-**目标**：1周内能部署和监控
-
-```
-Day 1-2: README.md + architecture.md（理解架构）
-Day 3-4: docs/deployment.md + docker-compose.yml
-Day 5-6: docs/deployment.md（部署、监控、故障演练）
-Day 7: 实际部署并配置监控
-```
-
-**关键文档阅读顺序**：
-1. `README.md` → `docs/architecture.md`
-2. `docs/deployment.md`
-3. `docs/deployment.md` + `docs/theory.md`第4章
-4. `deployment/`目录下的配置文件
-
----
-
-## 🗺️ 架构概览
-
-### 模块依赖图
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        用户层                                │
-│  notebooks/  │  run_backtest_cli.py  │  verify_all.sh      │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-┌────────────────────▼────────────────────────────────────────┐
-│                      策略层                                  │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
-│  │   Hawkes MM  │  │   AS Model   │  │    Naive     │      │
-│  │  hawkes_mm   │  │  avellaneda  │  │   naive.py   │      │
-│  └──────────────┘  └──────────────┘  └──────────────┘      │
-│                                                              │
-│  新: Hawkes对比框架                                          │
-│  research/backtest/hawkes_comparison.py                      │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-┌────────────────────▼────────────────────────────────────────┐
-│                      回测引擎                                │
-│  research/backtest/engine.py    # 事件驱动回测              │
-│  research/backtest/arena.py     # 多策略对比                │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-┌────────────────────▼────────────────────────────────────────┐
-│                      数据层                                  │
-│  data/downloaders/    # 交易所API                           │
-│  data/cache.py        # Parquet缓存                         │
-│  data/streaming.py    # WebSocket流                       │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-┌────────────────────▼────────────────────────────────────────┐
-│                      核心层                                  │
-│  core/types.py        # 数据类型                            │
-│  core/validation/     # Pydantic验证                       │
-│  utils/logging_config.py  # 日志                           │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### 关键文件速查
-
-| 功能 | 文件路径 | 说明 |
-|------|---------|------|
-| **Hawkes策略** | `strategies/market_making/hawkes_mm.py` | `HawkesMarketMaker` 固定参数版本 |
-| **Adaptive Hawkes** | `strategies/market_making/hawkes_mm.py` | `AdaptiveHawkesMarketMaker` 自适应版本 |
-| **AS策略** | `strategies/market_making/avellaneda_stoikov.py` | `AvellanedaStoikov` |
-| **对比框架** | `research/backtest/hawkes_comparison.py` | 新添加的对比实验框架 |
-| **回测引擎** | `research/backtest/engine.py` | 事件驱动回测 |
-| **场景生成** | `research/backtest/hawkes_comparison.py` | `ScenarioGenerator` |
-| **Notebook** | `notebooks/06_hawkes_backtest_comparison.ipynb` | 交互式教程 |
-
----
-
-## 📖 API速查
-
-### 快速生成测试场景
-
-```python
-from research.backtest.hawkes_comparison import ScenarioGenerator
-
-# 一行代码生成4种聚类程度的场景
-gen = ScenarioGenerator(base_price=50000.0)
-scenarios = gen.generate_hawkes_scenarios()
-# scenarios包含: low_clustering, medium_clustering, high_clustering, critical
-```
-
-### 快速运行策略对比
-
-```python
-from research.backtest.hawkes_comparison import ComprehensiveHawkesComparison
-from strategies.market_making.hawkes_mm import HawkesMarketMaker, HawkesMMConfig
-from strategies.market_making.avellaneda_stoikov import AvellanedaStoikov, ASConfig
-
-# 初始化
-comparison = ComprehensiveHawkesComparison(
-    initial_capital=100000.0,
-    transaction_cost_bps=2.0
-)
-
-# 运行对比
-results = comparison.run_full_comparison(
-    strategies=[
-        HawkesMarketMaker(HawkesMMConfig()),
-        AvellanedaStoikov(ASConfig()),
-    ],
-    scenarios=scenarios
-)
-
-# 生成报告
-print(comparison.generate_summary_report())
-```
-
-### 快速收集Hawkes专项指标
-
-```python
-from research.backtest.hawkes_comparison import HawkesMetricsCollector
-
-collector = HawkesMetricsCollector()
-
-# 在策略中埋点
-collector.record_intensity(timestamp, intensity)
-collector.record_spread(timestamp, spread_bps)
-
-# 计算指标
-metrics = collector.compute_metrics()
-print(f"强度-价差相关性: {metrics.intensity_spread_correlation}")
-```
-
----
-
-## 🎓 学习路线图
-
-### 阶段1：运行（第1周）
-- [ ] 安装依赖并跑通测试
-- [ ] 运行 `notebooks/06_hawkes_backtest_comparison.ipynb`
-- [ ] 理解输出结果的含义
-
-### 阶段2：理解（第2-3周）
-- [ ] 阅读 `docs/hawkes_comparison_experiment.md`
-- [ ] 理解ScenarioGenerator的工作原理
-- [ ] 理解6种对比策略的区别
-- [ ] 能够解释为什么Hawkes在某些场景更好
-
-### 阶段3：修改（第4-6周）
-- [ ] 修改Hawkes参数，观察结果变化
-- [ ] 添加新的测试场景
-- [ ] 实现自己的策略变体
-- [ ] 跑完整的对比实验并生成报告
-
-### 阶段4：深入（第7周+）
-- [ ] 阅读 docs/theory.md 第3章（数学推导）
-- [ ] 理解参数标定方法（docs/theory.md 第4章）
-- [ ] 优化回测性能
-- [ ] 贡献代码或文档
-
----
-
-## ❓ 常见问题
-
-### Q: 我应该先看哪个文档？
-**A**:
-- 完全新手 → `README.md` → `docs/quickstart.md` → 本GUIDE
-- 要跑实验 → 直接打开 `notebooks/06_hawkes_backtest_comparison.ipynb`
-- 要理解数学 → `docs/hawkes_comparison_experiment.md` → docs/theory.md
-- 要部署 → `docs/deployment.md`
-
-### Q: 数学公式看不懂怎么办？
-**A**:
-1. 先看 `docs/hawkes_comparison_experiment.md`（公式较少，侧重直观理解）
-2. 跑Notebook中的可视化部分，看图理解
-3. 再看 docs/theory.md 的公式，对照代码实现
-4. 跳过证明，先看结论和代码映射
-
-### Q: 代码太多从哪里开始？
-**A**:
-1. 从 `research/backtest/hawkes_comparison.py` 开始（最高层API）
-2. 然后看策略代码 `strategies/market_making/hawkes_mm.py`
-3. 需要时再深入回测引擎 `research/backtest/engine.py`
-4. 参考 docs/theory.md 第2章（代码架构导读）
-
-### Q: 如何验证我理解了？
-**A**: 完成这个检查清单：
-- [ ] 能独立运行Hawkes对比实验
-- [ ] 能解释强度-价差相关系数的含义
-- [ ] 能说出Hawkes在哪种市场条件下优于AS
-- [ ] 能调整参数并预测结果变化
-- [ ] 能向他人解释代码架构
-
----
-
-## 🔗 相关资源
-
-### 项目内
-- [GitHub Issues](https://github.com/signorloops/crypto-options-research-platform/issues) - 问题讨论
-- [Tests](../tests/) - 学习代码的好材料
-- [Notebooks](../notebooks/) - 交互式学习
-- [Archive 索引](archive/README.md) - 历史文档说明
-
-### 外部资源
-- **Hawkes过程论文**: Hawkes, A.G. (1971). Spectra of some self-exciting point processes
-- **AS模型论文**: Avellaneda & Stoikov (2008). High-frequency trading in a limit order book
-- **Deribit API文档**: https://docs.deribit.com/
-
----
-
-## 📝 文档更新记录
-
-| 日期 | 更新内容 |
-|------|---------|
-| 2026-02-19 | 清理旧文档入口：修复失效链接、补充 archive 索引、统一导航说明 |
-| 2026-02-15 | 文档整理：合并4本手册为 theory.md，保留 archive 历史文档 |
-| 2026-02-11 | 创建 GUIDE 并补充 Hawkes 对比实验导航 |
-
----
-
-## 💡 给不同角色的建议
-
-### 如果你是产品经理
-- 重点看：`docs/hawkes_comparison_experiment.md` 的"测试场景"和"评估指标"部分
-- 了解：6种策略的优缺点、实验设计逻辑
-
-### 如果你是交易员
-- 重点看：docs/theory.md第3章（数学推导）
-- 实践：在Notebook中调整参数，观察对PnL的影响
-
-### 如果你是工程师
-- 重点看：`docs/architecture.md`、docs/theory.md第2章（代码架构）
-- 实践：理解回测引擎的事件循环，尝试优化性能
-
-### 如果你是研究员
-- 重点看：docs/theory.md全文
-- 实践：设计新的对比实验，验证新的假设
-
----
-
-**最后更新**: 2026-02-19
-
-**下一步**: 根据你的角色，点击上方的学习路径开始 →
+## 6. 文档维护规则
+
+1. 本文件只做导航，不复制大段教程。
+2. 深入内容统一维护在专题文档，避免多处更新。
+3. `docs/plans/` 只保留在执行计划，历史内容移入 `docs/archive/plans/`。
+4. 修改导航后，执行 `make docs-link-check` 验证链接。
