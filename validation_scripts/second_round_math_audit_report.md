@@ -299,11 +299,11 @@ VaR估计对波动率冲击假设非常敏感！
 
 ## 附录: 验证脚本
 
-所有验证脚本保存在 `validation_scripts/` 目录:
+以下脚本已归档至 `validation_scripts/archive/` 目录:
 
-1. `theta_derivation_verification.py` - Theta公式验证
-2. `gamma_deep_verification.py` - Gamma公式验证
-3. `greeks_conversion_analysis.py` - Greeks转换验证
-4. `iv_convergence_analysis.py` - IV收敛性分析
-5. `put_call_parity_verification.py` - Put-Call Parity验证
-6. `var_vol_shock_analysis.py` - VaR波动率冲击分析
+1. `archive/theta_derivation_verification.py` - Theta公式验证
+2. `archive/gamma_deep_verification.py` - Gamma公式验证
+3. `archive/greeks_conversion_analysis.py` - Greeks转换验证
+4. `archive/iv_convergence_analysis.py` - IV收敛性分析
+5. `archive/put_call_parity_verification.py` - Put-Call Parity验证
+6. `archive/var_vol_shock_analysis.py` - VaR波动率冲击分析

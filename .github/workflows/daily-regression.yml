@@ -6,6 +6,7 @@ on:
     - cron: "0 2 * * *" # Daily 02:00 UTC
   pull_request:
   push:
+    branches: [ master, main ]
 
 jobs:
   daily-regression-gate:

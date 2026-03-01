@@ -47,6 +47,8 @@ logs/
 artifacts/
 results/backtest_*.json
 results/backtest_*.png
+results/backtest_full_history/
+results/backtest_with_output/
 results/*_report*.json
 results/*_report*.md
 

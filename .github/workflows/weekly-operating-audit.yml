@@ -17,6 +17,7 @@ on:
       - "docs/plans/weekly-operating-checklist.md"
       - ".github/workflows/weekly-operating-audit.yml"
   push:
+    branches: [ master, main ]
     paths:
       - "results/**/*.json"
       - "scripts/governance/weekly_operating_audit.py"
