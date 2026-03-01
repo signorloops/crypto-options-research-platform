@@ -248,6 +248,24 @@ else:
 - online MLE 参数更新接口（`estimate_parameters_online(use_mle=True)`）
 - quote `control_signals` 元数据输出（intensity、flow_imbalance、spread/skew 控制量）
 
+## 运维补充（缓存与看板）
+
+1. 缓存分层：
+- Parquet（历史持久化）
+- DuckDB（分析查询层）
+- Redis（低延迟实时值）
+
+2. 缓存策略：
+- Redis TTL 集中在 `data/cache_policy.py`
+- 通过 `IntegratedDataManager.invalidate_realtime_cache(...)` 做定向失效
+- 读路径为最终一致性，历史回放以 Parquet 为准
+
+3. 研究看板：
+- 启动：`python -m execution.research_dashboard`
+- 默认端口：`8501`（可用环境变量覆盖）
+- 提供 UI、文件列表、偏离分析、健康检查等接口
+- 支持 `make live-deviation-snapshot` 生成偏离快照产物
+
 ## 设计原则
 
 1. **研究与生产兼容**
@@ -267,5 +285,3 @@ else:
 - `docs/theory.md`
 - `docs/api.md`
 - `docs/hawkes_comparison_experiment.md`
-- `docs/cache_strategy.md`
-- `docs/dashboard.md`

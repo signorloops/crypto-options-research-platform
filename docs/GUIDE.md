@@ -29,8 +29,6 @@ pytest -q -m "not integration"
 | API/模块速查 | [`api.md`](api.md) |
 | 运行示例 | [`examples.md`](examples.md) |
 | Hawkes 对比实验 | [`hawkes_comparison_experiment.md`](hawkes_comparison_experiment.md) |
-| 缓存与性能策略 | [`cache_strategy.md`](cache_strategy.md) |
-| 研究看板说明 | [`dashboard.md`](dashboard.md) |
 | 部署与运维 | [`deployment.md`](deployment.md) |
 | 治理审计与瘦身 | [`governance-operations.md`](governance-operations.md) |
 | 算法学习扩展（归档） | [`archive/learning/README.md`](archive/learning/README.md) |
@@ -55,8 +53,7 @@ pytest -q -m "not integration"
 ### 运维发布
 
 1. [`deployment.md`](deployment.md)
-2. [`dashboard.md`](dashboard.md)
-3. [`plans/weekly-operating-checklist.md`](plans/weekly-operating-checklist.md)
+2. [`plans/weekly-operating-checklist.md`](plans/weekly-operating-checklist.md)
 
 ## 4. 计划文档入口
 
