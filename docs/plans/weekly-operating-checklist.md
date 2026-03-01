@@ -6,7 +6,7 @@
 自动化入口（生成 KPI 快照 + 风险例外 + 未完成任务清单）：
 
 ```bash
-cd corp
+cd crypto-options-research-platform
 make weekly-operating-audit
 ```
 
@@ -19,7 +19,7 @@ make weekly-close-gate
 生产偏离快照入口（可接入定时任务）：
 
 ```bash
-cd corp
+cd crypto-options-research-platform
 make live-deviation-snapshot
 ```
 

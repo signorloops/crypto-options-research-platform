@@ -6,7 +6,7 @@
 ## 1. 5 分钟起步
 
 ```bash
-cd /path/to/crypto-options-research-platform/corp
+cd /path/to/crypto-options-research-platform
 source venv/bin/activate
 pip install -e ".[dev]"
 pytest -q -m "not integration"

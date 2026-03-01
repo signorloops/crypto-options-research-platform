@@ -78,14 +78,14 @@ Workflow behavior:
 ## Local Run
 
 ```bash
-cd corp
+cd crypto-options-research-platform
 make complexity-audit
 ```
 
 Regression-only strict mode (fail only on new/worsened violations vs baseline):
 
 ```bash
-cd corp
+cd crypto-options-research-platform
 make complexity-audit-regression BASELINE_COMPLEXITY_JSON=artifacts/complexity-baseline.json
 ```
 
