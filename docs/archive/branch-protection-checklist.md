@@ -1,6 +1,6 @@
 # Branch Protection Checklist (master)
 
-更新时间：2026-02-26（基于最近一次成功运行的 check 名称）。
+历史快照：本清单仅用于回溯当时的分支保护配置；实际 required checks 以当前 GitHub workflow 运行结果为准。
 
 ## 1. Required Status Checks
 
