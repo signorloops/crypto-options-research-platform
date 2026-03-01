@@ -21,6 +21,10 @@
 
 旧的阶段性修复记录与临时分析文档已移除；如需追溯，请查看 Git 历史。
 
+另保留历史治理清单：
+
+- `branch-protection-checklist.md`
+
 ### 3) 历史计划文档
 
 - `plans/README.md`
