@@ -12,7 +12,6 @@
 
 ### 1) 学习扩展（归档）
 
-- `learning/README.md`
 - `learning/learning-materials-summary.md`
 
 ### 2) 阶段性记录（已清理）

@@ -29,7 +29,7 @@ pytest -q -m "not integration"
 | API/模块速查 | [`api.md`](api.md) |
 | 部署与运维 | [`deployment.md`](deployment.md) |
 | 治理审计与瘦身 | [`governance-operations.md`](governance-operations.md) |
-| 算法学习扩展（归档） | [`archive/learning/README.md`](archive/learning/README.md) |
+| 算法学习扩展（归档） | [`archive/learning/learning-materials-summary.md`](archive/learning/learning-materials-summary.md) |
 | 计划与执行状态 | [`plans/README.md`](plans/README.md) |
 
 ## 3. 按角色推荐路径
