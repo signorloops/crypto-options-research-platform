@@ -10,27 +10,23 @@
 
 ## 文档分类
 
-### 1) 历史学习手册（摘要索引）
-
-- `deep-learning-manuals-summary.md`
-
-### 2) 学习扩展（归档）
+### 1) 学习扩展（归档）
 
 - `learning/README.md`
 - `learning/learning-materials-summary.md`
 
-### 3) 阶段性记录（已清理）
+### 2) 阶段性记录（已清理）
 
 旧的阶段性修复记录与临时分析文档已移除；如需追溯，请查看 Git 历史。
 
 历史治理清单已并入报告与计划摘要索引，细节可通过 Git 历史追溯。
 
-### 4) 历史计划文档
+### 3) 历史计划文档
 
 - `plans/README.md`
 - `plans/2026-Q1-archived-plans-summary.md`
 
-### 5) 历史报告归档
+### 4) 历史报告归档
 
 - `reports/README.md`
 
