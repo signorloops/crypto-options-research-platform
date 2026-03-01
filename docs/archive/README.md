@@ -28,6 +28,10 @@
 - `plans/2026-02-24-coin-margined-options-research-roadmap.md`
 - `plans/2026-03-complexity-reduction-sprint.md`
 
+### 4) 历史报告归档
+
+- `reports/README.md`
+
 ## 当前主文档入口
 
 - `../GUIDE.md`

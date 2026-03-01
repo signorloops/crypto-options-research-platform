@@ -6,7 +6,7 @@ on:
     - cron: "0 13 * * 1" # Every Monday 13:00 UTC
   pull_request:
     paths:
-      - "results/**/*.json"
+      - "tests/fixtures/weekly_operating/**/*.json"
       - "scripts/governance/weekly_operating_audit.py"
       - "scripts/governance/weekly_pnl_attribution.py"
       - "scripts/governance/weekly_canary_checklist.py"
@@ -39,6 +39,10 @@ jobs:
       - name: Run weekly operating audit (strict)
         run: |
           python scripts/governance/weekly_operating_audit.py \
+            --inputs \
+              tests/fixtures/weekly_operating/backtest_results_20260209_174752.json \
+              tests/fixtures/weekly_operating/backtest_results_20260209_174850.json \
+              tests/fixtures/weekly_operating/backtest_full_20260209_175236.json \
             --thresholds config/weekly_operating_thresholds.json \
             --consistency-thresholds config/consistency_thresholds.json \
             --output-md artifacts/weekly-operating-audit.md \

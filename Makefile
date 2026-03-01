@@ -143,6 +143,10 @@ daily-regression:
 
 weekly-operating-audit:
 	$(PYTHON) scripts/governance/weekly_operating_audit.py \
+		--inputs \
+			tests/fixtures/weekly_operating/backtest_results_20260209_174752.json \
+			tests/fixtures/weekly_operating/backtest_results_20260209_174850.json \
+			tests/fixtures/weekly_operating/backtest_full_20260209_175236.json \
 		--thresholds config/weekly_operating_thresholds.json \
 		--consistency-thresholds config/consistency_thresholds.json \
 		--output-md artifacts/weekly-operating-audit.md \

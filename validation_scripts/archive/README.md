@@ -3,6 +3,11 @@
 This directory stores legacy one-off validation scripts that are not currently
 referenced by active workflows, Make targets, tests, or documentation.
 
+Retention policy:
+- Target retention: 30 days after archival
+- Default action after retention: remove from repository history path and keep only a short markdown summary
+- Ownership: maintainers of research audit workflows
+
 Archived in 2026-03 simplification batch:
 - deep_math_verification.py
 - gamma_deep_verification.py
