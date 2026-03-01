@@ -35,7 +35,6 @@ pytest -q -m "not integration"
 | 研究审计守门 | [`research-audit.md`](research-audit.md) |
 | 复杂度治理规则 | [`complexity-governance.md`](complexity-governance.md) |
 | 工作区瘦身流程 | [`workspace-slimming.md`](workspace-slimming.md) |
-| 项目全景图 | [`project-map-mermaid.md`](project-map-mermaid.md) |
 | 算法学习扩展（归档） | [`archive/learning/README.md`](archive/learning/README.md) |
 | 计划与执行状态 | [`plans/README.md`](plans/README.md) |
 

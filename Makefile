@@ -118,7 +118,7 @@ branch-name-guard:
 	$(PYTHON) scripts/governance/branch_name_guard.py
 
 check-service-entrypoint:
-	@if rg -n "python\\s+-m\\s+execution\\.(trading_engine|risk_monitor|market_data_collector)|\"execution\\.(trading_engine|risk_monitor|market_data_collector)\"" deployment docs/deployment.md docs/project-map-mermaid.md -S; then \
+	@if rg -n "python\\s+-m\\s+execution\\.(trading_engine|risk_monitor|market_data_collector)|\"execution\\.(trading_engine|risk_monitor|market_data_collector)\"" deployment docs/deployment.md -S; then \
 		echo "Legacy entrypoint detected. Use python -m execution.service_runner with SERVICE_NAME."; \
 		exit 1; \
 	else \
