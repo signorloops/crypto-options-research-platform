@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -19,6 +20,7 @@ SAFE_DIR_TARGETS = [
     "htmlcov",
 ]
 VENV_DIR_TARGETS = ["venv", ".venv", "env"]
+SAFE_FILE_GLOB_TARGETS = [".coverage", ".coverage.*"]
 
 
 @dataclass
@@ -73,6 +75,16 @@ def _list_untracked_results(repo_root: Path) -> list[Path]:
     return paths
 
 
+def _list_macos_metadata_files(repo_root: Path) -> list[Path]:
+    matches: list[Path] = []
+    for current_root, dirnames, filenames in os.walk(repo_root):
+        # Never traverse into git internals.
+        dirnames[:] = [name for name in dirnames if name != ".git"]
+        if ".DS_Store" in filenames:
+            matches.append((Path(current_root) / ".DS_Store").resolve())
+    return matches
+
+
 def _list_worktree_roots(repo_root: Path) -> list[Path]:
     completed = subprocess.run(
         ["git", "worktree", "list", "--porcelain"],
@@ -123,6 +135,24 @@ def _build_cleanup_plan(
             target = (root / name).resolve()
             if target.exists():
                 plan.append(CleanupItem(path=str(target), kind="dir", bytes=_path_size(target)))
+
+        for pattern in SAFE_FILE_GLOB_TARGETS:
+            for target in root.glob(pattern):
+                resolved = target.resolve()
+                if resolved.is_file():
+                    plan.append(
+                        CleanupItem(path=str(resolved), kind="file", bytes=resolved.stat().st_size)
+                    )
+
+        for metadata_file in _list_macos_metadata_files(root):
+            if metadata_file.is_file():
+                plan.append(
+                    CleanupItem(
+                        path=str(metadata_file),
+                        kind="file",
+                        bytes=metadata_file.stat().st_size,
+                    )
+                )
 
         for pycache in root.rglob("__pycache__"):
             if pycache.is_dir():

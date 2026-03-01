@@ -85,6 +85,27 @@ def test_build_cleanup_plan_can_include_untracked_results(tmp_path, monkeypatch)
     assert str((tmp_path / "results" / "sample_run.json").resolve()) in plan_paths
 
 
+def test_build_cleanup_plan_includes_safe_files_and_skips_git_metadata(tmp_path):
+    module = _load_module()
+    _touch(tmp_path / ".coverage")
+    _touch(tmp_path / ".coverage.unit")
+    _touch(tmp_path / "pkg" / ".DS_Store")
+    _touch(tmp_path / ".git" / ".DS_Store")
+
+    plan = module._build_cleanup_plan(
+        repo_root=tmp_path,
+        include_results=False,
+        include_venv=False,
+        include_all_worktrees=False,
+    )
+    plan_paths = {item["path"] for item in plan}
+
+    assert str((tmp_path / ".coverage").resolve()) in plan_paths
+    assert str((tmp_path / ".coverage.unit").resolve()) in plan_paths
+    assert str((tmp_path / "pkg" / ".DS_Store").resolve()) in plan_paths
+    assert str((tmp_path / ".git" / ".DS_Store").resolve()) not in plan_paths
+
+
 def test_list_worktree_roots_parses_porcelain_output(tmp_path, monkeypatch):
     module = _load_module()
     main_root = (tmp_path / "repo").resolve()
