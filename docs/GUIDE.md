@@ -32,9 +32,7 @@ pytest -q -m "not integration"
 | 缓存与性能策略 | [`cache_strategy.md`](cache_strategy.md) |
 | 研究看板说明 | [`dashboard.md`](dashboard.md) |
 | 部署与运维 | [`deployment.md`](deployment.md) |
-| 研究审计守门 | [`research-audit.md`](research-audit.md) |
-| 复杂度治理规则 | [`complexity-governance.md`](complexity-governance.md) |
-| 工作区瘦身流程 | [`workspace-slimming.md`](workspace-slimming.md) |
+| 治理审计与瘦身 | [`governance-operations.md`](governance-operations.md) |
 | 算法学习扩展（归档） | [`archive/learning/README.md`](archive/learning/README.md) |
 | 计划与执行状态 | [`plans/README.md`](plans/README.md) |
 

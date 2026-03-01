@@ -204,7 +204,7 @@ make research-audit-compare
 make research-audit-refresh-baseline
 ```
 
-完整参数、产物清单与 baseline 流程请查看 [`research-audit.md`](research-audit.md)。
+完整参数、产物清单与 baseline 流程请查看 [`governance-operations.md`](governance-operations.md)。
 
 ### 数据管理
 ```bash
@@ -234,5 +234,5 @@ python -c "from data.cache import DataCache; print(DataCache().get_cache_info())
 - 文档导航总入口：[`GUIDE.md`](GUIDE.md)
 - 计划索引：[`plans/README.md`](plans/README.md)
 - 报告索引：[`reports/README.md`](reports/README.md)
-- 研究审计专题：[`research-audit.md`](research-audit.md)
+- 治理专题：[`governance-operations.md`](governance-operations.md)
 - 历史归档索引：[`archive/README.md`](archive/README.md)
