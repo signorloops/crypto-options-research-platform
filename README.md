@@ -48,8 +48,6 @@ pip install -r requirements.txt
 
 # 可选：安装完整栈（ML + Notebook + 加速器）
 pip install -e ".[dev,full]"
-# 或
-pip install -r requirements-full.txt
 
 # 可选：环境变量
 cp .env.example .env

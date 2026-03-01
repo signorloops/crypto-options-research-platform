@@ -41,7 +41,7 @@ Scope: `docs/plans/weekly-operating-checklist.md` + weekly governance automation
    - Dependency profiles split in `pyproject.toml`:
      - core runtime remains default
      - optional extras: `accelerated`, `ml`, `notebook`, `full`
-   - Added `requirements-full.txt` and updated install docs (`README.md`, `docs/quickstart.md`, `docs/GUIDE.md`).
+   - Updated install docs (`README.md`, `docs/quickstart.md`, `docs/GUIDE.md`) to reflect editable extras profiles.
    - Updated `.gitignore` to block generated governance/research outputs and cleaned accidental artifact lines.
 
 ## Remaining Manual Tasks (By Design)

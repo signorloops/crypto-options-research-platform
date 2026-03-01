@@ -31,8 +31,6 @@ pip install -r requirements.txt
 
 # 如需完整栈（ML + Notebook + 加速）
 pip install -e ".[dev,full]"
-# 或（完整档）
-pip install -r requirements-full.txt
 ```
 
 ### 步骤 4: 配置环境变量
