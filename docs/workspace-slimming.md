@@ -36,6 +36,8 @@ pip install -e ".[dev,full]"
 make workspace-slim-report
 ```
 
+说明：上述 Makefile 目标默认开启多工作树扫描（`--all-worktrees`），会同时覆盖同一仓库下的所有 `git worktree`。
+
 清理安全目标（缓存 + artifacts + logs + untracked results）：
 
 ```bash
@@ -52,4 +54,4 @@ make workspace-slim-clean-venv
 
 1. `workspace-slim-clean` 默认不会删除 `venv`。  
 2. `workspace-slim-clean` 仅清理 `results/` 下 untracked 文件。  
-3. 若你使用多个仓库副本，建议只保留一个激活开发副本，其余通过 git worktree 临时创建。  
+3. 如需只扫描当前目录，可直接运行脚本并显式关闭多工作树行为（不传 `--all-worktrees`）。  

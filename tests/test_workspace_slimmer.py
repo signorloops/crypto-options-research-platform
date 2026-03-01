@@ -38,6 +38,7 @@ def test_build_cleanup_plan_includes_safe_targets_and_excludes_venv_by_default(t
         repo_root=tmp_path,
         include_results=False,
         include_venv=False,
+        include_all_worktrees=False,
     )
     plan_paths = {item["path"] for item in plan}
 
@@ -55,6 +56,7 @@ def test_build_cleanup_plan_can_include_venv(tmp_path):
         repo_root=tmp_path,
         include_results=False,
         include_venv=True,
+        include_all_worktrees=False,
     )
     plan_paths = {item["path"] for item in plan}
     assert str((tmp_path / "venv").resolve()) in plan_paths
@@ -77,6 +79,64 @@ def test_build_cleanup_plan_can_include_untracked_results(tmp_path, monkeypatch)
         repo_root=tmp_path,
         include_results=True,
         include_venv=False,
+        include_all_worktrees=False,
     )
     plan_paths = {item["path"] for item in plan}
     assert str((tmp_path / "results" / "sample_run.json").resolve()) in plan_paths
+
+
+def test_list_worktree_roots_parses_porcelain_output(tmp_path, monkeypatch):
+    module = _load_module()
+    main_root = (tmp_path / "repo").resolve()
+    secondary_root = (tmp_path / "repo-live-next").resolve()
+    main_root.mkdir(parents=True)
+    secondary_root.mkdir(parents=True)
+
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=0,
+            stdout=(
+                f"worktree {main_root}\n"
+                "HEAD 1111111111111111111111111111111111111111\n"
+                "branch refs/heads/master\n"
+                f"worktree {secondary_root}\n"
+                "HEAD 2222222222222222222222222222222222222222\n"
+                "branch refs/heads/feature\n"
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    roots = module._list_worktree_roots(main_root)
+
+    assert roots == [main_root, secondary_root]
+
+
+def test_build_cleanup_plan_can_scan_all_worktrees(tmp_path, monkeypatch):
+    module = _load_module()
+    main_root = (tmp_path / "repo").resolve()
+    secondary_root = (tmp_path / "repo-live-next").resolve()
+    main_root.mkdir(parents=True)
+    secondary_root.mkdir(parents=True)
+    _touch(secondary_root / ".pytest_cache" / "state")
+
+    monkeypatch.setattr(module, "_list_worktree_roots", lambda _: [main_root, secondary_root])
+
+    plan_single = module._build_cleanup_plan(
+        repo_root=main_root,
+        include_results=False,
+        include_venv=False,
+        include_all_worktrees=False,
+    )
+    plan_single_paths = {item["path"] for item in plan_single}
+    assert str((secondary_root / ".pytest_cache").resolve()) not in plan_single_paths
+
+    plan_all = module._build_cleanup_plan(
+        repo_root=main_root,
+        include_results=False,
+        include_venv=False,
+        include_all_worktrees=True,
+    )
+    plan_all_paths = {item["path"] for item in plan_all}
+    assert str((secondary_root / ".pytest_cache").resolve()) in plan_all_paths
