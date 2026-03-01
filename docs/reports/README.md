@@ -4,11 +4,12 @@ This directory keeps only currently referenced reports.
 
 ## Active reports
 
-- `2026-02-25-arxiv-frontier-inverse-options.md`
+No active reports in this directory.
 
 ## Archive
 
-Historical operational/progress logs are archived under:
+Historical reports are archived under:
 
 - `../archive/reports/README.md`
 - `../archive/reports/2026-Q1-governance-timeline-summary.md`
+- `../archive/reports/2026-02-25-arxiv-frontier-inverse-options.md`
