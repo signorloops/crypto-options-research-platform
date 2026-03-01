@@ -108,7 +108,6 @@ corp/
 
 文档入口已收敛为“索引优先”，避免在多个文件重复维护同一说明。
 
-- [导航总入口](docs/GUIDE.md)
 - [周执行清单](docs/plans/weekly-operating-checklist.md)
 - [Q1 历史归档总览](docs/archive/2026-Q1-archive-summary.md)
 

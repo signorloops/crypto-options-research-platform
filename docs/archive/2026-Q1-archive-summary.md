@@ -50,5 +50,5 @@
 ## 4. 使用方式
 
 1. 当前执行内容：查看 `../plans/weekly-operating-checklist.md`。
-2. 日常导航：查看 `../GUIDE.md` 与 `../README.md`。
+2. 日常导航：查看 `../README.md`。
 3. 需要历史上下文：先读本摘要，再通过 Git 历史追溯具体版本。
