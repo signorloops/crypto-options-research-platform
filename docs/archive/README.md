@@ -22,7 +22,6 @@
 
 ### 3) 历史计划文档
 
-- `plans/README.md`
 - `plans/2026-Q1-archived-plans-summary.md`
 
 ### 4) 历史报告归档
