@@ -27,7 +27,6 @@ pytest -q -m "not integration"
 | 架构与模块关系 | [`architecture.md`](architecture.md) |
 | 理论与模型推导 | [`theory.md`](theory.md) |
 | API/模块速查 | [`api.md`](api.md) |
-| 运行示例与 Hawkes 实验 | [`examples-summary.md`](examples-summary.md) |
 | 部署与运维 | [`deployment.md`](deployment.md) |
 | 治理审计与瘦身 | [`governance-operations.md`](governance-operations.md) |
 | 算法学习扩展（归档） | [`archive/learning/README.md`](archive/learning/README.md) |
@@ -39,15 +38,13 @@ pytest -q -m "not integration"
 
 1. [`../README.md`](../README.md)
 2. [`quickstart.md`](quickstart.md)
-3. [`examples-summary.md`](examples-summary.md)
-4. [`theory.md`](theory.md)
+3. [`theory.md`](theory.md)
 
 ### 工程开发
 
 1. [`../README.md`](../README.md)
 2. [`architecture.md`](architecture.md)
 3. [`api.md`](api.md)
-4. [`examples-summary.md`](examples-summary.md)
 
 ### 运维发布
 

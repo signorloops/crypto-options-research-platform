@@ -231,4 +231,3 @@ uvicorn execution.research_dashboard:app --host 0.0.0.0 --port 8501
 
 - `docs/theory.md`
 - `docs/architecture.md`
-- `docs/examples-summary.md`

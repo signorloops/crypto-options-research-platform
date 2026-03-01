@@ -284,4 +284,3 @@ else:
 
 - `docs/theory.md`
 - `docs/api.md`
-- `docs/examples-summary.md`
