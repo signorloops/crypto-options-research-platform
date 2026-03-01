@@ -284,4 +284,4 @@ else:
 
 - `docs/theory.md`
 - `docs/api.md`
-- `docs/hawkes_comparison_experiment.md`
+- `docs/examples-summary.md`
