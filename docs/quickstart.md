@@ -81,5 +81,6 @@ make live-deviation-snapshot
 - 导航入口：`GUIDE.md`
 - 计划索引：`plans/README.md`
 - 治理手册：`governance-operations.md`
-- 报告归档：`archive/reports/README.md`
+- 治理时间线摘要：`archive/reports/2026-Q1-governance-timeline-summary.md`
+- 数学验证摘要：`archive/reports/2026-Q1-math-validation-summary.md`
 - 历史归档：`archive/README.md`

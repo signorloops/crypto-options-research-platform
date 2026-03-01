@@ -110,7 +110,7 @@ corp/
 
 - [导航总入口](docs/GUIDE.md)
 - [计划文档索引](docs/plans/README.md)
-- [报告归档索引](docs/archive/reports/README.md)
+- [治理时间线摘要](docs/archive/reports/2026-Q1-governance-timeline-summary.md)
 - [历史归档索引](docs/archive/README.md)
 
 常用专题：

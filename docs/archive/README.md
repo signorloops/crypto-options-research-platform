@@ -26,7 +26,9 @@
 
 ### 4) 历史报告归档
 
-- `reports/README.md`
+- `reports/2026-Q1-governance-timeline-summary.md`
+- `reports/2026-Q1-math-validation-summary.md`
+- `reports/2026-02-25-arxiv-frontier-inverse-options.md`
 
 ## 当前主文档入口
 
