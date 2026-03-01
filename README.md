@@ -154,6 +154,17 @@ mypy .
 make workspace-slim-report
 make workspace-slim-clean
 
+# 复杂度治理（严格/回归对比）
+make complexity-audit
+make complexity-audit-regression
+
+# 每周治理链路与发布前硬门禁
+make weekly-operating-audit
+make weekly-close-gate
+
+# 生产偏离快照
+make live-deviation-snapshot
+
 # 检查部署配置是否误用旧入口模块名
 make check-service-entrypoint
 

@@ -27,6 +27,8 @@ make live-deviation-snapshot
 并自动生成近 7 天变更记录与回滚基线 tag（如存在）。
 并自动串联生成 canary、收益归因、决策日志、人工签字包与线上/线下一致性回放报告。
 其中签字包会读取一致性回放结果：`FAIL` 自动阻断，`PENDING_DATA` 或缺失状态进入待办项。
+若仓库是 shallow clone（如 `actions/checkout` 默认深度），会标记 `变更记录完整` 为未完成；
+请使用完整历史和 tag（例如 `fetch-depth: 0`，并确保 tag 可见）。
 
 输出文件：
 
