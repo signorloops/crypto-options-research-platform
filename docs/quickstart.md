@@ -233,6 +233,6 @@ python -c "from data.cache import DataCache; print(DataCache().get_cache_info())
 
 - 文档导航总入口：[`GUIDE.md`](GUIDE.md)
 - 计划索引：[`plans/README.md`](plans/README.md)
-- 报告索引：[`reports/README.md`](reports/README.md)
+- 报告索引：[`archive/reports/README.md`](archive/reports/README.md)
 - 治理专题：[`governance-operations.md`](governance-operations.md)
 - 历史归档索引：[`archive/README.md`](archive/README.md)
