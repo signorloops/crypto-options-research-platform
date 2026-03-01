@@ -1,26 +1,12 @@
 # validation_scripts archive
 
-This directory stores legacy one-off validation scripts that are not currently
-referenced by active workflows, Make targets, tests, or documentation.
+This directory keeps only archive notes.
+Legacy one-off scripts were removed in the 2026-03 cleanup pass because they
+were not wired to active workflows, Make targets, tests, or runtime paths.
 
-Retention policy:
-- Target retention: 30 days after archival
-- Default action after retention: remove from repository history path and keep only a short markdown summary
-- Ownership: maintainers of research audit workflows
+Historical outputs are preserved in:
+- `docs/archive/reports/inverse-pnl-validation-report-2026-02-08.md`
+- `docs/archive/reports/second-round-math-audit-report.md`
 
-Archived in 2026-03 simplification batch:
-- deep_math_verification.py
-- gamma_deep_verification.py
-- gamma_derivation_analysis.py
-- gamma_sign_analysis.py
-- greeks_conversion_analysis.py
-- inverse_options_math_validation.py
-- inverse_pnl_math_validation.py
-- iv_convergence_analysis.py
-- long_term_algorithms_benchmark.py
-- put_call_parity_verification.py
-- theta_derivation_verification.py
-- var_vol_shock_analysis.py
-
-If any archived script needs to be reactivated, move it back to
-`validation_scripts/` and add explicit wiring in docs/workflows.
+If a historical check needs to be reintroduced, create a new script under
+`validation_scripts/`, then wire it into tests/docs/workflows explicitly.
