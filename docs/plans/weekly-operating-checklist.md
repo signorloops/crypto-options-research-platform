@@ -51,7 +51,6 @@ make live-deviation-snapshot
   - 包含可直接复制到 PR 描述的 `PR Brief (Copy/Paste)` 段落与 `pr_brief` 字段
 - `artifacts/live-deviation-snapshot.md`
 - `artifacts/live-deviation-snapshot.json`
-- `docs/templates/weekly-replay-template.md`
 
 ---
 
