@@ -133,7 +133,7 @@ graph TD
 
 **2. Prometheus 指标格式错误**
 
-- [corp/core/health_server.py](corp/core/health_server.py) 的 `/metrics` 返回 JSON，不是 Prometheus 格式
+- [corp/core/health_server.py](../../../../core/health_server.py) 的 `/metrics` 返回 JSON，不是 Prometheus 格式
 - 且 `prometheus_client` 库未在依赖中
 - 建议: 引入 `prometheus_client`，使用标准 Prometheus 格式暴露指标
 

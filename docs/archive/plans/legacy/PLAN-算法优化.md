@@ -60,14 +60,14 @@ isProject: false
 
 回测结果中的 PnL **完全没有扣除手续费和滑点**，导致所有策略的盈利数据严重失真。
 
-- [corp/research/backtest/engine.py](corp/research/backtest/engine.py): `RealisticFillSimulator.simulate_fill()` 以裸报价价格成交，零滑点
+- [corp/research/backtest/engine.py](../../../../research/backtest/engine.py): `RealisticFillSimulator.simulate_fill()` 以裸报价价格成交，零滑点
 - `_apply_slippage()` 和 `_simulate_fill_simple()` 存在但**从未被调用**
 - `_check_adverse_selection()` 计算了结果但**直接丢弃**，未影响成交
-- [corp/research/backtest/arena.py](corp/research/backtest/arena.py): `transaction_cost_bps=2.0` 存储了但**未传递给 BacktestEngine**
+- [corp/research/backtest/arena.py](../../../../research/backtest/arena.py): `transaction_cost_bps=2.0` 存储了但**未传递给 BacktestEngine**
 
 ### BUG-2: realized_volatility 缺少 /N 归一化
 
-[corp/research/volatility/historical.py](corp/research/volatility/historical.py): `realized_volatility()` 计算 `sqrt(sum(r^2))` 而非 `sqrt(mean(r^2))`，导致波动率随样本量增大而增大。**所有下游依赖此函数的模块（策略、风控、定价）都受影响。**
+[corp/research/volatility/historical.py](../../../../research/volatility/historical.py): `realized_volatility()` 计算 `sqrt(sum(r^2))` 而非 `sqrt(mean(r^2))`，导致波动率随样本量增大而增大。**所有下游依赖此函数的模块（策略、风控、定价）都受影响。**
 
 ```python
 # 当前（错误）: vol 随 N 增长
@@ -80,35 +80,35 @@ vol = np.sqrt(rv / len(returns)) * np.sqrt(periods)
 
 ### BUG-3: Max Drawdown 计算反了
 
-[corp/research/backtest/engine.py](corp/research/backtest/engine.py): `drawdown.min()` 取的是最小回撤而非最大回撤。应改为 `.max()`。
+[corp/research/backtest/engine.py](../../../../research/backtest/engine.py): `drawdown.min()` 取的是最小回撤而非最大回撤。应改为 `.max()`。
 
 ### BUG-4: VPIN 毒性阈值永远无法触发
 
-[corp/research/microstructure/vpin.py](corp/research/microstructure/vpin.py): VPIN 范围为 [0, 0.5]（除以了 `2 * total_vol`），但 `get_high_toxicity_periods` 默认阈值为 0.6，永远不会触发告警。
+[corp/research/microstructure/vpin.py](../../../../research/microstructure/vpin.py): VPIN 范围为 [0, 0.5]（除以了 `2 * total_vol`），但 `get_high_toxicity_periods` 默认阈值为 0.6，永远不会触发告警。
 
 ### BUG-5: HMM 状态标签随机排列
 
-[corp/research/signals/regime_detector.py](corp/research/signals/regime_detector.py) 和 [fast_regime_detector.py](corp/research/signals/fast_regime_detector.py): HMM 训练后 state 0/1/2 与 LOW/MEDIUM/HIGH 的对应关系是随机的，每次重新训练后可能交换。需要按波动率均值排序后重映射。
+[corp/research/signals/regime_detector.py](../../../../research/signals/regime_detector.py) 和 [fast_regime_detector.py](../../../../research/signals/fast_regime_detector.py): HMM 训练后 state 0/1/2 与 LOW/MEDIUM/HIGH 的对应关系是随机的，每次重新训练后可能交换。需要按波动率均值排序后重映射。
 
 ### BUG-6: Avellaneda-Stoikov 用墙钟时间计算 (T-t)
 
-[corp/strategies/market_making/avellaneda_stoikov.py](corp/strategies/market_making/avellaneda_stoikov.py): 用 `time.time()` 而非 `state.timestamp` 计算剩余时间。在回测中 (T-t) 永远不会正确递减。
+[corp/strategies/market_making/avellaneda_stoikov.py](../../../../strategies/market_making/avellaneda_stoikov.py): 用 `time.time()` 而非 `state.timestamp` 计算剩余时间。在回测中 (T-t) 永远不会正确递减。
 
 ### BUG-7: Arena 引用不存在的属性
 
-[corp/research/backtest/arena.py](corp/research/backtest/arena.py): `_calculate_scorecard` 引用 `result.total_pnl` 和 `result.avg_trade_pnl`，但 `BacktestResult` 定义的是 `total_pnl_crypto` 和 `avg_trade_pnl_crypto`，运行时会 `AttributeError`。
+[corp/research/backtest/arena.py](../../../../research/backtest/arena.py): `_calculate_scorecard` 引用 `result.total_pnl` 和 `result.avg_trade_pnl`，但 `BacktestResult` 定义的是 `total_pnl_crypto` 和 `avg_trade_pnl_crypto`，运行时会 `AttributeError`。
 
 ### BUG-8: 粗糙波动率特征函数计算错误
 
-[corp/research/volatility/models.py](corp/research/volatility/models.py): `rough_volatility_signature` 用 `returns[::delta]`（子采样）而非 block 累加。计算出的 Hurst 指数无意义。
+[corp/research/volatility/models.py](../../../../research/volatility/models.py): `rough_volatility_signature` 用 `returns[::delta]`（子采样）而非 block 累加。计算出的 Hurst 指数无意义。
 
 ### BUG-9: Hawkes CV 公式错误
 
-[corp/strategies/market_making/hawkes_mm.py](corp/strategies/market_making/hawkes_mm.py): `cv = var_iet / mean_iet`，但变异系数应为 `std / mean = sqrt(var) / mean`。
+[corp/strategies/market_making/hawkes_mm.py](../../../../strategies/market_making/hawkes_mm.py): `cv = var_iet / mean_iet`，但变异系数应为 `std / mean = sqrt(var) / mean`。
 
 ### BUG-10: Portfolio Greeks USD 转换可能双重计算 spot
 
-[corp/research/risk/greeks.py](corp/research/risk/greeks.py): 当 `fx_rate == spot` 时，inverse option 的 delta 被乘以 spot^2 而非 spot。
+[corp/research/risk/greeks.py](../../../../research/risk/greeks.py): 当 `fx_rate == spot` 时，inverse option 的 delta 被乘以 spot^2 而非 spot。
 
 ---
 
@@ -116,7 +116,7 @@ vol = np.sqrt(rv / len(returns)) * np.sqrt(periods)
 
 ### PERF-1: Hawkes 强度计算 O(n) -> O(1)
 
-[corp/strategies/market_making/hawkes_mm.py](corp/strategies/market_making/hawkes_mm.py) 和 [corp/data/generators/hawkes.py](corp/data/generators/hawkes.py): 每次计算遍历所有历史事件。Hawkes 核有递推公式：
+[corp/strategies/market_making/hawkes_mm.py](../../../../strategies/market_making/hawkes_mm.py) 和 [corp/data/generators/hawkes.py](../../../../data/generators/hawkes.py): 每次计算遍历所有历史事件。Hawkes 核有递推公式：
 
 ```
 A(n) = exp(-beta * (t_n - t_{n-1})) * (A(n-1) + alpha)
@@ -127,25 +127,25 @@ lambda(t) = mu + A(n)
 
 ### PERF-2: EWMA / GARCH 纯 Python 循环
 
-[corp/research/volatility/models.py](corp/research/volatility/models.py): EWMA 和 GARCH 的核心循环用纯 Python 实现，比 NumPy 向量化或 Numba JIT 慢 10-100x。GARCH MLE 优化中该循环被调用数百次。
+[corp/research/volatility/models.py](../../../../research/volatility/models.py): EWMA 和 GARCH 的核心循环用纯 Python 实现，比 NumPy 向量化或 Numba JIT 慢 10-100x。GARCH MLE 优化中该循环被调用数百次。
 
 建议: 用 `scipy.signal.lfilter` 做 EWMA，用 `@numba.jit(nopython=True)` 做 GARCH likelihood。
 
 ### PERF-3: XGBoost 每次报价做 20 次预测
 
-[corp/strategies/market_making/xgboost_spread.py](corp/strategies/market_making/xgboost_spread.py): `_predict_spread` 对 20 个候选 spread 做网格搜索，每次 quote 调用 20 次 XGBoost predict。应改为直接回归最优 spread 的单模型。
+[corp/strategies/market_making/xgboost_spread.py](../../../../strategies/market_making/xgboost_spread.py): `_predict_spread` 对 20 个候选 spread 做网格搜索，每次 quote 调用 20 次 XGBoost predict。应改为直接回归最优 spread 的单模型。
 
 ### PERF-4: 快速策略缓存淘汰 O(n log n)
 
-[corp/strategies/market_making/fast_integrated_strategy.py](corp/strategies/market_making/fast_integrated_strategy.py): Greeks 缓存溢出时对所有 key 排序。应用 `collections.OrderedDict` 实现 O(1) LRU。
+[corp/strategies/market_making/fast_integrated_strategy.py](../../../../strategies/market_making/fast_integrated_strategy.py): Greeks 缓存溢出时对所有 key 排序。应用 `collections.OrderedDict` 实现 O(1) LRU。
 
 ### PERF-5: VPIN 逐笔循环创建 volume bucket
 
-[corp/research/microstructure/vpin.py](corp/research/microstructure/vpin.py): 应用 `np.cumsum` + `np.searchsorted` 向量化。
+[corp/research/microstructure/vpin.py](../../../../research/microstructure/vpin.py): 应用 `np.cumsum` + `np.searchsorted` 向量化。
 
 ### PERF-6: 回测引擎全量 DataFrame -> list of dicts
 
-[corp/research/backtest/engine.py](corp/research/backtest/engine.py): `_prepare_events()` 把整个 DataFrame 转为 dict list，内存翻三倍。应用 `itertuples()` 或直接按索引访问。
+[corp/research/backtest/engine.py](../../../../research/backtest/engine.py): `_prepare_events()` 把整个 DataFrame 转为 dict list，内存翻三倍。应用 `itertuples()` 或直接按索引访问。
 
 ---
 
