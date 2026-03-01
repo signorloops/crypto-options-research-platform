@@ -1,238 +1,85 @@
-# 快速开始指南
+# 快速开始
 
-> 📚 **提示**: 如果你不确定从哪里开始，先阅读 [GUIDE.md](GUIDE.md) - 它根据你的背景提供了详细的学习路径推荐。
+## 1. 安装
 
-## 安装
-
-### 环境要求
-- Python 3.9+
-- 4GB+ RAM
-- 10GB+ 磁盘空间（数据缓存）
-
-### 步骤 1: 克隆仓库
 ```bash
 git clone https://github.com/signorloops/crypto-options-research-platform.git
 cd crypto-options-research-platform
-```
 
-### 步骤 2: 创建虚拟环境
-```bash
 python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# 或
-venv\Scripts\activate  # Windows
-```
+source venv/bin/activate  # Windows: venv\Scripts\activate
 
-### 步骤 3: 安装依赖
-```bash
 pip install -e ".[dev]"
-
-# 如需完整栈（ML + Notebook + 加速）
+# 可选完整栈
 pip install -e ".[dev,full]"
-```
 
-### 步骤 4: 配置环境变量
-```bash
 cp .env.example .env
-# 编辑 .env 文件，填入你的 API keys（可选）
 ```
 
-## 第一个程序
+## 2. 最小验证
 
-### 获取市场数据
-```python
-import asyncio
-from data.downloaders.deribit import DeribitClient
-
-async def main():
-    client = DeribitClient()
-
-    async with client:
-        # 获取 BTC 期权合约列表
-        contracts = await client.get_instruments("BTC", "option")
-        print(f"找到 {len(contracts)} 个 BTC 期权合约")
-
-        # 获取第一个合约的订单簿
-        if contracts:
-            symbol = contracts[0].symbol
-            ob = await client.get_order_book(symbol)
-            print(f"{symbol}: 买 {ob.best_bid} / 卖 {ob.best_ask}")
-
-if __name__ == "__main__":
-    asyncio.run(main())
+```bash
+pytest -q -m "not integration"
+make docs-link-check
 ```
 
-### 实时 WebSocket 流
-```python
-import asyncio
-from data.downloaders.deribit import DeribitClient
+## 3. 基础示例
 
-async def on_trade(trade):
-    print(f"成交: {trade.instrument} @ {trade.price} ({trade.side})")
+### 波动率
 
-async def main():
-    client = DeribitClient()
-
-    # 订阅 BTC 永续合约的实时交易
-    await client.subscribe_trades(
-        ["BTC-PERPETUAL"],
-        callback=on_trade
-    )
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-### 波动率计算
 ```python
 import numpy as np
-from research.volatility import yang_zhang_volatility
+from research.volatility.historical import realized_volatility
 
-# 模拟 OHLC 数据
-open_p = np.array([50000, 51000, 50500, 52000])
-high = np.array([52000, 53000, 52500, 54000])
-low = np.array([49000, 50000, 49500, 51000])
-close = np.array([51000, 50500, 52000, 53000])
-
-# 计算 Yang-Zhang 波动率
-vol = yang_zhang_volatility(open_p, high, low, close, annualize=True)
-print(f"年化波动率: {vol*100:.2f}%")
+returns = np.random.normal(0, 0.02, 500)
+vol = realized_volatility(returns, annualize=True, periods=365)
+print(vol)
 ```
 
-### 简单回测
+### 回测
+
 ```python
-from datetime import datetime, timedelta
-from research.backtest.engine import BacktestEngine
-from strategies.market_making.naive import NaiveMarketMaker
+from research.backtest.hawkes_comparison import ScenarioGenerator
 
-# 配置
-config = {
-    'start_date': datetime(2024, 1, 1),
-    'end_date': datetime(2024, 1, 31),
-    'instruments': ['BTC-PERPETUAL'],
-    'initial_capital': 100000,
-}
-
-# 创建策略
-strategy = NaiveMarketMaker(
-    spread_bps=50,  # 50基点价差
-    max_position=1.0
-)
-
-# 运行回测
-engine = BacktestEngine(config)
-results = engine.run(strategy)
-
-print(f"最终权益: {results.final_equity:.2f}")
-print(f"夏普比率: {results.sharpe_ratio:.2f}")
-```
-
-### Hawkes 策略对比实验
-```python
-from research.backtest.hawkes_comparison import (
-    ScenarioGenerator,
-    ComprehensiveHawkesComparison
-)
-from strategies.market_making.hawkes_mm import (
-    HawkesMarketMaker, HawkesMMConfig
-)
-from strategies.market_making.avellaneda_stoikov import (
-    AvellanedaStoikov, ASConfig
-)
-
-# 生成测试场景（合成 Hawkes 数据）
 gen = ScenarioGenerator(base_price=50000.0)
 scenarios = gen.generate_hawkes_scenarios()
-
-# 初始化策略
-strategies = [
-    HawkesMarketMaker(HawkesMMConfig()),
-    AvellanedaStoikov(ASConfig()),
-]
-
-# 运行对比实验
-comparison = ComprehensiveHawkesComparison(
-    initial_capital=100000.0,
-    transaction_cost_bps=2.0
-)
-results = comparison.run_full_comparison(strategies, scenarios)
-
-# 生成报告
-report = comparison.generate_summary_report()
-print(report)
+print(list(scenarios.keys()))
 ```
 
-#### 使用 Jupyter Notebook
+## 4. 常用命令
+
 ```bash
-# 启动交互式实验
-jupyter notebook notebooks/06_hawkes_backtest_comparison.ipynb
-```
+# 测试
+pytest -q -m "not integration"
+RUN_INTEGRATION_TESTS=1 pytest -q -m "integration"
 
-## 常用命令
-
-### 运行测试
-```bash
-# 默认测试（不包含外部 API 集成测试）
-pytest tests/ -v -m "not integration"
-
-# 特定模块
-pytest tests/test_volatility.py -v
-
-# 覆盖率报告
-pytest tests/ -m "not integration" --cov=core --cov=strategies --cov=research
-
-# 显式运行集成测试（访问交易所 API）
-RUN_INTEGRATION_TESTS=1 pytest tests/ -v -m "integration"
-```
-
-### 代码格式化
-```bash
+# 代码质量
 black .
 ruff check . --fix
 mypy .
-```
 
-### 研究审计与基准
-```bash
-# 一键生成研究审计工件（推荐）
+# 研究审计
 make research-audit
-
-# 与基线做差异对比
 make research-audit-compare
-
-# 确认升级是预期行为后刷新基线
 make research-audit-refresh-baseline
+
+# 治理链路
+make complexity-audit
+make weekly-operating-audit
+make weekly-close-gate
+make live-deviation-snapshot
 ```
 
-完整参数、产物清单与 baseline 流程请查看 [`governance-operations.md`](governance-operations.md)。
+## 5. 常见问题
 
-### 数据管理
-```bash
-# 查看缓存信息
-python -c "from data.cache import DataCache; print(DataCache().get_cache_info())"
+1. `429 Too Many Requests`：降低请求频率或配置 API Key。
+2. WebSocket 中断：检查网络，客户端已有自动重连。
+3. 内存不足：缩小回测窗口或减少数据规模。
 
-# 清理过期缓存
-# 手动删除 data/cache/ 下的旧文件
-```
+## 6. 下一步
 
-## 故障排除
-
-### 问题: API 返回 429 Too Many Requests
-**解决:** 降低请求频率，或添加 API key 提高限流
-
-### 问题: WebSocket 连接断开
-**解决:** 已实现自动重连，检查网络连接
-
-### 问题: 内存不足
-**解决:** 减少回测日期范围，或增加交换空间
-
-### 问题: Pydantic 验证错误
-**解决:** 检查输入数据格式，参考 `core/validation/schemas.py`
-
-## 下一步
-
-- 文档导航总入口：[`GUIDE.md`](GUIDE.md)
-- 计划索引：[`plans/README.md`](plans/README.md)
-- 报告索引：[`archive/reports/README.md`](archive/reports/README.md)
-- 治理专题：[`governance-operations.md`](governance-operations.md)
-- 历史归档索引：[`archive/README.md`](archive/README.md)
+- 导航入口：`GUIDE.md`
+- 计划索引：`plans/README.md`
+- 治理手册：`governance-operations.md`
+- 报告归档：`archive/reports/README.md`
+- 历史归档：`archive/README.md`
