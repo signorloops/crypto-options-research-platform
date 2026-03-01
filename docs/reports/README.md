@@ -11,4 +11,4 @@ This directory keeps only currently referenced reports.
 Historical operational/progress logs are archived under:
 
 - `../archive/reports/README.md`
-- `../archive/reports/2026-02-28-governance-gate-activation.md`
+- `../archive/reports/2026-Q1-governance-timeline-summary.md`

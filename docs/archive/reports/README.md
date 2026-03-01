@@ -6,11 +6,7 @@ Historical progress logs and one-off acceptance records moved from `docs/reports
 
 | File | Focus |
 |---|---|
-| `2026-02-24-autonomous-delivery-log.md` | 多轮自主交付记录与执行日志 |
-| `2026-02-24-day10-regression-acceptance.md` | Day10 回归验收结果 |
-| `2026-02-25-roadmap-progress-and-gaps.md` | 路线图进度与缺口审计 |
-| `2026-02-26-governance-manual-closure-progress.md` | 人工收口治理执行进展 |
-| `2026-02-28-governance-gate-activation.md` | 主干 required checks 与周治理门禁启用记录 |
+| `2026-Q1-governance-timeline-summary.md` | 2026-02 阶段治理/交付报告合并摘要 |
 | `inverse-pnl-validation-report-2026-02-08.md` | 早期 inverse PnL 数学验证记录（历史快照） |
 | `second-round-math-audit-report.md` | 第二轮深度数学审核报告（历史结论） |
 | `validation-scripts-retirement-note.md` | 退休验证脚本清理说明与复活规则 |
