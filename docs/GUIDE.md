@@ -67,7 +67,6 @@ pytest -q -m "not integration"
 - 当前执行计划：
   - [`plans/2026-Q2-long-term-execution-roadmap.md`](plans/2026-Q2-long-term-execution-roadmap.md)
   - [`plans/weekly-operating-checklist.md`](plans/weekly-operating-checklist.md)
-  - [`plans/2026-02-25-inverse-options-arxiv-implementation-plan.md`](plans/2026-02-25-inverse-options-arxiv-implementation-plan.md)
 - 历史计划：[`archive/plans/README.md`](archive/plans/README.md)
 
 ## 5. 常用命令

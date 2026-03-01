@@ -4,6 +4,7 @@
 
 - [2026-02-20-algorithm-upgrades.md](2026-02-20-algorithm-upgrades.md)
 - [2026-02-24-coin-margined-options-research-roadmap.md](2026-02-24-coin-margined-options-research-roadmap.md)
+- [2026-02-25-inverse-options-arxiv-implementation-plan.md](2026-02-25-inverse-options-arxiv-implementation-plan.md)
 - [2026-03-complexity-reduction-sprint.md](2026-03-complexity-reduction-sprint.md)
 - [legacy/README.md](legacy/README.md)
 
