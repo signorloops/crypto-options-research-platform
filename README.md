@@ -110,7 +110,7 @@ corp/
 
 - [导航总入口](docs/GUIDE.md)
 - [周执行清单](docs/plans/weekly-operating-checklist.md)
-- [治理时间线摘要](docs/archive/reports/2026-Q1-governance-timeline-summary.md)
+- [归档报告摘要](docs/archive/reports/2026-Q1-reports-summary.md)
 - [历史计划摘要](docs/archive/plans/2026-Q1-archived-plans-summary.md)
 - [历史学习摘要](docs/archive/learning/learning-materials-summary.md)
 
