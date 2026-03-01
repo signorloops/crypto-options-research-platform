@@ -10,6 +10,7 @@ import pytest
 @pytest.mark.parametrize(
     ("module_name", "symbol_name"),
     [
+        ("data", "DataCache"),
         ("research.pricing", "InverseOptionPricer"),
         ("research.volatility", "realized_volatility"),
         ("research.hedging", "AdaptiveDeltaHedger"),
@@ -27,6 +28,7 @@ def test_lazy_exports_resolve_known_symbols(module_name: str, symbol_name: str) 
 @pytest.mark.parametrize(
     ("module_name", "missing_symbol"),
     [
+        ("data", "__missing_symbol__"),
         ("research.pricing", "__missing_symbol__"),
         ("research.volatility", "__missing_symbol__"),
         ("research.hedging", "__missing_symbol__"),
