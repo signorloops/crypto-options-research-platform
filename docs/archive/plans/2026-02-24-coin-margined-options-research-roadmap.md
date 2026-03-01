@@ -120,7 +120,7 @@
 6. **Day 10: 回归验证与文档沉淀**
 - 文档：
   - `docs/theory.md`
-  - `docs/算法与模型深度讲解.md`
+  - `docs/archive/learning/算法与模型深度讲解.md`
   - `ALGORITHMS.md`
 - 验证命令：
   - `pytest -q tests/test_pricing_inverse.py tests/test_volatility.py tests/test_hawkes_comparison.py tests/test_research_dashboard.py`

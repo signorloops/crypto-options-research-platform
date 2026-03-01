@@ -17,7 +17,13 @@
 - `项目深度学习手册_第三册_策略与风控联合推导_含公式证明_回测实验设计.md`
 - `项目深度学习手册_第四册_参数标定与实盘部署手册_含监控告警与故障演练.md`
 
-### 2) 阶段性记录（已清理）
+### 2) 学习扩展（归档）
+
+- `learning/README.md`
+- `learning/算法与模型入门学习版.md`
+- `learning/算法与模型深度讲解.md`
+
+### 3) 阶段性记录（已清理）
 
 旧的阶段性修复记录与临时分析文档已移除；如需追溯，请查看 Git 历史。
 
@@ -25,14 +31,14 @@
 
 - `branch-protection-checklist.md`
 
-### 3) 历史计划文档
+### 4) 历史计划文档
 
 - `plans/README.md`
 - `plans/2026-02-20-algorithm-upgrades.md`
 - `plans/2026-02-24-coin-margined-options-research-roadmap.md`
 - `plans/2026-03-complexity-reduction-sprint.md`
 
-### 4) 历史报告归档
+### 5) 历史报告归档
 
 - `reports/README.md`
 
