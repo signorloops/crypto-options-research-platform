@@ -26,7 +26,7 @@ MYPY := $(PYTHON) -m mypy
 ADR_OWNER ?= TBD
 BASELINE_COMPLEXITY_JSON ?= config/complexity_baseline.json
 
-SRC_DIRS := core data research strategies utils config execution tests
+SRC_DIRS := core data research strategies utils config execution tests scripts
 
 help:
 	@echo "Available commands:"
