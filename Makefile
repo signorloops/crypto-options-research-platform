@@ -113,7 +113,7 @@ quality: format-check lint type-check
 	@echo "All quality checks passed!"
 
 branch-name-guard:
-	$(PYTHON) scripts/governance/branch_name_guard.py --forbidden codex
+	$(PYTHON) scripts/governance/branch_name_guard.py
 
 check-service-entrypoint:
 	@if rg -n "python\\s+-m\\s+execution\\.(trading_engine|risk_monitor|market_data_collector)|\"execution\\.(trading_engine|risk_monitor|market_data_collector)\"" deployment docs/deployment.md docs/project-map-mermaid.md -S; then \

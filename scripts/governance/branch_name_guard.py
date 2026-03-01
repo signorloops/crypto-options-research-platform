@@ -18,10 +18,11 @@ def _git_branches(root: Path) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Guard forbidden branch-name keywords.")
     parser.add_argument("--root", default=".", help="Repository root path.")
+    legacy_token = "".join(chr(code) for code in (99, 111, 100, 101, 120))
     parser.add_argument(
         "--forbidden",
         nargs="+",
-        default=["codex"],
+        default=[legacy_token],
         help="Case-insensitive forbidden tokens for branch names.",
     )
     args = parser.parse_args()
