@@ -19,5 +19,5 @@
 
 ## 使用方式
 
-1. 需要当前执行内容：查看 `../../plans/2026-Q2-long-term-execution-roadmap.md` 与 `../../plans/weekly-operating-checklist.md`。
+1. 需要当前执行内容：查看 `../../plans/weekly-operating-checklist.md`。
 2. 需要历史背景：先读本摘要，再通过 Git 历史查看具体计划版本。

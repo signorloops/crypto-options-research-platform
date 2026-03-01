@@ -92,7 +92,7 @@ corp/
 │   ├── pricing/             # inverse 定价、rough volatility
 │   ├── volatility/          # 历史/条件/隐含波动率模型
 │   ├── risk/                # Greeks、VaR、Circuit Breaker
-│   ├── signals/             # HMM regime、fast regime、BOCD
+│   ├── signals/             # HMM regime、fast regime、jump premia
 │   ├── hedging/             # adaptive delta、quanto inverse hedging
 │   ├── execution/           # Almgren-Chriss
 │   └── backtest/            # 回测引擎、策略竞技场、Hawkes专项评测
@@ -109,12 +109,10 @@ corp/
 文档入口已收敛为“索引优先”，避免在多个文件重复维护同一说明。
 
 - [导航总入口](docs/GUIDE.md)
-- [Q2 执行路线图](docs/plans/2026-Q2-long-term-execution-roadmap.md)
 - [周执行清单](docs/plans/weekly-operating-checklist.md)
 - [治理时间线摘要](docs/archive/reports/2026-Q1-governance-timeline-summary.md)
 - [历史计划摘要](docs/archive/plans/2026-Q1-archived-plans-summary.md)
 - [历史学习摘要](docs/archive/learning/learning-materials-summary.md)
-- [历史报告摘要](docs/archive/reports/2026-Q1-governance-timeline-summary.md)
 
 常用专题：
 

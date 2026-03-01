@@ -79,11 +79,9 @@ make live-deviation-snapshot
 ## 6. 下一步
 
 - 导航入口：`GUIDE.md`
-- 路线图：`plans/2026-Q2-long-term-execution-roadmap.md`
 - 周清单：`plans/weekly-operating-checklist.md`
 - 治理手册：`governance-operations.md`
 - 治理时间线摘要：`archive/reports/2026-Q1-governance-timeline-summary.md`
 - 数学验证摘要：`archive/reports/2026-Q1-math-validation-summary.md`
 - 历史计划摘要：`archive/plans/2026-Q1-archived-plans-summary.md`
 - 历史学习摘要：`archive/learning/learning-materials-summary.md`
-- 历史报告摘要：`archive/reports/2026-Q1-governance-timeline-summary.md`
