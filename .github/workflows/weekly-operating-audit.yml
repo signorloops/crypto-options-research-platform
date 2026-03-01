@@ -34,24 +34,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install \
-            pytest \
-            pytest-asyncio \
-            numpy \
-            pandas \
-            scipy \
-            matplotlib \
-            scikit-learn \
-            aiohttp \
-            websockets \
-            requests \
-            fastapi \
-            starlette \
-            httpx \
-            plotly \
-            pydantic \
-            pydantic-settings \
-            prometheus-client
+          python -m pip install -r requirements.txt
 
       - name: Run weekly operating audit (strict)
         run: |

@@ -149,42 +149,13 @@ weekly-operating-audit:
 		--output-json artifacts/weekly-operating-audit.json \
 		--regression-cmd "$(PYTHON) -m pytest -q --noconftest tests/test_pricing_inverse.py tests/test_volatility.py tests/test_hawkes_comparison.py tests/test_research_dashboard.py" \
 		--strict
-	$(PYTHON) scripts/governance/weekly_pnl_attribution.py \
-		--output-md artifacts/weekly-pnl-attribution.md \
-		--output-json artifacts/weekly-pnl-attribution.json
-	$(PYTHON) scripts/governance/weekly_canary_checklist.py \
-		--audit-json artifacts/weekly-operating-audit.json \
-		--attribution-json artifacts/weekly-pnl-attribution.json \
-		--output-md artifacts/weekly-canary-checklist.md \
-		--output-json artifacts/weekly-canary-checklist.json
-	$(PYTHON) scripts/governance/weekly_adr_draft.py \
-		--audit-json artifacts/weekly-operating-audit.json \
-		--output-md artifacts/weekly-adr-draft.md \
-		--owner "$(ADR_OWNER)"
-	$(PYTHON) scripts/governance/weekly_decision_log.py \
-		--audit-json artifacts/weekly-operating-audit.json \
-		--canary-json artifacts/weekly-canary-checklist.json \
-		--output-md artifacts/weekly-decision-log.md \
-		--output-json artifacts/weekly-decision-log.json
-	$(PYTHON) scripts/governance/weekly_manual_status_prefill.py \
-		--decision-json artifacts/weekly-decision-log.json \
-		--attribution-json artifacts/weekly-pnl-attribution.json \
-		--manual-status-json artifacts/weekly-manual-status.json
-	$(PYTHON) scripts/governance/online_offline_consistency_replay.py \
-		--audit-json artifacts/weekly-operating-audit.json \
-		--live-json artifacts/live-deviation-snapshot.json \
-		--thresholds config/online_offline_consistency_thresholds.json \
-		--output-md artifacts/online-offline-consistency-replay.md \
-		--output-json artifacts/online-offline-consistency-replay.json
-	$(PYTHON) scripts/governance/weekly_signoff_pack.py \
-		--audit-json artifacts/weekly-operating-audit.json \
-		--canary-json artifacts/weekly-canary-checklist.json \
-		--decision-json artifacts/weekly-decision-log.json \
-		--attribution-json artifacts/weekly-pnl-attribution.json \
-		--manual-status-json artifacts/weekly-manual-status.json \
-		--consistency-replay-json artifacts/online-offline-consistency-replay.json \
-		--output-md artifacts/weekly-signoff-pack.md \
-		--output-json artifacts/weekly-signoff-pack.json
+	$(MAKE) weekly-pnl-attribution
+	$(MAKE) weekly-canary-checklist
+	$(MAKE) weekly-adr-draft ADR_OWNER="$(ADR_OWNER)"
+	$(MAKE) weekly-decision-log
+	$(MAKE) weekly-manual-prefill
+	$(MAKE) weekly-consistency-replay
+	$(MAKE) weekly-signoff-pack
 
 weekly-close-gate:
 	$(MAKE) weekly-operating-audit
