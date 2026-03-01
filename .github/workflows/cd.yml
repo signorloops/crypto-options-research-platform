@@ -47,7 +47,7 @@ jobs:
   deploy-staging:
     runs-on: ubuntu-latest
     needs: build-and-push
-    if: ${{ github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' }}
+    if: ${{ github.ref == 'refs/heads/master' }}
     environment: staging
     env:
       KUBE_CONFIG_B64: ${{ secrets.KUBE_CONFIG }}

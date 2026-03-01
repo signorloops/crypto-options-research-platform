@@ -2,9 +2,9 @@ name: Docs Link Check
 
 on:
   pull_request:
-    branches: [ master, main ]
+    branches: [ master ]
   push:
-    branches: [ master, main ]
+    branches: [ master ]
 
 jobs:
   docs-link-check:
