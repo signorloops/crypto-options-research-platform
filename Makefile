@@ -242,9 +242,10 @@ clean:
 	rm -rf .pytest_cache/
 	rm -rf .mypy_cache/
 	rm -rf htmlcov/
-	rm -rf .coverage
+	find . -maxdepth 1 -type f -name ".coverage*" -delete
 	find . -type d -name __pycache__ -exec rm -rf {} +
 	find . -type f -name "*.pyc" -delete
+	find . -path "./.git" -prune -o -type f -name ".DS_Store" -delete
 
 docs:
 	@echo "Building documentation..."
