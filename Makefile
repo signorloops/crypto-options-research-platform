@@ -97,16 +97,16 @@ test-cov:
 	$(PYTEST) --cov=core --cov=data --cov=research --cov=strategies --cov=utils --cov=config --cov=execution --cov-report=term-missing --cov-report=html
 
 lint:
-	$(RUFF) check $(SRC_DIRS) verify_implementation.py
+	$(RUFF) check $(SRC_DIRS)
 
 lint-fix:
-	$(RUFF) check --fix $(SRC_DIRS) verify_implementation.py
+	$(RUFF) check --fix $(SRC_DIRS)
 
 format:
-	$(BLACK) core data research strategies utils config tests execution verify_implementation.py
+	$(BLACK) core data research strategies utils config tests execution
 
 format-check:
-	$(BLACK) --check core data research strategies utils config tests execution verify_implementation.py
+	$(BLACK) --check core data research strategies utils config tests execution
 
 type-check:
 	$(MYPY) core data research strategies utils config execution tests
