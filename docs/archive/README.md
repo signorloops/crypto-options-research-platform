@@ -17,8 +17,7 @@
 ### 2) 学习扩展（归档）
 
 - `learning/README.md`
-- `learning/算法与模型入门学习版.md`
-- `learning/算法与模型深度讲解.md`
+- `learning/learning-materials-summary.md`
 
 ### 3) 阶段性记录（已清理）
 
