@@ -11,8 +11,8 @@
 
 ### 步骤 1: 克隆仓库
 ```bash
-git clone <repository-url>
-cd corp
+git clone https://github.com/signorloops/crypto-options-research-platform.git
+cd crypto-options-research-platform
 ```
 
 ### 步骤 2: 创建虚拟环境
@@ -196,46 +196,17 @@ mypy .
 
 ### 研究审计与基准
 ```bash
-# 一键生成所有研究审计工件（推荐）
+# 一键生成研究审计工件（推荐）
 make research-audit
 
-# 近月 IV surface 稳定性 + 静态无套利报告
-python validation_scripts/iv_surface_stability_report.py
+# 与基线做差异对比
+make research-audit-compare
 
-# 加质量门槛（CI 模式）
-python validation_scripts/iv_surface_stability_report.py --fail-on-arbitrage --min-short-max-jump-reduction 0.005
-
-# 启用 fast-calibration（本地重复运行可复用缓存）
-python validation_scripts/iv_surface_stability_report.py --fast-calibration --cache-dir artifacts/research-audit-cache/iv
-
-# Rough volatility + jumps 实验对比
-python validation_scripts/rough_jump_experiment.py --seed 42
-
-# 定价模型 zoo 基准（固定样本，适合跨提交漂移比较）
-python validation_scripts/pricing_model_zoo_benchmark.py --quotes-json validation_scripts/fixtures/model_zoo_quotes_seed42.json
-
-# 同时输出机器可读 JSON
-python validation_scripts/pricing_model_zoo_benchmark.py --quotes-json validation_scripts/fixtures/model_zoo_quotes_seed42.json --output-json artifacts/pricing-model-zoo-benchmark.json
-
-# 同时输出 JSON + Markdown（便于 CI Summary/周报）
-python validation_scripts/pricing_model_zoo_benchmark.py --quotes-json validation_scripts/fixtures/model_zoo_quotes_seed42.json --output-json artifacts/pricing-model-zoo-benchmark.json --output-md artifacts/pricing-model-zoo-benchmark.md
-
-# 加质量门槛（期望最优模型 + RMSE 上限）
-python validation_scripts/pricing_model_zoo_benchmark.py --quotes-json validation_scripts/fixtures/model_zoo_quotes_seed42.json --expected-best-model bates --max-best-rmse 120.0
-
-# 若需要动态生成样本，也可使用 seed + bucket
-python validation_scripts/pricing_model_zoo_benchmark.py --seed 42 --n-per-bucket 1
-
-# inverse-power MC 基线与闭式 inverse 定价一致性验证
-python validation_scripts/inverse_power_validation.py --n-paths 120000 --max-abs-error 0.0006
+# 确认升级是预期行为后刷新基线
+make research-audit-refresh-baseline
 ```
 
-GitHub Actions:
-- `Research Audit` workflow 每周一 UTC 自动运行，并可手动触发。
-- `Research Audit Baseline Refresh` 可手动生成“候选基线 + 差异报告”artifact 供审阅。
-- 手动触发时可调 `seed`、`n_per_bucket`、`quotes_json`、`expected_best_model`、`max_best_rmse`、`max_best_rmse_increase_pct`、`max_iv_reduction_drop_pct`、`allow_best_model_change`、`fail_on_arbitrage`、`fast_calibration`、`min_short_max_jump_reduction`、`min_net_jump_premium_std`、`max_inverse_power_abs_error`。
-- 运行后可在 artifact 下载 `iv-surface-stability`（md/json）、`rough-jump`（txt）、`jump-premia-stability`（md/json）、`inverse-power-validation`（md/json）、`model-zoo`（txt/json/md）、`research-audit-snapshot.json`、`research-audit-drift-report`（md/json）、`research-audit-weekly-summary.md`。
-- 如果你确认模型升级是预期行为，可本地执行 `make research-audit-refresh-baseline` 刷新基线。
+完整参数、产物清单与 baseline 流程请查看 [`research-audit.md`](research-audit.md)。
 
 ### 数据管理
 ```bash
@@ -262,11 +233,8 @@ python -c "from data.cache import DataCache; print(DataCache().get_cache_info())
 
 ## 下一步
 
-- 阅读 [架构文档](architecture.md) 了解系统设计
-- 查看 [API 文档](api.md) 了解所有接口
-- 探索 [示例 Notebook](../notebooks/)
-- 了解 [Hawkes 策略对比实验](hawkes_comparison_experiment.md) 详细设计
-- 按 [Branch Protection 清单](branch-protection-checklist.md) 配置主干合并守门
-- 阅读 [Research Audit 指南](research-audit.md) 了解研究守门产物与阈值
-- 阅读 [arXiv 前沿清单（币本位期权）](reports/2026-02-25-arxiv-frontier-inverse-options.md) 获取可落地论文路线图
-- 参考 [arXiv 路线实施计划](plans/2026-02-25-inverse-options-arxiv-implementation-plan.md) 直接拆任务执行
+- 文档导航总入口：[`GUIDE.md`](GUIDE.md)
+- 计划索引：[`plans/README.md`](plans/README.md)
+- 报告索引：[`reports/README.md`](reports/README.md)
+- 研究审计专题：[`research-audit.md`](research-audit.md)
+- 历史归档索引：[`archive/README.md`](archive/README.md)
