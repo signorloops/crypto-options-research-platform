@@ -8,18 +8,11 @@ from importlib import import_module
 from typing import Any
 
 __all__ = [
-    "BOCDConfig",
-    "OnlineBayesianChangepointDetector",
     "JumpRiskPremiaEstimator",
     "JumpRiskPremiaSignal",
 ]
 
 _EXPORTS: dict[str, tuple[str, str]] = {
-    "BOCDConfig": ("research.signals.bayesian_changepoint", "BOCDConfig"),
-    "OnlineBayesianChangepointDetector": (
-        "research.signals.bayesian_changepoint",
-        "OnlineBayesianChangepointDetector",
-    ),
     "JumpRiskPremiaEstimator": ("research.signals.jump_risk_premia", "JumpRiskPremiaEstimator"),
     "JumpRiskPremiaSignal": ("research.signals.jump_risk_premia", "JumpRiskPremiaSignal"),
 }

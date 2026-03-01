@@ -25,7 +25,7 @@
 - 数据与工程
   - Parquet + DuckDB + Redis 多层缓存，WebSocket 自动重连，健康检查与研究看板
 - 长期研究模块
-  - Rough Volatility、Online BOCD、Deep Hedging、Almgren-Chriss 最优执行
+  - Rough Volatility、Jump Premia、Almgren-Chriss 最优执行
 
 ## 快速开始
 
@@ -93,7 +93,7 @@ corp/
 │   ├── volatility/          # 历史/条件/隐含波动率模型
 │   ├── risk/                # Greeks、VaR、Circuit Breaker
 │   ├── signals/             # HMM regime、fast regime、BOCD
-│   ├── hedging/             # adaptive delta、deep hedging
+│   ├── hedging/             # adaptive delta、quanto inverse hedging
 │   ├── execution/           # Almgren-Chriss
 │   └── backtest/            # 回测引擎、策略竞技场、Hawkes专项评测
 ├── strategies/

@@ -11,9 +11,6 @@ __all__ = [
     "AdaptiveDeltaHedger",
     "AdaptiveHedgeConfig",
     "SimpleDeltaHedger",
-    "DeepHedger",
-    "DeepHedgingConfig",
-    "DeepHedgingPolicy",
     "QuantoInverseHedger",
     "QuantoInverseHedgePlan",
 ]
@@ -22,9 +19,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "AdaptiveDeltaHedger": ("research.hedging.adaptive_delta", "AdaptiveDeltaHedger"),
     "AdaptiveHedgeConfig": ("research.hedging.adaptive_delta", "AdaptiveHedgeConfig"),
     "SimpleDeltaHedger": ("research.hedging.adaptive_delta", "SimpleDeltaHedger"),
-    "DeepHedger": ("research.hedging.deep_hedging", "DeepHedger"),
-    "DeepHedgingConfig": ("research.hedging.deep_hedging", "DeepHedgingConfig"),
-    "DeepHedgingPolicy": ("research.hedging.deep_hedging", "DeepHedgingPolicy"),
     "QuantoInverseHedger": ("research.hedging.quanto_inverse", "QuantoInverseHedger"),
     "QuantoInverseHedgePlan": ("research.hedging.quanto_inverse", "QuantoInverseHedgePlan"),
 }

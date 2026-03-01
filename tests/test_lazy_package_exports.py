@@ -14,7 +14,7 @@ import pytest
         ("research.pricing", "InverseOptionPricer"),
         ("research.volatility", "realized_volatility"),
         ("research.hedging", "AdaptiveDeltaHedger"),
-        ("research.signals", "BOCDConfig"),
+        ("research.signals", "JumpRiskPremiaEstimator"),
         ("strategies.arbitrage", "BasisArbitrage"),
     ],
 )
