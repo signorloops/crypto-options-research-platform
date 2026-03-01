@@ -11,10 +11,7 @@
 
 已归档到 `../archive/plans/`：
 
-- [2026-02-20-algorithm-upgrades.md](../archive/plans/2026-02-20-algorithm-upgrades.md)
-- [2026-02-24-coin-margined-options-research-roadmap.md](../archive/plans/2026-02-24-coin-margined-options-research-roadmap.md)
-- [2026-02-25-inverse-options-arxiv-implementation-plan.md](../archive/plans/2026-02-25-inverse-options-arxiv-implementation-plan.md)
-- [2026-03-complexity-reduction-sprint.md](../archive/plans/2026-03-complexity-reduction-sprint.md)
+- [2026-Q1-archived-plans-summary.md](../archive/plans/2026-Q1-archived-plans-summary.md)
 
 ## 维护规则
 

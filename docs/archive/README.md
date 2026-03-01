@@ -31,9 +31,7 @@
 ### 4) 历史计划文档
 
 - `plans/README.md`
-- `plans/2026-02-20-algorithm-upgrades.md`
-- `plans/2026-02-24-coin-margined-options-research-roadmap.md`
-- `plans/2026-03-complexity-reduction-sprint.md`
+- `plans/2026-Q1-archived-plans-summary.md`
 
 ### 5) 历史报告归档
 
