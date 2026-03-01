@@ -108,30 +108,20 @@ corp/
 
 ## 文档导航
 
-新用户优先：
+文档入口已收敛为“索引优先”，避免在多个文件重复维护同一说明。
 
-- [完全指南](docs/GUIDE.md)
-- [项目全景图（Mermaid）](docs/project-map-mermaid.md)
+- [导航总入口](docs/GUIDE.md)
+- [计划文档索引](docs/plans/README.md)
+- [报告文档索引](docs/reports/README.md)
+- [历史归档索引](docs/archive/README.md)
+
+常用专题：
+
 - [快速开始](docs/quickstart.md)
 - [架构文档](docs/architecture.md)
 - [理论手册](docs/theory.md)
 - [API 文档](docs/api.md)
-
-算法学习：
-
-- [算法与模型深度讲解](docs/算法与模型深度讲解.md)
-- [算法与模型入门学习版](docs/算法与模型入门学习版.md)
-
-专项文档：
-
-- [Hawkes 策略对比实验](docs/hawkes_comparison_experiment.md)
-- [缓存策略](docs/cache_strategy.md)
-- [工作区瘦身指南](docs/workspace-slimming.md)
-- [研究看板](docs/dashboard.md)
 - [部署指南](docs/deployment.md)
-- [计划文档索引](docs/plans/README.md)
-- [2026 Q2 长期执行路线图](docs/plans/2026-Q2-long-term-execution-roadmap.md)
-- [每周执行清单模板](docs/plans/weekly-operating-checklist.md)
 
 ## 常用命令
 
