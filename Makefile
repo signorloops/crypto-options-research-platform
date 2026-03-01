@@ -128,7 +128,7 @@ check-service-entrypoint:
 
 docs-link-check:
 	$(PYTHON) scripts/docs/check_markdown_links.py \
-		--paths README.md docs/GUIDE.md docs/plans docs/archive/README.md docs/archive/plans/README.md
+		--paths README.md docs
 
 complexity-audit:
 	$(PYTHON) scripts/governance/complexity_guard.py \
