@@ -242,9 +242,9 @@ def main():
     results_df = stress_test.run_all_tests()
 
     # Save report
-    os.makedirs("tests/performance", exist_ok=True)
+    os.makedirs("artifacts/performance", exist_ok=True)
     stress_test.generate_report(
-        save_path="tests/performance/stress_test_report.md"
+        save_path="artifacts/performance/stress_test_report.md"
     )
 
     return results_df

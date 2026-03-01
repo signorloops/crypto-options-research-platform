@@ -318,7 +318,7 @@ def main():
     parser.add_argument(
         "--report-path",
         type=str,
-        default="tests/performance/latency_benchmark_report.md",
+        default="artifacts/performance/latency_benchmark_report.md",
         help="Path to save markdown report",
     )
     parser.add_argument(

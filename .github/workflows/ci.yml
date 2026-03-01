@@ -141,7 +141,7 @@ jobs:
           --benchmarks greeks_calculation,circuit_breaker,adaptive_hedger \
           --fail-on-target-miss \
           --quiet \
-          --report-path tests/performance/latency_benchmark_report_ci.md
+          --report-path artifacts/performance/latency_benchmark_report_ci.md
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v3
