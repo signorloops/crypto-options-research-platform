@@ -30,7 +30,7 @@ pytest -q -m "not integration"
 | 部署与运维 | [`deployment.md`](deployment.md) |
 | 治理审计与瘦身 | [`governance-operations.md`](governance-operations.md) |
 | 算法学习扩展（归档） | [`archive/learning/learning-materials-summary.md`](archive/learning/learning-materials-summary.md) |
-| 计划与执行状态 | [`plans/README.md`](plans/README.md) |
+| 计划与执行状态 | [`plans/weekly-operating-checklist.md`](plans/weekly-operating-checklist.md) |
 
 ## 3. 按角色推荐路径
 
@@ -53,8 +53,7 @@ pytest -q -m "not integration"
 
 ## 4. 计划文档入口
 
-- 计划索引：[`plans/README.md`](plans/README.md)
-- 当前执行计划：
+- 在执行计划：
   - [`plans/2026-Q2-long-term-execution-roadmap.md`](plans/2026-Q2-long-term-execution-roadmap.md)
   - [`plans/weekly-operating-checklist.md`](plans/weekly-operating-checklist.md)
 - 历史计划：[`archive/plans/2026-Q1-archived-plans-summary.md`](archive/plans/2026-Q1-archived-plans-summary.md)

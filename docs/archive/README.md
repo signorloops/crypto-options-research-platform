@@ -33,7 +33,8 @@
 ## 当前主文档入口
 
 - `../GUIDE.md`
-- `../plans/README.md`
+- `../plans/weekly-operating-checklist.md`
+- `../plans/2026-Q2-long-term-execution-roadmap.md`
 - `../quickstart.md`
 - `../theory.md`
 - `../architecture.md`

@@ -109,7 +109,8 @@ corp/
 文档入口已收敛为“索引优先”，避免在多个文件重复维护同一说明。
 
 - [导航总入口](docs/GUIDE.md)
-- [计划文档索引](docs/plans/README.md)
+- [Q2 执行路线图](docs/plans/2026-Q2-long-term-execution-roadmap.md)
+- [周执行清单](docs/plans/weekly-operating-checklist.md)
 - [治理时间线摘要](docs/archive/reports/2026-Q1-governance-timeline-summary.md)
 - [历史归档索引](docs/archive/README.md)
 
