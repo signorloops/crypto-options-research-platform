@@ -43,8 +43,6 @@ source venv/bin/activate  # macOS/Linux
 
 # 安装依赖（默认精简开发栈）
 pip install -e ".[dev]"
-# 或
-pip install -r requirements.txt
 
 # 可选：安装完整栈（ML + Notebook + 加速器）
 pip install -e ".[dev,full]"
