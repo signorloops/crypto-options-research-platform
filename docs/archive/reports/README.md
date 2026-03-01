@@ -13,3 +13,4 @@ Historical progress logs and one-off acceptance records moved from `docs/reports
 | `2026-02-28-governance-gate-activation.md` | 主干 required checks 与周治理门禁启用记录 |
 | `inverse-pnl-validation-report-2026-02-08.md` | 早期 inverse PnL 数学验证记录（历史快照） |
 | `second-round-math-audit-report.md` | 第二轮深度数学审核报告（历史结论） |
+| `validation-scripts-retirement-note.md` | 退休验证脚本清理说明与复活规则 |

@@ -1,6 +1,5 @@
-# validation_scripts archive
+# Validation Scripts Retirement Note
 
-This directory keeps only archive notes.
 Legacy one-off scripts were removed in the 2026-03 cleanup pass because they
 were not wired to active workflows, Make targets, tests, or runtime paths.
 
