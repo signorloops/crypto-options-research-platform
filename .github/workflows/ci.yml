@@ -136,7 +136,7 @@ jobs:
     - name: Performance regression guard (Python 3.11)
       if: matrix.python-version == '3.11'
       run: |
-        python tests/performance/latency_benchmark.py \
+        python scripts/performance/latency_benchmark.py \
           --iterations 150 \
           --benchmarks greeks_calculation,circuit_breaker,adaptive_hedger \
           --fail-on-target-miss \
