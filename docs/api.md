@@ -74,7 +74,7 @@ make weekly-operating-audit
 
 ## 7. 相关文档
 
-- `docs/quickstart.md`
+- `README.md`
 - `docs/architecture.md`
 - `docs/theory.md`
 - `docs/deployment.md`

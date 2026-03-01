@@ -114,7 +114,6 @@ corp/
 
 常用专题：
 
-- [快速开始](docs/quickstart.md)
 - [架构文档](docs/architecture.md)
 - [理论手册](docs/theory.md)
 - [API 文档](docs/api.md)

@@ -14,16 +14,16 @@ pytest -q -m "not integration"
 
 完成后按目标阅读：
 
-- 快速上手：[`quickstart.md`](quickstart.md)
 - 全局认知：[`../README.md`](../README.md)
 - 系统结构：[`architecture.md`](architecture.md)
+- 运维与治理：[`governance-operations.md`](governance-operations.md)
 
 ## 2. 按任务找文档
 
 | 任务 | 入口文档 |
 |---|---|
 | 项目总览与能力边界 | [`../README.md`](../README.md) |
-| 环境安装与第一个运行 | [`quickstart.md`](quickstart.md) |
+| 环境安装与第一个运行 | [`../README.md`](../README.md) |
 | 架构与模块关系 | [`architecture.md`](architecture.md) |
 | 理论与模型推导 | [`theory.md`](theory.md) |
 | API/模块速查 | [`api.md`](api.md) |
@@ -37,7 +37,7 @@ pytest -q -m "not integration"
 ### 量化研究
 
 1. [`../README.md`](../README.md)
-2. [`quickstart.md`](quickstart.md)
+2. [`architecture.md`](architecture.md)
 3. [`theory.md`](theory.md)
 
 ### 工程开发
