@@ -116,7 +116,6 @@ corp/
 
 - [架构文档](docs/architecture.md)
 - [理论手册](docs/theory.md)
-- [API 文档](docs/api.md)
 - [部署指南](docs/deployment.md)
 
 ## 常用命令

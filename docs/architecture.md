@@ -70,10 +70,37 @@ make complexity-audit
 make weekly-operating-audit
 ```
 
-## 6. 相关文档
+## 6. 接口速查
+
+核心类型（`core/types.py`）：
+
+- `MarketState`
+- `OrderBook`
+- `Position`
+- `QuoteAction`
+- `Greeks`
+
+策略基类（`strategies/base.py`）关键方法：
+
+- `quote(market_state, position)`
+- `reset()`
+- `train(...)`（可选）
+- `on_fill(...)`（可选）
+
+服务入口：
+
+```bash
+python -m execution.service_runner
+```
+
+环境变量：
+
+- `SERVICE_NAME=trading-engine|risk-monitor|market-data-collector`
+- `TRADING_ENGINE_PORT`, `RISK_MONITOR_PORT`, `MARKET_DATA_COLLECTOR_PORT`
+
+## 7. 相关文档
 
 - `README.md`
-- `docs/api.md`
 - `docs/theory.md`
 - `docs/deployment.md`
 - `docs/governance-operations.md`

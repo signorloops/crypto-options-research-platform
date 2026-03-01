@@ -26,7 +26,7 @@ pytest -q -m "not integration"
 | 环境安装与第一个运行 | [`../README.md`](../README.md) |
 | 架构与模块关系 | [`architecture.md`](architecture.md) |
 | 理论与模型推导 | [`theory.md`](theory.md) |
-| API/模块速查 | [`api.md`](api.md) |
+| API/模块速查 | [`architecture.md`](architecture.md) |
 | 部署与运维 | [`deployment.md`](deployment.md) |
 | 治理审计与瘦身 | [`governance-operations.md`](governance-operations.md) |
 | 历史归档总览 | [`archive/2026-Q1-archive-summary.md`](archive/2026-Q1-archive-summary.md) |
@@ -44,7 +44,7 @@ pytest -q -m "not integration"
 
 1. [`../README.md`](../README.md)
 2. [`architecture.md`](architecture.md)
-3. [`api.md`](api.md)
+3. [`governance-operations.md`](governance-operations.md)
 
 ### 运维发布
 
