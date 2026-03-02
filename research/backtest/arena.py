@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
+import warnings
 from typing import Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
@@ -423,6 +424,51 @@ class StrategyArena:
         ax.legend()
         ax.grid(True, alpha=0.3)
 
+    @staticmethod
+    def _pairwise_p_value(returns1: pd.Series, returns2: pd.Series) -> float:
+        """
+        Robust pairwise p-value:
+        - avoid numerical warnings on near-identical low-variance samples
+        - keep behavior deterministic for degenerate cases
+        """
+        from scipy import stats
+
+        values1 = returns1.to_numpy(dtype=float)
+        values2 = returns2.to_numpy(dtype=float)
+        values1 = values1[np.isfinite(values1)]
+        values2 = values2[np.isfinite(values2)]
+
+        if len(values1) < 2 or len(values2) < 2:
+            return 1.0
+
+        if np.allclose(values1, values2, rtol=1e-10, atol=1e-12):
+            return 1.0
+
+        std1 = float(np.std(values1, ddof=1))
+        std2 = float(np.std(values2, ddof=1))
+        mean_diff = abs(float(np.mean(values1) - np.mean(values2)))
+        mean_scale = max(abs(float(np.mean(values1))), abs(float(np.mean(values2))), 1.0)
+        tol = 1e-12 * mean_scale
+
+        # Degenerate distributions with effectively zero variance.
+        if std1 <= 1e-12 and std2 <= 1e-12:
+            return 1.0 if mean_diff <= tol else 0.0
+        if std1 <= 1e-12 or std2 <= 1e-12:
+            if mean_diff <= tol:
+                return 1.0
+            _, p_value = stats.mannwhitneyu(values1, values2, alternative="two-sided")
+            return float(p_value)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            try:
+                _, p_value = stats.ttest_ind(values1, values2, equal_var=False)
+                return float(p_value)
+            except RuntimeWarning:
+                # Fall back to rank-based test when moment-based t-test is unstable.
+                _, p_value = stats.mannwhitneyu(values1, values2, alternative="two-sided")
+                return float(p_value)
+
     def _plot_metrics_table(self, ax: plt.Axes) -> None:
         ax.axis("off")
 
@@ -482,7 +528,6 @@ class StrategyArena:
 
     def statistical_comparison(self, correction: str = "bonferroni") -> pd.DataFrame:
         """Perform pairwise statistical tests between strategies."""
-        from scipy import stats
 
         names = list(self.scorecards.keys())
         n = len(names)
@@ -503,7 +548,7 @@ class StrategyArena:
                     returns1 = sc1.pnl_series.diff().dropna()
                     returns2 = sc2.pnl_series.diff().dropna()
 
-                    _, p_value = stats.ttest_ind(returns1, returns2, equal_var=False)
+                    p_value = self._pairwise_p_value(returns1, returns2)
                     p_values[i, j] = p_value
                     p_values[j, i] = p_value
                     raw_p_values.append(p_value)

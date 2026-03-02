@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import warnings
 
 import matplotlib
 import pandas as pd
@@ -170,3 +171,23 @@ def test_annualization_periods_infers_from_series_frequency():
     assert daily_periods == pytest.approx(365.25, rel=0.05)
     assert hourly_periods == pytest.approx(365.25 * 24.0, rel=0.05)
     assert hourly_periods > daily_periods
+
+
+def test_statistical_comparison_avoids_runtime_warning_on_near_identical_series():
+    """Near-identical return samples should not emit scipy precision RuntimeWarning."""
+    arena = StrategyArena(_market_data_frame(), initial_capital=100000.0)
+    # Nearly identical daily PnL paths trigger scipy catastrophic-cancellation warnings
+    # unless handled explicitly.
+    pnl_a = [float(v) for v in range(0, 25)]
+    pnl_b = [float(v) + 1e-10 for v in range(0, 25)]
+    r1 = _make_backtest_result("A", pnl_a, sharpe=1.0)
+    r2 = _make_backtest_result("B", pnl_b, sharpe=1.0)
+    arena.scorecards = {"A": arena._calculate_scorecard(r1), "B": arena._calculate_scorecard(r2)}
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        pvals = arena.statistical_comparison(correction="bonferroni")
+
+    runtime_warnings = [w for w in caught if issubclass(w.category, RuntimeWarning)]
+    assert runtime_warnings == []
+    assert pvals.shape == (2, 2)

@@ -20,6 +20,7 @@ class AlmgrenChrissConfig:
     initial_price: float = 1.0
     max_participation_rate: Optional[float] = None
     expected_step_market_volume: Optional[np.ndarray] = None
+    random_seed: Optional[int] = None
 
 
 @dataclass
@@ -210,7 +211,7 @@ class AlmgrenChrissExecutor:
         """
         if n_paths <= 0:
             raise ValueError("n_paths must be positive")
-        gen = rng or np.random.default_rng(42)
+        gen = rng or np.random.default_rng(self.config.random_seed)
 
         if schedule is None:
             schedule = self.optimal_trading_schedule()
