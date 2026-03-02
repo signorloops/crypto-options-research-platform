@@ -43,20 +43,25 @@ class GBMPriceGenerator:
         self.params = params
         self.seed = seed
 
+    def _get_rng(self, rng: Optional[np.random.Generator] = None) -> np.random.Generator:
+        """Create per-call RNG so seeded generators are deterministic without touching global state."""
+        if rng is not None:
+            return rng
+        return np.random.default_rng(self.seed)
+
     def generate(
         self,
         T: float,  # Time horizon in years
-        start_time: datetime = None
+        start_time: datetime = None,
+        rng: Optional[np.random.Generator] = None,
     ) -> pd.DataFrame:
         """Generate price path."""
-        # Reset seed for reproducibility on each call
-        if self.seed:
-            np.random.seed(self.seed)
+        rng = self._get_rng(rng)
 
         n_steps = int(T / self.params.dt) + 1  # +1 to include start point
 
         # Generate random walk (n_steps - 1 random returns, first return is 0)
-        dW = np.random.normal(0, np.sqrt(self.params.dt), n_steps - 1)
+        dW = rng.normal(0, np.sqrt(self.params.dt), n_steps - 1)
         drift = (self.params.mu - 0.5 * self.params.sigma**2) * self.params.dt
         log_returns = np.concatenate([[0], drift + self.params.sigma * dW])
 
@@ -83,25 +88,28 @@ class MertonJumpDiffusion(GBMPriceGenerator):
     Adds Poisson jumps to GBM for more realistic fat tails.
     """
 
-    def generate(self, T: float, start_time: datetime = None) -> pd.DataFrame:
+    def generate(
+        self,
+        T: float,
+        start_time: datetime = None,
+        rng: Optional[np.random.Generator] = None,
+    ) -> pd.DataFrame:
         """Generate price path with jumps."""
-        # Reset seed for reproducibility on each call
-        if self.seed:
-            np.random.seed(self.seed)
+        rng = self._get_rng(rng)
 
         n_steps = int(T / self.params.dt) + 1  # +1 to include start point
 
         # GBM component (n_steps - 1 random returns, first return is 0)
-        dW = np.random.normal(0, np.sqrt(self.params.dt), n_steps - 1)
+        dW = rng.normal(0, np.sqrt(self.params.dt), n_steps - 1)
         drift = (self.params.mu - 0.5 * self.params.sigma**2) * self.params.dt
         log_returns = np.concatenate([[0], drift + self.params.sigma * dW])
 
         # Jump component (Poisson) - no jumps at start
-        jumps = np.random.poisson(
+        jumps = rng.poisson(
             self.params.jump_intensity * self.params.dt,
             n_steps - 1
         )
-        jump_sizes = np.random.normal(
+        jump_sizes = rng.normal(
             self.params.jump_mean,
             self.params.jump_std,
             n_steps - 1
@@ -148,9 +156,11 @@ class OrderBookSimulator:
         self,
         mid_price: float,
         volatility_regime: float = 1.0,  # 1.0 = normal, >1 = high vol
-        spread_multiplier: float = 1.0
+        spread_multiplier: float = 1.0,
+        rng: Optional[np.random.Generator] = None,
     ) -> OrderBook:
         """Generate order book around mid price."""
+        rng = np.random.default_rng() if rng is None else rng
         # Adjust spread based on volatility
         effective_spread = self.base_spread_bps * volatility_regime * spread_multiplier
         half_spread = mid_price * effective_spread / 10000 / 2
@@ -169,18 +179,18 @@ class OrderBookSimulator:
             base_size = 10 * np.exp(-decay_rate * i)
 
             # Add noise
-            bid_size = max(0.1, base_size * np.random.lognormal(0, 0.5))
-            ask_size = max(0.1, base_size * np.random.lognormal(0, 0.5))
+            bid_size = max(0.1, base_size * rng.lognormal(0, 0.5))
+            ask_size = max(0.1, base_size * rng.lognormal(0, 0.5))
 
             bids.append(OrderBookLevel(
                 price=round(bid_price, 2),
                 size=round(bid_size, 4),
-                num_orders=np.random.poisson(3)
+                num_orders=rng.poisson(3)
             ))
             asks.append(OrderBookLevel(
                 price=round(ask_price, 2),
                 size=round(ask_size, 4),
-                num_orders=np.random.poisson(3)
+                num_orders=rng.poisson(3)
             ))
 
         return OrderBook(
@@ -193,9 +203,11 @@ class OrderBookSimulator:
     def generate_time_series(
         self,
         price_path: pd.DataFrame,
-        volatility_column: str = "volatility"
+        volatility_column: str = "volatility",
+        rng: Optional[np.random.Generator] = None,
     ) -> List[OrderBook]:
         """Generate order book series following price path."""
+        rng = np.random.default_rng() if rng is None else rng
         snapshots = []
 
         for _, row in price_path.iterrows():
@@ -204,7 +216,8 @@ class OrderBookSimulator:
 
             ob = self.generate_snapshot(
                 mid_price=row["price"],
-                volatility_regime=regime
+                volatility_regime=regime,
+                rng=rng,
             )
             ob.timestamp = row["timestamp"]
             snapshots.append(ob)
@@ -233,9 +246,11 @@ class TradeFlowSimulator:
     def generate(
         self,
         price_path: pd.DataFrame,
-        order_books: Optional[List[OrderBook]] = None
+        order_books: Optional[List[OrderBook]] = None,
+        rng: Optional[np.random.Generator] = None,
     ) -> pd.DataFrame:
         """Generate trade flow matching price dynamics."""
+        rng = np.random.default_rng() if rng is None else rng
         trades = []
 
         for i, row in price_path.iterrows():
@@ -244,15 +259,15 @@ class TradeFlowSimulator:
             arrival_rate = self.base_arrival_rate * (1 + 5 * hour_vol * np.sqrt(365 * 24))
 
             # Number of trades this hour (Poisson)
-            n_trades = np.random.poisson(arrival_rate * 3600)
+            n_trades = rng.poisson(arrival_rate * 3600)
 
             for _ in range(n_trades):
                 # Trade timing
-                offset_ms = np.random.randint(0, 3600 * 1000)
+                offset_ms = int(rng.integers(0, 3600 * 1000))
                 timestamp = row["timestamp"] + timedelta(milliseconds=offset_ms)
 
                 # Is this an informed trade?
-                is_informed = np.random.random() < self.informed_trade_prob
+                is_informed = rng.random() < self.informed_trade_prob
 
                 # Direction: informed trades follow current momentum (no look-ahead)
                 if is_informed and i > 0:
@@ -261,10 +276,10 @@ class TradeFlowSimulator:
                 else:
                     # Uninformed: slight momentum following
                     momentum_bias = 0.5 + 0.3 * np.sign(row["returns"]) if row["returns"] != 0 else 0.5
-                    side = OrderSide.BUY if np.random.random() < momentum_bias else OrderSide.SELL
+                    side = OrderSide.BUY if rng.random() < momentum_bias else OrderSide.SELL
 
                 # Size: Pareto distribution (many small, few large)
-                base_size = np.random.pareto(self.size_alpha) * 0.1
+                base_size = rng.pareto(self.size_alpha) * 0.1
                 if is_informed:
                     base_size *= 3  # Informed trades are larger
                 size = max(0.001, base_size)
@@ -273,11 +288,11 @@ class TradeFlowSimulator:
                 if order_books:
                     ob = order_books[i]
                     if side == OrderSide.BUY:
-                        price = ob.best_ask * (1 + np.random.exponential(0.0001))
+                        price = ob.best_ask * (1 + rng.exponential(0.0001))
                     else:
-                        price = ob.best_bid * (1 - np.random.exponential(0.0001))
+                        price = ob.best_bid * (1 - rng.exponential(0.0001))
                 else:
-                    price = row["price"] * (1 + np.random.normal(0, 0.001))
+                    price = row["price"] * (1 + rng.normal(0, 0.001))
 
                 trades.append({
                     "timestamp": timestamp,
@@ -441,9 +456,7 @@ class CompleteMarketSimulator:
         Returns:
             Dictionary with keys: spot, order_book, trades, options
         """
-        # Reset random seed for reproducibility
-        if self.seed:
-            np.random.seed(self.seed)
+        rng = np.random.default_rng(self.seed)
 
         # Support hours parameter for shorter simulations (useful in tests)
         if hours is not None:
@@ -452,13 +465,13 @@ class CompleteMarketSimulator:
             T = days / 365
 
         # 1. Generate spot price
-        spot = self.price_gen.generate(T)
+        spot = self.price_gen.generate(T, rng=rng)
 
         # 2. Generate order books
-        obs = self.ob_sim.generate_time_series(spot)
+        obs = self.ob_sim.generate_time_series(spot, rng=rng)
 
         # 3. Generate trades
-        trades = self.trade_sim.generate(spot, obs)
+        trades = self.trade_sim.generate(spot, obs, rng=rng)
 
         result = {
             "spot": spot,

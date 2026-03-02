@@ -60,6 +60,21 @@ class TestGBMPriceGenerator:
 
         assert high_vol_range > low_vol_range * 2  # High vol should have much wider range
 
+    def test_seeded_generate_does_not_mutate_global_numpy_rng(self):
+        """Seeded generator should remain local and not affect global NumPy RNG state."""
+        np.random.seed(2026)
+        _ = np.random.random()
+        expected_next = np.random.random()
+
+        np.random.seed(2026)
+        _ = np.random.random()
+        params = PriceModelParams(S0=50000, sigma=0.5)
+        gen = GBMPriceGenerator(params, seed=42)
+        _ = gen.generate(T=1 / 365)
+        actual_next = np.random.random()
+
+        assert actual_next == expected_next
+
 
 class TestMertonJumpDiffusion:
     """Test Jump Diffusion model."""
@@ -223,3 +238,17 @@ class TestCompleteMarketSimulator:
         data2 = sim2.generate(hours=2, include_options=False)
 
         assert np.allclose(data1['spot']['price'].values, data2['spot']['price'].values)
+
+    def test_seeded_simulator_does_not_mutate_global_numpy_rng(self):
+        """Complete simulator should not reseed or mutate global NumPy RNG state."""
+        np.random.seed(2027)
+        _ = np.random.random()
+        expected_next = np.random.random()
+
+        np.random.seed(2027)
+        _ = np.random.random()
+        sim = CompleteMarketSimulator(seed=42)
+        _ = sim.generate(hours=2, include_options=False)
+        actual_next = np.random.random()
+
+        assert actual_next == expected_next

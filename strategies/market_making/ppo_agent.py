@@ -40,6 +40,7 @@ class PPOConfig:
     batch_size: int = 64
     epochs: int = 10
     total_timesteps: int = 1_000_000
+    random_seed: Optional[int] = None
 
     # Action bounds (spread in bps)
     min_spread_bps: float = 5.0
@@ -578,8 +579,15 @@ class PPOMarketMaker(MarketMakingStrategy):
         """Train PPO agent on historical data."""
         logger.info("Training PPO agent", extra=log_extra(samples=len(historical_data)))
 
+        if self.config.random_seed is not None:
+            torch.manual_seed(self.config.random_seed)
+
         # Create environment
-        self.env = MarketMakingEnv(historical_data, episode_length=1000)
+        self.env = MarketMakingEnv(
+            historical_data,
+            episode_length=1000,
+            random_seed=self.config.random_seed,
+        )
 
         # Initialize network
         sample_state = self.env.reset()

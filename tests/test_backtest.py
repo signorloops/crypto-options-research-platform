@@ -592,3 +592,16 @@ class TestBacktestRiskMetrics:
         pnl_series = pd.Series([0.0, -0.10, -0.20, -0.15])
         max_dd = _calculate_max_drawdown(pnl_series)
         assert max_dd == pytest.approx(-0.20)
+
+
+def test_engine_periods_per_year_infers_frequency_from_datetime_index():
+    """Annualization helper should distinguish daily vs hourly frequencies."""
+    daily_idx = pd.date_range("2026-01-01", periods=6, freq="1D")
+    hourly_idx = pd.date_range("2026-01-01", periods=6, freq="1h")
+
+    daily = BacktestEngine._periods_per_year(daily_idx, len(daily_idx))
+    hourly = BacktestEngine._periods_per_year(hourly_idx, len(hourly_idx))
+
+    assert daily == pytest.approx(365.25, rel=0.05)
+    assert hourly == pytest.approx(365.25 * 24.0, rel=0.05)
+    assert hourly > daily

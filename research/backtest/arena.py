@@ -99,13 +99,29 @@ class StrategyArena:
         market_data: pd.DataFrame,
         initial_capital: float = 100000.0,
         transaction_cost_bps: float = 2.0,
+        annualization_periods: Optional[float] = None,
     ):
         self.market_data = market_data.copy()
         self.initial_capital = initial_capital
         self.transaction_cost_bps = transaction_cost_bps
+        self.annualization_periods = annualization_periods
 
         self.results: Dict[str, BacktestResult] = {}
         self.scorecards: Dict[str, StrategyScorecard] = {}
+
+    def _periods_per_year(self, series: pd.Series) -> float:
+        """Infer annualization periods from series frequency, with optional override."""
+        if self.annualization_periods is not None and self.annualization_periods > 0:
+            return float(self.annualization_periods)
+        if len(series) <= 1:
+            return 365.25
+        if isinstance(series.index, pd.DatetimeIndex):
+            deltas = series.index.to_series().diff().dropna().dt.total_seconds()
+            if len(deltas) > 0:
+                step_seconds = float(deltas.median())
+                if step_seconds > 0:
+                    return (365.25 * 24.0 * 3600.0) / step_seconds
+        return 365.25
 
     def run_tournament(
         self, strategies: List[MarketMakingStrategy], verbose: bool = True
@@ -191,9 +207,10 @@ class StrategyArena:
         total_pnl = result.total_pnl_usd
         total_return_pct = total_pnl / self.initial_capital
 
-        days = max(1, (pnl_series.index[-1] - pnl_series.index[0]).days)
+        periods_per_year = self._periods_per_year(pnl_series)
+        periods_observed = max(len(pnl_series) - 1, 1)
         if total_return_pct > -1:
-            annualized_return = (1 + total_return_pct) ** (365 / days) - 1
+            annualized_return = (1 + total_return_pct) ** (periods_per_year / periods_observed) - 1
         else:
             annualized_return = -1.0
 
@@ -207,7 +224,9 @@ class StrategyArena:
             downside_deviation = np.sqrt(np.mean((downside_returns - target_return) ** 2))
             if downside_deviation > 0:
                 excess_return = daily_returns.mean() - target_return
-                sortino = (excess_return / downside_deviation) * np.sqrt(365)
+                sortino = (excess_return / downside_deviation) * np.sqrt(
+                    self._periods_per_year(daily_returns)
+                )
             else:
                 sortino = 0.0
         else:
@@ -386,10 +405,11 @@ class StrategyArena:
         if len(pnl_series) <= window:
             return pd.Series(dtype=float)
         daily_returns = pnl_series.diff()
+        annualization = np.sqrt(self._periods_per_year(daily_returns.dropna()))
         return (
             daily_returns.rolling(window).mean()
             / daily_returns.rolling(window).std()
-            * np.sqrt(365)
+            * annualization
         )
 
     def _plot_rolling_sharpe(self, ax: plt.Axes, window: int) -> None:

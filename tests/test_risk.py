@@ -433,6 +433,28 @@ class TestVaRCalculator:
         assert r1.cvar_95 == pytest.approx(r2.cvar_95)
         assert r1.cvar_99 == pytest.approx(r2.cvar_99)
 
+    def test_monte_carlo_var_without_seed_does_not_mutate_global_numpy_rng(self):
+        """Monte Carlo VaR should use local RNG even when no explicit seed is provided."""
+        calc = VaRCalculator(confidence_level=0.95)
+        positions = pd.DataFrame({"value": [60000, 40000]}, index=["BTC", "ETH"])
+        returns = pd.DataFrame(
+            {
+                "BTC": np.random.normal(0, 0.02, 800),
+                "ETH": np.random.normal(0, 0.025, 800),
+            }
+        )
+
+        np.random.seed(2026)
+        _ = np.random.random()
+        expected_next = np.random.random()
+
+        np.random.seed(2026)
+        _ = np.random.random()
+        _ = calc.monte_carlo_var(positions, returns, n_simulations=2500)
+        actual_next = np.random.random()
+
+        assert actual_next == expected_next
+
     def test_filtered_historical_var_with_seed_is_reproducible(self):
         """Filtered historical VaR should be deterministic when seed is fixed."""
         calc = VaRCalculator(confidence_level=0.95)

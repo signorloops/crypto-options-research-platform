@@ -155,3 +155,18 @@ def test_rolling_sharpe_series_handles_short_and_long_inputs():
     )
     long_roll = arena._rolling_sharpe_series(long, window=3)
     assert len(long_roll) == len(long)
+
+
+def test_annualization_periods_infers_from_series_frequency():
+    """Arena annualization should adapt to intraday vs daily timestamps."""
+    arena = StrategyArena(_market_data_frame(), initial_capital=100000.0)
+
+    daily = pd.Series([1.0, 1.1, 1.2], index=pd.date_range("2026-01-01", periods=3, freq="1D"))
+    hourly = pd.Series([1.0, 1.1, 1.2], index=pd.date_range("2026-01-01", periods=3, freq="1h"))
+
+    daily_periods = arena._periods_per_year(daily)
+    hourly_periods = arena._periods_per_year(hourly)
+
+    assert daily_periods == pytest.approx(365.25, rel=0.05)
+    assert hourly_periods == pytest.approx(365.25 * 24.0, rel=0.05)
+    assert hourly_periods > daily_periods

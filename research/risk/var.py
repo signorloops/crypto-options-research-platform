@@ -627,8 +627,8 @@ class VaRCalculator:
         mean = aligned_returns.mean().values
         cov = self._regularize_covariance(aligned_returns.cov().to_numpy(copy=True))
 
-        # Optional local RNG improves reproducibility without mutating global RNG state.
-        rng = np.random.default_rng(random_seed) if random_seed is not None else np.random
+        # Always use local RNG so simulations never mutate global NumPy random state.
+        rng = np.random.default_rng(random_seed)
 
         simulated_returns = self._simulate_correlated_returns(
             mean=mean,

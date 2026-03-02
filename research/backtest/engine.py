@@ -433,6 +433,19 @@ class BacktestEngine:
         realized_pnl, unrealized_pnl = self._calculate_crypto_pnl_components(current_price)
         return realized_pnl + unrealized_pnl
 
+    @staticmethod
+    def _periods_per_year(index: pd.Index, n_obs: int) -> float:
+        """Infer annualization periods from datetime index when available."""
+        if n_obs <= 1:
+            return 365.25 * 24.0
+        if isinstance(index, pd.DatetimeIndex):
+            deltas = index.to_series().diff().dropna().dt.total_seconds()
+            if len(deltas) > 0:
+                step_seconds = float(deltas.median())
+                if step_seconds > 0:
+                    return (365.25 * 24.0 * 3600.0) / step_seconds
+        return 365.25
+
     def _bootstrap_risk_ci(
         self, returns: pd.Series, n_bootstrap: int = 500, alpha: float = 0.05
     ) -> Tuple[Tuple[float, float], Tuple[float, float]]:
@@ -442,7 +455,7 @@ class BacktestEngine:
 
         sharpe_samples: List[float] = []
         dd_samples: List[float] = []
-        annualization = np.sqrt(365.0)
+        annualization = np.sqrt(self._periods_per_year(returns.index, len(returns)))
         values = returns.to_numpy()
 
         for _ in range(n_bootstrap):
@@ -491,11 +504,7 @@ class BacktestEngine:
         if returns.std() <= 0:
             return 0.0
 
-        if len(returns) > 1:
-            time_span = (pnl_series.index[-1] - pnl_series.index[0]).total_seconds()
-            periods_per_year = len(returns) * (365.0 * 24 * 3600) / max(time_span, 1)
-        else:
-            periods_per_year = 365.0 * 24
+        periods_per_year = self._periods_per_year(returns.index, len(returns))
         annualization = np.sqrt(periods_per_year)
 
         risk_free_rate = 0.0

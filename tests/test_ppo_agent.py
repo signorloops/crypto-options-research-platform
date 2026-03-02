@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from strategies.market_making.ppo_agent import MarketMakingEnv
+from strategies.market_making.ppo_agent import MarketMakingEnv, PPOConfig, PPOMarketMaker
 
 
 def _sample_market_data(n: int = 160) -> pd.DataFrame:
@@ -64,3 +64,16 @@ def test_market_making_env_uses_dynamic_state_features():
     assert state[13] != pytest.approx(0.5)  # ask volume norm
     assert state[20] != 0.0  # delta
     assert state[21] != 0.0  # vega
+
+
+def test_ppo_train_uses_configured_seed_for_environment_reset():
+    """Training should pass random_seed through to environment for deterministic episode start."""
+    data = _sample_market_data(n=1500)
+    config = PPOConfig(total_timesteps=0, random_seed=123, use_lstm=False)
+    agent = PPOMarketMaker(config=config)
+
+    agent.train(data)
+
+    expected_start = int(np.random.default_rng(123).integers(0, len(data) - 1000 - 100))
+    assert agent.env is not None
+    assert agent.env.episode_start == expected_start
