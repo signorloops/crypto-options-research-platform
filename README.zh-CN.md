@@ -143,6 +143,7 @@ make workspace-slim-clean
 # 复杂度治理（严格/回归对比）
 make complexity-audit
 make complexity-audit-regression
+make algorithm-performance-baseline
 
 # 每周治理链路与发布前硬门禁
 make weekly-operating-audit

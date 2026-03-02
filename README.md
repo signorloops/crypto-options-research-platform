@@ -143,6 +143,7 @@ make workspace-slim-clean
 # Complexity governance (strict/regression compare)
 make complexity-audit
 make complexity-audit-regression
+make algorithm-performance-baseline
 
 # Weekly governance pipeline and pre-release hard gates
 make weekly-operating-audit
