@@ -105,7 +105,11 @@ class RedisCache:
         try:
             await self._pool.ping()
             return True
-        except Exception:
+        except RedisConnectionError:
+            logger.warning("Redis health check failed: connection error")
+            return False
+        except Exception as exc:
+            logger.warning("Redis health check failed", extra=log_extra(error=str(exc)))
             return False
 
     # Greeks caching

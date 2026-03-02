@@ -158,6 +158,18 @@ make check-service-entrypoint
 make branch-name-guard
 ```
 
+## Circuit Breaker Alerts
+
+Circuit breaker state degradation (`NORMAL -> WARNING/RESTRICTED/HALTED`) can trigger webhook alerts.
+
+- Enable/disable: `CB_ALERT_ENABLED=true|false`
+- Generic webhook: `CB_ALERT_WEBHOOK_URL` (fallback alias: `ALERT_WEBHOOK_URL`)
+- Slack incoming webhook: `CB_SLACK_WEBHOOK_URL`
+- Request timeout (seconds): `CB_ALERT_TIMEOUT_SECONDS` (default `5`)
+
+Webhook payload includes `severity`, `state`, `violation_count`, top `violations`, and UTC `timestamp`.
+Slack payload sends a human-readable summary with top violations.
+
 ## Research Dashboard
 
 ```bash

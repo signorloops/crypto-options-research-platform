@@ -513,6 +513,7 @@ class OKXClient(ExchangeInterface):
             await stream.connect()
             self._active_streams.append(stream)
         except Exception:
+            logger.exception("Failed to subscribe order book stream", extra=log_extra(count=len(instruments)))
             await stream.disconnect()
             raise
 
@@ -529,5 +530,6 @@ class OKXClient(ExchangeInterface):
             await stream.connect()
             self._active_streams.append(stream)
         except Exception:
+            logger.exception("Failed to subscribe trade stream", extra=log_extra(count=len(instruments)))
             await stream.disconnect()
             raise

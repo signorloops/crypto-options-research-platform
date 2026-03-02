@@ -326,6 +326,7 @@ class CircuitBreaker:
             )
             return True
         except Exception:
+            logger.exception("Failed to persist circuit breaker state to Redis")
             return False
 
     async def load_state(self) -> bool:
@@ -363,6 +364,7 @@ class CircuitBreaker:
 
             return True
         except Exception:
+            logger.exception("Failed to load circuit breaker state from Redis")
             return False
 
     async def sync_with_redis(self) -> None:
@@ -692,7 +694,9 @@ class CircuitBreaker:
             loop.create_task(coroutine_factory())
             return
         except RuntimeError:
-            pass
+            loop = None
+        if loop is not None:
+            return
 
         def _runner() -> None:
             try:

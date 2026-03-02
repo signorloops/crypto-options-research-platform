@@ -14,6 +14,7 @@
 """
 
 import concurrent.futures
+import logging
 import threading
 import warnings
 from collections import deque
@@ -22,6 +23,9 @@ from enum import Enum
 from typing import Deque, Dict, List, Optional, Tuple
 
 import numpy as np
+
+
+logger = logging.getLogger(__name__)
 
 
 class RegimeState(Enum):
@@ -265,8 +269,8 @@ class FastVolatilityRegimeDetector:
                     self._hmm_last_train = self._hmm_sample_count
 
             except Exception:
-                # 训练失败,保持当前状态
-                pass
+                # 训练失败时保留当前状态并记录可观测日志.
+                logger.exception("Fast HMM training failed; keeping previous regime model")
             finally:
                 with self._hmm_lock:
                     self._hmm_training = False

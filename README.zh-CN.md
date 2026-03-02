@@ -158,6 +158,18 @@ make check-service-entrypoint
 make branch-name-guard
 ```
 
+## Circuit Breaker 告警
+
+当熔断状态恶化（`NORMAL -> WARNING/RESTRICTED/HALTED`）时，可触发 webhook 告警。
+
+- 告警开关：`CB_ALERT_ENABLED=true|false`
+- 通用 webhook：`CB_ALERT_WEBHOOK_URL`（兼容别名：`ALERT_WEBHOOK_URL`）
+- Slack Incoming Webhook：`CB_SLACK_WEBHOOK_URL`
+- 请求超时（秒）：`CB_ALERT_TIMEOUT_SECONDS`（默认 `5`）
+
+通用 webhook payload 包含 `severity`、`state`、`violation_count`、主要 `violations` 与 UTC `timestamp`。
+Slack payload 为可读性摘要文本（含主要违规项）。
+
 ## 研究看板
 
 ```bash
