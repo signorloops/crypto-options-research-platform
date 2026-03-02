@@ -504,6 +504,19 @@ class TestFastIntegratedStrategy:
         portfolio = strategy._update_portfolio_state(state, position)
         assert portfolio.cash == pytest.approx(strategy._realized_pnl)
 
+    def test_portfolio_state_initial_capital_is_static(self):
+        """Risk normalization base should remain constant across ticks."""
+        config = FastIntegratedStrategyConfig(initial_capital=2500.0)
+        strategy = FastIntegratedMarketMakingStrategy(config)
+
+        state1 = self.create_market_state(50000.0)
+        state2 = self.create_market_state(52000.0)
+        portfolio1 = strategy._update_portfolio_state(state1, Position("BTC-USD", 5.0, 50000.0))
+        portfolio2 = strategy._update_portfolio_state(state2, Position("BTC-USD", 1.0, 51000.0))
+
+        assert portfolio1.initial_capital == pytest.approx(2500.0)
+        assert portfolio2.initial_capital == pytest.approx(2500.0)
+
     def test_return_calculation_uses_log_returns(self):
         """Fast strategy should use log returns consistent with standard strategy."""
         strategy = FastIntegratedMarketMakingStrategy()

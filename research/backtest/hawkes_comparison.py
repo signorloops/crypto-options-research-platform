@@ -12,6 +12,7 @@ Hawkes-based market making strategies against various benchmarks.
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Callable, Any
 from enum import Enum
 
@@ -238,22 +239,109 @@ class ScenarioGenerator:
         end: datetime,
         data_dir: str
     ) -> pd.DataFrame:
-        """Load data for a specific period."""
-        # This is a placeholder - actual implementation would load from files
-        # For now, generate synthetic data with realistic characteristics
-        logger.info(f"Loading/Generating data for {start} to {end}")
+        """Load data for a specific period with explicit synthetic fallback labeling."""
+        logger.info(f"Loading historical data for {start} to {end} from {data_dir}")
+        start_ts = self._to_utc_timestamp(start)
+        end_ts = self._to_utc_timestamp(end)
+        data_path = Path(data_dir)
 
-        # Generate synthetic data as fallback
+        frames: List[pd.DataFrame] = []
+        if data_path.exists() and data_path.is_dir():
+            for path in sorted(data_path.rglob("*")):
+                if not path.is_file():
+                    continue
+                suffix = "".join(path.suffixes).lower()
+                if suffix.endswith(".parquet"):
+                    try:
+                        raw = pd.read_parquet(path)
+                    except Exception:
+                        continue
+                elif suffix.endswith(".csv") or suffix.endswith(".csv.gz"):
+                    try:
+                        raw = pd.read_csv(path)
+                    except Exception:
+                        continue
+                else:
+                    continue
+
+                normalized = self._normalize_historical_frame(raw, start_ts, end_ts)
+                if normalized is not None and not normalized.empty:
+                    frames.append(normalized)
+
+        if frames:
+            merged = pd.concat(frames, axis=0).sort_index()
+            merged = merged.groupby(level=0).agg({"price": "mean", "volume": "sum"})
+            merged["intensity"] = merged["volume"].ewm(span=20, adjust=False, min_periods=1).mean()
+            merged["scenario_source"] = "historical"
+            return merged
+
+        logger.warning(
+            "No usable historical files found in period range; falling back to synthetic proxy"
+        )
         days = (end - start).days
         config = HawkesScenarioConfig(
             name="real_proxy",
             mu=0.1,
             alpha=0.4,
             beta=0.8,
-            T=days * 86400.0
+            T=max(days, 1) * 86400.0
         )
+        synthetic = self._generate_single_hawkes_scenario(config, seed_offset=start.month)
+        synthetic["scenario_source"] = "synthetic_proxy"
+        return synthetic
 
-        return self._generate_single_hawkes_scenario(config, seed_offset=start.month)
+    @staticmethod
+    def _to_utc_timestamp(value: datetime) -> pd.Timestamp:
+        """Convert datetime-like value to UTC pandas Timestamp."""
+        ts = pd.Timestamp(value)
+        if ts.tzinfo is None:
+            return ts.tz_localize("UTC")
+        return ts.tz_convert("UTC")
+
+    @staticmethod
+    def _normalize_historical_frame(
+        frame: pd.DataFrame, start_ts: pd.Timestamp, end_ts: pd.Timestamp
+    ) -> Optional[pd.DataFrame]:
+        """Normalize heterogeneous historical market files into price/volume schema."""
+        if frame is None or frame.empty:
+            return None
+
+        columns = {str(col).lower(): col for col in frame.columns}
+
+        def _pick(candidates: List[str]) -> Optional[str]:
+            for candidate in candidates:
+                if candidate in columns:
+                    return columns[candidate]
+            return None
+
+        timestamp_col = _pick(["timestamp", "ts", "time", "datetime", "date"])
+        price_col = _pick(["price", "mid_price", "close", "last", "mark_price"])
+        volume_col = _pick(["volume", "size", "qty", "trade_size"])
+
+        if price_col is None:
+            return None
+
+        if timestamp_col is not None:
+            timestamps = pd.to_datetime(frame[timestamp_col], utc=True, errors="coerce")
+        elif isinstance(frame.index, pd.DatetimeIndex):
+            timestamps = pd.to_datetime(frame.index, utc=True, errors="coerce")
+        else:
+            return None
+
+        prices = pd.to_numeric(frame[price_col], errors="coerce").to_numpy()
+        if volume_col is not None:
+            volumes = pd.to_numeric(frame[volume_col], errors="coerce").to_numpy()
+        else:
+            volumes = np.full(len(frame), 1.0, dtype=float)
+
+        out = pd.DataFrame({"price": prices, "volume": volumes}, index=timestamps)
+        out = out.dropna(subset=["price"])
+        out = out[out["price"] > 0]
+        out["volume"] = out["volume"].fillna(0.0).clip(lower=0.0)
+        out = out[(out.index >= start_ts) & (out.index <= end_ts)]
+        if out.empty:
+            return None
+        return out
 
     def generate_stress_scenarios(self) -> Dict[str, pd.DataFrame]:
         """Generate stress test scenarios.

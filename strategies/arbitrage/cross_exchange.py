@@ -159,46 +159,33 @@ class CrossExchangeArbitrage:
         if len(prices) < 2:
             return
 
-        # 优化: 排序后只检查最大价差的一对 (O(n log n) 替代 O(n²))
-        sorted_prices = sorted(prices.items(), key=lambda x: x[1])
-        min_ex, min_price = sorted_prices[0]
-        max_ex, max_price = sorted_prices[-1]
+        best_opportunity: Optional[ArbitrageOpportunity] = None
+        for buy_ex, buy_price in prices.items():
+            for sell_ex, sell_price in prices.items():
+                if buy_ex == sell_ex:
+                    continue
+                opportunity = self._build_opportunity(
+                    instrument=instrument,
+                    buy_exchange=buy_ex,
+                    sell_exchange=sell_ex,
+                    buy_price=buy_price,
+                    sell_price=sell_price,
+                )
+                if opportunity is None:
+                    continue
+                if opportunity.spread_bps < self.min_spread_bps:
+                    continue
+                if opportunity.profit_pct / 100 < self.min_profit_pct:
+                    continue
+                if (
+                    best_opportunity is None
+                    or opportunity.profit_pct > best_opportunity.profit_pct
+                ):
+                    best_opportunity = opportunity
 
-        # 只在有套利空间时继续
-        if max_price <= min_price:
-            return
-
-        buy_ex, buy_price = min_ex, min_price
-        sell_ex, sell_price = max_ex, max_price
-
-        # 计算价差 (基点)
-        spread_bps = (sell_price - buy_price) / buy_price * 10000
-
-        # 计算费率
-        buy_fees = self.exchange_fees.get(buy_ex, ExchangeFees(0.001, 0.001))
-        sell_fees = self.exchange_fees.get(sell_ex, ExchangeFees(0.001, 0.001))
-
-        total_fee = buy_fees.taker_fee + sell_fees.taker_fee
-        slippage = self._estimate_slippage_pct(self.max_position_size)
-
-        # 计算净利润
-        profit_pct = (sell_price - buy_price) / buy_price - total_fee - slippage  # decimal fraction
-
-        # 检查阈值
-        if spread_bps >= self.min_spread_bps and profit_pct >= self.min_profit_pct:
-            opportunity = ArbitrageOpportunity(
-                buy_exchange=buy_ex,
-                sell_exchange=sell_ex,
-                instrument=instrument,
-                buy_price=buy_price,
-                sell_price=sell_price,
-                spread_bps=spread_bps,
-                profit_pct=profit_pct * 100,
-                timestamp=datetime.now(timezone.utc)
-            )
-
+        if best_opportunity is not None:
             if self.opportunity_callback:
-                self.opportunity_callback(opportunity)
+                self.opportunity_callback(best_opportunity)
 
     def get_best_opportunities(self, top_n: int = 10) -> List[ArbitrageOpportunity]:
         """
@@ -206,7 +193,7 @@ class CrossExchangeArbitrage:
 
         注意: 此方法需要维护机会历史，当前实现为简化版。
         """
-        opportunities = []
+        opportunities: List[ArbitrageOpportunity] = []
 
         for instrument, price_entries in self.price_cache.items():
             # Extract prices from PriceEntry objects
@@ -220,35 +207,58 @@ class CrossExchangeArbitrage:
             if len(prices) < 2:
                 continue
 
-            # 优化: 排序后只检查最大价差的一对 (O(n log n) 替代 O(n²))
-            sorted_prices = sorted(prices.items(), key=lambda x: x[1])
-            buy_ex, buy_price = sorted_prices[0]
-            sell_ex, sell_price = sorted_prices[-1]
+            for buy_ex, buy_price in prices.items():
+                for sell_ex, sell_price in prices.items():
+                    if buy_ex == sell_ex:
+                        continue
+                    opportunity = self._build_opportunity(
+                        instrument=instrument,
+                        buy_exchange=buy_ex,
+                        sell_exchange=sell_ex,
+                        buy_price=buy_price,
+                        sell_price=sell_price,
+                    )
+                    if opportunity is None:
+                        continue
+                    if opportunity.spread_bps < self.min_spread_bps:
+                        continue
+                    if opportunity.profit_pct / 100 < self.min_profit_pct:
+                        continue
+                    opportunities.append(opportunity)
 
-            if sell_price <= buy_price:
-                continue
-
-            spread_bps = (sell_price - buy_price) / buy_price * 10000
-
-            if spread_bps >= self.min_spread_bps:
-                buy_fees = self.exchange_fees.get(buy_ex, ExchangeFees(0.001, 0.001))
-                sell_fees = self.exchange_fees.get(sell_ex, ExchangeFees(0.001, 0.001))
-                total_fee = buy_fees.taker_fee + sell_fees.taker_fee + self._estimate_slippage_pct(self.max_position_size)
-                profit_pct = (sell_price - buy_price) / buy_price - total_fee
-                opportunities.append(ArbitrageOpportunity(
-                    buy_exchange=buy_ex,
-                    sell_exchange=sell_ex,
-                    instrument=instrument,
-                    buy_price=buy_price,
-                    sell_price=sell_price,
-                    spread_bps=spread_bps,
-                    profit_pct=profit_pct * 100,
-                    timestamp=datetime.now(timezone.utc)
-                ))
-
-        # 按价差排序
-        opportunities.sort(key=lambda x: x.spread_bps, reverse=True)
+        # 按净利润排序
+        opportunities.sort(key=lambda x: x.profit_pct, reverse=True)
         return opportunities[:top_n]
+
+    def _build_opportunity(
+        self,
+        instrument: str,
+        buy_exchange: str,
+        sell_exchange: str,
+        buy_price: float,
+        sell_price: float,
+    ) -> Optional[ArbitrageOpportunity]:
+        """Construct one opportunity candidate with fee/slippage-adjusted net edge."""
+        if buy_price <= 0 or sell_price <= buy_price:
+            return None
+
+        spread_bps = (sell_price - buy_price) / buy_price * 10000
+        buy_fees = self.exchange_fees.get(buy_exchange, ExchangeFees(0.001, 0.001))
+        sell_fees = self.exchange_fees.get(sell_exchange, ExchangeFees(0.001, 0.001))
+        total_fee = buy_fees.taker_fee + sell_fees.taker_fee
+        slippage = self._estimate_slippage_pct(self.max_position_size)
+        profit_pct = (sell_price - buy_price) / buy_price - total_fee - slippage
+
+        return ArbitrageOpportunity(
+            buy_exchange=buy_exchange,
+            sell_exchange=sell_exchange,
+            instrument=instrument,
+            buy_price=buy_price,
+            sell_price=sell_price,
+            spread_bps=spread_bps,
+            profit_pct=profit_pct * 100,
+            timestamp=datetime.now(timezone.utc),
+        )
 
     def calculate_required_capital(
         self,

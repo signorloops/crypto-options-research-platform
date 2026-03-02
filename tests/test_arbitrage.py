@@ -79,6 +79,28 @@ class TestCrossExchangeArbitrage:
         assert len(opportunities) == 1
         assert opportunities[0].spread_bps == 200.0  # (51000-50000)/50000*10000
 
+    def test_arbitrage_detection_optimizes_for_net_profit_not_raw_spread(self):
+        """Strategy should not miss fee-adjusted opportunities when min/max pair is unprofitable."""
+        opportunities = []
+        strategy = CrossExchangeArbitrage(min_spread_bps=40.0, min_profit_pct=0.002)
+        strategy.on_opportunity(lambda opp: opportunities.append(opp))
+
+        strategy.set_exchange_fees("a", ExchangeFees(0.0, 0.03))
+        strategy.set_exchange_fees("b", ExchangeFees(0.0, 0.03))
+        strategy.set_exchange_fees("c", ExchangeFees(0.0, 0.0001))
+        strategy.set_exchange_fees("d", ExchangeFees(0.0, 0.0001))
+
+        strategy.update_price("a", "BTC-USD", 100.0)
+        strategy.update_price("b", "BTC-USD", 101.0)   # Raw max spread pair but net negative after fees
+        strategy.update_price("c", "BTC-USD", 100.4)
+        strategy.update_price("d", "BTC-USD", 100.9)   # Smaller spread but net positive
+
+        assert opportunities
+        latest = opportunities[-1]
+        assert latest.buy_exchange == "c"
+        assert latest.sell_exchange == "d"
+        assert latest.profit_pct > 0
+
     def test_no_arbitrage_when_spread_too_small(self):
         """Test that small spreads don't trigger arbitrage."""
         opportunities = []
@@ -304,6 +326,17 @@ class TestBasisArbitrage:
         assert fr > 0
         ratio = strategy.get_hedge_ratio("BTC", inverse_contract=True, contract_multiplier=1.0)
         assert ratio > 0
+
+    def test_hourly_funding_mode_converts_to_annualized_carry_cost(self):
+        """Hourly funding mode should be normalized before carry-cost calculations."""
+        annualized = BasisArbitrage(risk_free_rate=0.0, funding_cost=0.001, funding_rate_is_hourly=False)
+        hourly = BasisArbitrage(risk_free_rate=0.0, funding_cost=0.001, funding_rate_is_hourly=True)
+
+        annualized_cost = annualized.estimate_carry_cost(position_value=1000.0, days=1)
+        hourly_cost = hourly.estimate_carry_cost(position_value=1000.0, days=1)
+
+        assert hourly_cost > annualized_cost
+        assert hourly_cost == pytest.approx(24.0, rel=1e-3)
 
 
 class TestOptionBoxArbitrage:

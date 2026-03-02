@@ -308,24 +308,26 @@ class XGBoostSpreadStrategy(MarketMakingStrategy):
             outcome_window: Future data simulating what happens after quote
                            In real-time this would be actual future periods
         """
-        # Simplified: cost = adverse selection + missed opportunity
-        mid = historical_window['price'].mean()
-        half_spread = mid * spread / 10000 / 2
+        # Keep target units consistent in bps.
+        half_spread_bps = float(max(spread, 0.0) / 2.0)
 
         # Adverse selection: if price moves against us after quote
         # This uses outcome_window which simulates the future after our quote
         # In training, we have this data; in inference, we predict the cost
         future_returns = outcome_window['price'].pct_change().dropna()
-        adverse_move = abs(future_returns.mean()) * 100  # Basis points
+        if future_returns.empty:
+            adverse_move_bps = 0.0
+        else:
+            adverse_move_bps = float(abs(future_returns.mean()) * 10000.0)
 
         # Cost is higher if spread < adverse selection
-        cost = max(0, adverse_move - half_spread)
+        cost = max(0.0, adverse_move_bps - half_spread_bps)
 
         # Add penalty for very wide spreads (opportunity cost)
         if spread > 50:
             cost += (spread - 50) * 0.1
 
-        return cost
+        return float(cost)
 
     def get_internal_state(self) -> Dict:
         """Return model status."""

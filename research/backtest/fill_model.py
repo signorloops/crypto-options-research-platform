@@ -70,6 +70,7 @@ class RealisticFillSimulator:
         quote: QuoteAction,
         market_state: MarketState,
         next_trades: list[Trade],
+        quote_timestamp=None,
         inventory_pressure: float = 0.0,
         transaction_cost_bps: float = 0.0,
     ) -> Fill | None:
@@ -80,6 +81,7 @@ class RealisticFillSimulator:
             quote: The quote we placed
             market_state: Current market state
             next_trades: Trades that occur after our quote
+            quote_timestamp: Time when quote was placed (defaults to market_state timestamp)
             inventory_pressure: How much we're pushing inventory limits
 
         Returns:
@@ -87,6 +89,8 @@ class RealisticFillSimulator:
         """
         if not next_trades:
             return None
+        if quote_timestamp is None:
+            quote_timestamp = market_state.timestamp
 
         # Simulate latency: our quote arrives after some delay
         if self.config.latency_std_ms <= 0:
@@ -100,11 +104,7 @@ class RealisticFillSimulator:
         # Check each trade against our quote
         for trade in next_trades:
             # Check if trade timestamp is after our quote + latency
-            trade_delay = trade.timestamp - market_state.timestamp
-            if hasattr(trade_delay, "total_seconds"):
-                trade_delay_ms = float(trade_delay.total_seconds() * 1000)
-            else:
-                trade_delay_ms = float(trade_delay / np.timedelta64(1, "ms"))
+            trade_delay_ms = self._time_diff_ms(trade.timestamp, quote_timestamp)
             if trade_delay_ms < latency_ms:
                 continue  # Trade happened before our quote arrived
 
@@ -315,6 +315,14 @@ class RealisticFillSimulator:
             return self.rng.random() < self.config.adverse_selection_factor * 2
         return self.rng.random() < self.config.adverse_selection_factor
 
+    @staticmethod
+    def _time_diff_ms(later_timestamp, earlier_timestamp) -> float:
+        """Return later-earlier in milliseconds across datetime/timestamp types."""
+        delta = later_timestamp - earlier_timestamp
+        if hasattr(delta, "total_seconds"):
+            return float(delta.total_seconds() * 1000)
+        return float(delta / np.timedelta64(1, "ms"))
+
     def _apply_order_book_slippage(
         self,
         quote_price: float,
@@ -326,7 +334,8 @@ class RealisticFillSimulator:
         if order_book is None:
             return quote_price
 
-        levels = order_book.asks if side == OrderSide.BUY else order_book.bids
+        # Maker fills should be modeled on our quoted side of the book.
+        levels = order_book.bids if side == OrderSide.BUY else order_book.asks
         if not levels or trade_size <= 0:
             return quote_price
 
@@ -341,13 +350,15 @@ class RealisticFillSimulator:
             remaining -= take
 
         if remaining > 0:
-            worst_price = levels[-1].price
-            penalty = worst_price * (1.001 if side == OrderSide.BUY else 0.999)
+            penalty = quote_price * (1.0005 if side == OrderSide.BUY else 0.9995)
             notional += remaining * penalty
 
         vwap = notional / trade_size
-        random_slip = self.rng.normal(0.0, quote_price * 0.0001)
-        return float(vwap + random_slip)
+        random_slip = abs(float(self.rng.normal(0.0, quote_price * 0.0001)))
+        if side == OrderSide.BUY:
+            # No price-improvement assumption for passive fills.
+            return float(max(vwap, quote_price) + random_slip)
+        return float(max(min(vwap, quote_price) - random_slip, 0.0))
 
     @staticmethod
     def _cost_against_side(

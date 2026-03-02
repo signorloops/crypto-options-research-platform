@@ -29,6 +29,59 @@ class TestRealisticFillSimulator:
         sim = RealisticFillSimulator()
         assert sim is not None
 
+    def test_fill_latency_uses_quote_timestamp_not_current_tick(self):
+        """Latency gate should compare trade time to quote placement time."""
+        sim = RealisticFillSimulator(
+            config=FillSimulatorConfig(
+                base_latency_ms=50.0,
+                latency_std_ms=0.0,
+                adverse_selection_factor=0.0,
+            ),
+            rng=np.random.default_rng(123),
+        )
+        sim._estimate_fill_probability = lambda *args, **kwargs: 1.0  # type: ignore[method-assign]
+
+        t0 = datetime.now(timezone.utc)
+        t1 = t0 + timedelta(milliseconds=120)
+        order_book = OrderBook(
+            timestamp=t1,
+            instrument="SYNTHETIC",
+            bids=[OrderBookLevel(price=99.95, size=1.0)],
+            asks=[OrderBookLevel(price=100.05, size=1.0)],
+        )
+        market_state = MarketState(
+            timestamp=t1,
+            instrument="SYNTHETIC",
+            spot_price=100.0,
+            order_book=order_book,
+            recent_trades=[],
+        )
+        quote = QuoteAction(bid_price=100.0, bid_size=1.0, ask_price=100.2, ask_size=1.0)
+        trade = Trade(
+            timestamp=t1,
+            instrument="SYNTHETIC",
+            price=99.99,
+            size=0.2,
+            side=OrderSide.SELL,
+        )
+
+        fill_without_quote_time = sim.simulate_fill(
+            quote=quote,
+            market_state=market_state,
+            next_trades=[trade],
+            transaction_cost_bps=0.0,
+        )
+        fill_with_quote_time = sim.simulate_fill(
+            quote=quote,
+            market_state=market_state,
+            next_trades=[trade],
+            quote_timestamp=t0,
+            transaction_cost_bps=0.0,
+        )
+
+        assert fill_without_quote_time is None
+        assert fill_with_quote_time is not None
+
     def test_fill_simulator_applies_slippage_and_fee_costs(self):
         """Main fill path should accumulate slippage/fee friction."""
         sim = RealisticFillSimulator(
@@ -74,6 +127,27 @@ class TestRealisticFillSimulator:
         assert fill.price > quote.bid_price
         assert sim.transaction_cost_paid > 0
         assert sim.slippage_cost > 0
+
+    def test_order_book_slippage_uses_maker_side_depth(self):
+        """BUY maker fills should not reference ask-side depth."""
+        sim = RealisticFillSimulator(
+            config=FillSimulatorConfig(base_latency_ms=0.0, latency_std_ms=0.0),
+            rng=np.random.default_rng(11),
+        )
+        now = datetime.now(timezone.utc)
+        order_book = OrderBook(
+            timestamp=now,
+            instrument="SYNTHETIC",
+            bids=[OrderBookLevel(price=99.98, size=1.0), OrderBookLevel(price=99.95, size=1.0)],
+            asks=[OrderBookLevel(price=120.0, size=1.0), OrderBookLevel(price=121.0, size=1.0)],
+        )
+        filled_price = sim._apply_order_book_slippage(
+            quote_price=100.0,
+            trade_size=0.2,
+            order_book=order_book,
+            side=OrderSide.BUY,
+        )
+        assert filled_price < 101.0
 
     def test_fill_simulator_tracks_adverse_selection_cost(self):
         """Adverse fills should be reflected in simulator cost metrics."""
@@ -369,6 +443,36 @@ class TestBacktestEngine:
 
         trade_counts = [len(engine._generate_synthetic_trades(market_state, volume=15.0)) for _ in range(200)]
         assert max(trade_counts) > 3
+
+    def test_synthetic_trade_timestamps_span_quote_interval(self):
+        """Synthetic trades should be distributed between quote and current event timestamps."""
+        strategy = NaiveMarketMaker()
+        engine = BacktestEngine(strategy, random_seed=7)
+        end_ts = datetime.now(timezone.utc)
+        start_ts = end_ts - timedelta(seconds=1)
+        market_state = MarketState(
+            timestamp=end_ts,
+            instrument="SYNTHETIC",
+            spot_price=100.0,
+            order_book=OrderBook(
+                timestamp=end_ts,
+                instrument="SYNTHETIC",
+                bids=[OrderBookLevel(price=99.95, size=1.0)],
+                asks=[OrderBookLevel(price=100.05, size=1.0)],
+            ),
+            recent_trades=[],
+        )
+
+        trades = []
+        for _ in range(20):
+            trades = engine._generate_synthetic_trades(
+                market_state, volume=10.0, start_timestamp=start_ts
+            )
+            if trades:
+                break
+
+        assert trades
+        assert all(start_ts <= t.timestamp <= end_ts for t in trades)
 
     def test_compute_result_preserves_realized_unrealized_breakdown(self):
         """Backtest result should expose realized/unrealized components consistently."""

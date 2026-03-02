@@ -193,6 +193,7 @@ class BacktestEngine:
     def _maybe_process_previous_quote(
         self,
         previous_quote: Optional[QuoteAction],
+        quote_timestamp,
         market_state: MarketState,
         position: Position,
         event_volume: float,
@@ -205,6 +206,7 @@ class BacktestEngine:
         synthetic_trades = self._generate_synthetic_trades(
             market_state,
             volume=event_volume,
+            start_timestamp=quote_timestamp,
         )
         if not synthetic_trades:
             return position
@@ -213,6 +215,7 @@ class BacktestEngine:
             previous_quote,
             market_state,
             synthetic_trades,
+            quote_timestamp=quote_timestamp,
             transaction_cost_bps=self.transaction_cost_bps,
         )
         if fill is None:
@@ -249,6 +252,7 @@ class BacktestEngine:
 
         current_ob = self._create_dummy_order_book(prices[0])
         previous_quote: Optional[QuoteAction] = None
+        previous_quote_timestamp = None
         previous_market_state: Optional[MarketState] = None
 
         for i in range(n_events):
@@ -263,6 +267,7 @@ class BacktestEngine:
             position = self.positions.get("SYNTHETIC", Position("SYNTHETIC", 0, 0))
             position = self._maybe_process_previous_quote(
                 previous_quote=previous_quote,
+                quote_timestamp=previous_quote_timestamp,
                 market_state=market_state,
                 position=position,
                 event_volume=float(event_volumes[i]),
@@ -272,6 +277,7 @@ class BacktestEngine:
             new_quote = self._quote_with_lagged_snapshot(quote_state=quote_state, position=position)
             self.quotes.append(new_quote)
             previous_quote = new_quote
+            previous_quote_timestamp = timestamp
             previous_market_state = market_state
 
             self._record_state(timestamp, price)
@@ -314,11 +320,11 @@ class BacktestEngine:
         )
 
     def _generate_synthetic_trades(
-        self, market_state: MarketState, volume: float = 1.0
+        self, market_state: MarketState, volume: float = 1.0, start_timestamp=None
     ) -> List[Trade]:
         """Generate synthetic trades from current event activity."""
         trades = []
-        timestamp = market_state.timestamp
+        end_timestamp = market_state.timestamp
 
         # Use Poisson arrivals with adaptive cap to preserve high-activity regimes.
         arrival_intensity = float(max(volume, 0.0))
@@ -339,10 +345,11 @@ class BacktestEngine:
             trade_price = mid + price_offset
 
             trade_size = volume * self.rng.random() * 0.3
+            trade_timestamp = self._sample_trade_timestamp(start_timestamp, end_timestamp)
 
             trades.append(
                 Trade(
-                    timestamp=timestamp,
+                    timestamp=trade_timestamp,
                     instrument=market_state.instrument,
                     price=abs(trade_price),
                     size=abs(trade_size),
@@ -351,6 +358,24 @@ class BacktestEngine:
             )
 
         return trades
+
+    def _sample_trade_timestamp(self, start_timestamp, end_timestamp):
+        """Sample a synthetic trade timestamp between quote placement and current event."""
+        if start_timestamp is None:
+            return end_timestamp
+
+        delta = end_timestamp - start_timestamp
+        if hasattr(delta, "total_seconds"):
+            span_sec = float(delta.total_seconds())
+            if span_sec <= 0:
+                return end_timestamp
+            return start_timestamp + delta * float(self.rng.random())
+
+        span_ns = float(delta / np.timedelta64(1, "ns"))
+        if span_ns <= 0:
+            return end_timestamp
+        offset_ns = int(span_ns * float(self.rng.random()))
+        return start_timestamp + np.timedelta64(offset_ns, "ns")
 
     def _process_fill(self, fill: Fill, current_position: Position, current_price: float) -> None:
         """Process a fill and update position plus crypto balance."""

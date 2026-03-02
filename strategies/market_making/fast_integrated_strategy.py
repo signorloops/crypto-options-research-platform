@@ -48,6 +48,7 @@ class FastIntegratedStrategyConfig:
     adaptive_hedger: AdaptiveHedgeConfig = field(default_factory=AdaptiveHedgeConfig)
 
     # 基础做市参数
+    initial_capital: float = 1.0
     base_spread_bps: float = 20.0
     quote_size: float = 1.0
     inventory_limit: float = 10.0
@@ -95,6 +96,7 @@ class FastIntegratedMarketMakingStrategy(MarketMakingStrategy):
         self._current_greeks: Optional[Greeks] = None
         self._realized_pnl: float = 0.0
         self._current_price: float = 0.0
+        self._initial_capital: float = max(float(self.config.initial_capital), 1e-8)
 
         # Greeks缓存
         self._greeks_cache: OrderedDict = OrderedDict()
@@ -187,7 +189,7 @@ class FastIntegratedMarketMakingStrategy(MarketMakingStrategy):
             cash=self._realized_pnl,
             pnl_series=self._pnl_series_cache,
             asset_returns=asset_returns_df,
-            initial_capital=abs(position.size) * mid if position.size != 0 else 10000.0,
+            initial_capital=self._initial_capital,
         )
 
     def _calculate_return(self, current_price: float) -> Optional[float]:
@@ -431,6 +433,7 @@ class FastIntegratedMarketMakingStrategy(MarketMakingStrategy):
         return {
             "strategy_name": self.name,
             "config": {
+                "initial_capital": self.config.initial_capital,
                 "base_spread_bps": self.config.base_spread_bps,
                 "inventory_limit": self.config.inventory_limit,
                 "enable_circuit_breaker": self.config.enable_circuit_breaker,

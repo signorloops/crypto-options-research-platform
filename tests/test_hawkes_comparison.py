@@ -5,6 +5,7 @@ Tests for Hawkes strategy comparison framework.
 """
 import os
 import sys
+import tempfile
 import unittest
 from datetime import datetime, timedelta
 
@@ -129,6 +130,42 @@ class TestScenarioGenerator(unittest.TestCase):
         self.assertEqual(len(df), len(events))
         self.assertIn('price', df.columns)
         self.assertIn('volume', df.columns)
+
+    def test_load_real_scenarios_reads_historical_files(self):
+        """Historical loader should ingest local CSV data when available."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ts = pd.date_range("2024-01-01", periods=6, freq="h", tz="UTC")
+            df = pd.DataFrame(
+                {
+                    "timestamp": ts,
+                    "price": [50000, 50020, 50010, 50030, 50040, 50035],
+                    "volume": [1.0, 0.9, 1.1, 1.2, 0.8, 1.0],
+                }
+            )
+            df.to_csv(os.path.join(tmpdir, "spot_ticks.csv"), index=False)
+
+            scenarios = self.generator.load_real_scenarios(
+                [(datetime(2024, 1, 1), datetime(2024, 1, 1, 3))],
+                data_dir=tmpdir,
+            )
+
+            self.assertIn("202401_202401", scenarios)
+            out = scenarios["202401_202401"]
+            self.assertFalse(out.empty)
+            self.assertIn("scenario_source", out.columns)
+            self.assertEqual(out["scenario_source"].iloc[0], "historical")
+
+    def test_load_period_data_marks_synthetic_fallback(self):
+        """Missing historical files should return clearly labeled synthetic proxy data."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = self.generator._load_period_data(
+                datetime(2024, 1, 1),
+                datetime(2024, 1, 3),
+                tmpdir,
+            )
+            self.assertFalse(out.empty)
+            self.assertIn("scenario_source", out.columns)
+            self.assertEqual(out["scenario_source"].iloc[0], "synthetic_proxy")
 
 
 class TestHawkesMetricsCollector(unittest.TestCase):

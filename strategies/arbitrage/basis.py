@@ -58,7 +58,8 @@ class BasisArbitrage:
         self,
         risk_free_rate: float = 0.05,  # 无风险利率 5%
         min_annualized_return: float = 0.10,  # 最小年化收益率 10%
-        funding_cost: float = 0.0001,  # 资金费率 (每小时)
+        funding_cost: float = 0.0001,  # 资金费率（默认按年化口径）
+        funding_rate_is_hourly: bool = False,
         transaction_cost: float = 0.001,  # 交易成本 0.1%
         margin_requirement_ratio: float = 0.1,
         liquidation_buffer_pct: float = 0.15,
@@ -66,6 +67,7 @@ class BasisArbitrage:
         self.risk_free_rate = risk_free_rate
         self.min_annualized_return = min_annualized_return
         self.funding_cost = funding_cost
+        self.funding_rate_is_hourly = funding_rate_is_hourly
         self.transaction_cost = transaction_cost
         self.margin_requirement_ratio = margin_requirement_ratio
         self.liquidation_buffer_pct = liquidation_buffer_pct
@@ -74,6 +76,13 @@ class BasisArbitrage:
         self.futures_prices: Dict[str, float] = {}
         self.futures_expiry: Dict[str, datetime] = {}
         self.funding_rate_history: Dict[str, list] = {}
+
+    def _annualized_funding_rate(self, funding_rate: float) -> float:
+        """Normalize funding rate to annualized units."""
+        rate = float(funding_rate)
+        if self.funding_rate_is_hourly:
+            return rate * 24.0 * 365.0
+        return rate
 
     def update_spot_price(self, instrument: str, price: float) -> None:
         """更新现货价格。"""
@@ -198,8 +207,13 @@ class BasisArbitrage:
         Returns:
             BasisOpportunity 或 None
         """
-        dynamic_funding = funding_rate if funding_rate is not None else self.get_dynamic_funding_rate(instrument, self.funding_cost)
-        basis_info = self.calculate_basis(instrument, dynamic_funding)
+        raw_funding = (
+            funding_rate
+            if funding_rate is not None
+            else self.get_dynamic_funding_rate(instrument, self.funding_cost)
+        )
+        annualized_funding = self._annualized_funding_rate(raw_funding)
+        basis_info = self.calculate_basis(instrument, annualized_funding)
         if basis_info is None:
             return None
 
@@ -216,7 +230,7 @@ class BasisArbitrage:
         annualized_return = basis_pct / T
 
         # 扣除交易成本
-        funding_drag = abs(dynamic_funding)
+        funding_drag = abs(annualized_funding)
         net_return = annualized_return - 2 * self.transaction_cost / T - funding_drag
 
         # 判断策略方向
@@ -316,7 +330,8 @@ class BasisArbitrage:
         - 资金成本
         - 资金费率
         """
-        daily_cost = position_value * (self.risk_free_rate / 365 + self.funding_cost)
+        annualized_funding = self._annualized_funding_rate(self.funding_cost)
+        daily_cost = position_value * ((self.risk_free_rate + annualized_funding) / 365)
         return daily_cost * days
 
     def assess_margin_liquidation_risk(
