@@ -302,6 +302,39 @@ def test_build_report_flags_consistency_exceptions(tmp_path):
     assert report["consistency_checks"][0]["status"] == "FAIL"
 
 
+def test_build_report_requires_performance_baseline_when_requested(tmp_path):
+    module = _load_module()
+    result_path = tmp_path / "results" / "backtest_results_perf_required.json"
+    _write(
+        result_path,
+        json.dumps(
+            {
+                "Stable": {
+                    "summary": {
+                        "total_pnl": 100.0,
+                        "sharpe_ratio": 1.2,
+                        "max_drawdown": -0.1,
+                    }
+                }
+            }
+        ),
+    )
+
+    report = module._build_report(
+        [result_path],
+        dict(module.DEFAULT_THRESHOLDS),
+        performance_result={
+            "executed": False,
+            "summary": {"all_passed": None},
+            "error": "missing_performance_json",
+        },
+        performance_required=True,
+    )
+
+    assert report["checklist"]["performance_baseline_passed"] is False
+    assert "性能基线达标" in report["incomplete_tasks"]
+
+
 def test_main_strict_exits_nonzero_when_consistency_exceptions_exist(tmp_path, monkeypatch):
     module = _load_module()
     older = tmp_path / "results" / "backtest_results_old2.json"
@@ -378,6 +411,129 @@ def test_main_strict_exits_nonzero_when_consistency_exceptions_exist(tmp_path, m
     assert exit_code == 2
     report = json.loads(report_json.read_text(encoding="utf-8"))
     assert report["summary"]["consistency_exceptions"] == 1
+
+
+def test_main_require_performance_strict_fails_when_json_missing(tmp_path, monkeypatch):
+    module = _load_module()
+    result_path = tmp_path / "results" / "backtest_results_perf_missing.json"
+    _write(
+        result_path,
+        json.dumps(
+            {
+                "Stable": {
+                    "summary": {
+                        "total_pnl": 120.0,
+                        "sharpe_ratio": 1.1,
+                        "max_drawdown": -0.08,
+                    }
+                }
+            }
+        ),
+    )
+    thresholds_path = tmp_path / "thresholds.json"
+    consistency_thresholds_path = tmp_path / "consistency_thresholds.json"
+    report_md = tmp_path / "artifacts" / "weekly-operating-audit.md"
+    report_json = tmp_path / "artifacts" / "weekly-operating-audit.json"
+    missing_performance = tmp_path / "artifacts" / "missing-performance.json"
+    _write(thresholds_path, json.dumps(module.DEFAULT_THRESHOLDS))
+    _write(consistency_thresholds_path, json.dumps(module.DEFAULT_CONSISTENCY_THRESHOLDS))
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "weekly_operating_audit.py",
+            "--inputs",
+            str(result_path),
+            "--thresholds",
+            str(thresholds_path),
+            "--consistency-thresholds",
+            str(consistency_thresholds_path),
+            "--performance-json",
+            str(missing_performance),
+            "--require-performance",
+            "--output-md",
+            str(report_md),
+            "--output-json",
+            str(report_json),
+            "--strict",
+        ],
+    )
+
+    exit_code = module.main()
+
+    assert exit_code == 2
+    report = json.loads(report_json.read_text(encoding="utf-8"))
+    assert report["checklist"]["performance_baseline_passed"] is False
+    assert report["performance_baseline"]["error"] == "missing_performance_json"
+
+
+def test_main_require_performance_passes_when_baseline_passed(tmp_path, monkeypatch):
+    module = _load_module()
+    result_path = tmp_path / "results" / "backtest_results_perf_ok.json"
+    _write(
+        result_path,
+        json.dumps(
+            {
+                "Stable": {
+                    "summary": {
+                        "total_pnl": 90.0,
+                        "sharpe_ratio": 1.0,
+                        "max_drawdown": -0.06,
+                    }
+                }
+            }
+        ),
+    )
+    thresholds_path = tmp_path / "thresholds.json"
+    consistency_thresholds_path = tmp_path / "consistency_thresholds.json"
+    performance_path = tmp_path / "artifacts" / "algorithm-performance-baseline.json"
+    report_md = tmp_path / "artifacts" / "weekly-operating-audit.md"
+    report_json = tmp_path / "artifacts" / "weekly-operating-audit.json"
+    _write(thresholds_path, json.dumps(module.DEFAULT_THRESHOLDS))
+    _write(consistency_thresholds_path, json.dumps(module.DEFAULT_CONSISTENCY_THRESHOLDS))
+    _write(
+        performance_path,
+        json.dumps(
+            {
+                "summary": {"all_passed": True, "checks_passed": 2, "checks_total": 2},
+                "metrics": {
+                    "var_monte_carlo": {"p95_ms": 1.2},
+                    "backtest_engine": {"p95_ms": 5.6},
+                },
+            }
+        ),
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "weekly_operating_audit.py",
+            "--inputs",
+            str(result_path),
+            "--thresholds",
+            str(thresholds_path),
+            "--consistency-thresholds",
+            str(consistency_thresholds_path),
+            "--performance-json",
+            str(performance_path),
+            "--require-performance",
+            "--output-md",
+            str(report_md),
+            "--output-json",
+            str(report_json),
+            "--strict",
+        ],
+    )
+
+    exit_code = module.main()
+
+    assert exit_code == 0
+    report = json.loads(report_json.read_text(encoding="utf-8"))
+    assert report["checklist"]["performance_baseline_passed"] is True
+    assert report["performance_baseline"]["executed"] is True
+    assert report["performance_baseline"]["summary"]["all_passed"] is True
 
 
 def test_main_close_gate_only_strict_fails_when_signoff_missing(tmp_path, monkeypatch):

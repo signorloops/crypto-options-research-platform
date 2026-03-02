@@ -180,6 +180,32 @@ class TestScenarioGenerator(unittest.TestCase):
             self.assertIn("scenario_source", out.columns)
             self.assertEqual(out["scenario_source"].iloc[0], "historical")
 
+    def test_load_real_scenarios_skips_unreadable_files(self):
+        """Unreadable files should be skipped while valid files are still ingested."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ts = pd.date_range("2024-01-01", periods=4, freq="h", tz="UTC")
+            pd.DataFrame(
+                {
+                    "timestamp": ts,
+                    "price": [50000, 50010, 50020, 50030],
+                    "volume": [1.0, 1.1, 0.9, 1.0],
+                }
+            ).to_csv(os.path.join(tmpdir, "valid_ticks.csv"), index=False)
+
+            # Intentionally unreadable CSV payload (invalid UTF-8).
+            with open(os.path.join(tmpdir, "broken_ticks.csv"), "wb") as f:
+                f.write(b"\xff\xfe\x00\x00")
+
+            scenarios = self.generator.load_real_scenarios(
+                [(datetime(2024, 1, 1), datetime(2024, 1, 1, 3))],
+                data_dir=tmpdir,
+            )
+
+            self.assertIn("202401_202401", scenarios)
+            out = scenarios["202401_202401"]
+            self.assertFalse(out.empty)
+            self.assertEqual(out["scenario_source"].iloc[0], "historical")
+
     def test_load_period_data_marks_synthetic_fallback(self):
         """Missing historical files should return clearly labeled synthetic proxy data."""
         with tempfile.TemporaryDirectory() as tmpdir:

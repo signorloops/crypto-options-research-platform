@@ -146,6 +146,7 @@ make complexity-audit-regression
 make algorithm-performance-baseline
 
 # Weekly governance pipeline and pre-release hard gates
+# (weekly-operating-audit runs and enforces algorithm-performance-baseline)
 make weekly-operating-audit
 make weekly-close-gate
 

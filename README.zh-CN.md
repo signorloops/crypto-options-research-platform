@@ -146,6 +146,7 @@ make complexity-audit-regression
 make algorithm-performance-baseline
 
 # 每周治理链路与发布前硬门禁
+# （weekly-operating-audit 会先执行并强制校验 algorithm-performance-baseline）
 make weekly-operating-audit
 make weekly-close-gate
 

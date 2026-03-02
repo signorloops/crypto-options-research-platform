@@ -3,6 +3,7 @@ Tests for crypto option pricing model zoo.
 """
 import numpy as np
 
+import research.pricing.model_zoo as model_zoo_module
 from research.pricing.model_zoo import CryptoOptionModelZoo, OptionQuote
 from research.volatility.implied import black_scholes_price
 
@@ -89,3 +90,30 @@ class TestCryptoOptionModelZoo:
 
         best = zoo.select_best_model(quotes, sigma=0.55)
         assert best in zoo.available_models
+
+    def test_benchmark_tolerates_iv_inversion_failures(self, monkeypatch):
+        """Occasional IV inversion errors should not abort benchmark generation."""
+        zoo = CryptoOptionModelZoo()
+        quote = OptionQuote(
+            spot=50000.0,
+            strike=50000.0,
+            maturity=30.0 / 365.0,
+            rate=0.02,
+            market_price=black_scholes_price(50000.0, 50000.0, 30.0 / 365.0, 0.02, 0.6, True),
+            is_call=True,
+        )
+        calls = {"count": 0}
+        original_iv = model_zoo_module.implied_volatility
+
+        def flaky_iv(*args, **kwargs):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise ValueError("synthetic iv inversion failure")
+            return original_iv(*args, **kwargs)
+
+        monkeypatch.setattr(model_zoo_module, "implied_volatility", flaky_iv)
+
+        table = zoo.benchmark([quote], sigma=0.6)
+
+        assert not table.empty
+        assert set(["model", "rmse", "mae", "mean_abs_iv_error"]).issubset(table.columns)

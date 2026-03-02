@@ -16,6 +16,15 @@ import pandas as pd
 
 from research.volatility.implied import black_scholes_price, implied_volatility
 
+IV_INVERSION_EXCEPTIONS = (
+    ValueError,
+    TypeError,
+    ArithmeticError,
+    FloatingPointError,
+    OverflowError,
+    RuntimeError,
+)
+
 
 @dataclass
 class OptionQuote:
@@ -294,7 +303,7 @@ class CryptoOptionModelZoo:
                     )
                     if np.isfinite(market_iv) and np.isfinite(pred_iv):
                         iv_abs_err.append(abs(float(pred_iv - market_iv)))
-                except Exception:
+                except IV_INVERSION_EXCEPTIONS:
                     # Keep benchmark robust to occasional IV inversion failure.
                     continue
 

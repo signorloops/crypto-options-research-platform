@@ -401,6 +401,46 @@ class TestVaRCalculator:
         assert high.method == "monte_carlo"
         assert abs(low.var_95 - high.var_95) > 1e-6
 
+    def test_monte_carlo_revaluation_falls_back_on_pricer_errors(self, monkeypatch):
+        """Option pricer failures in simulation path should fall back to linear approximation."""
+        calc = VaRCalculator(confidence_level=0.95)
+        spot_0 = 50000.0
+        positions = pd.DataFrame(
+            {
+                "value": [20000.0],
+                "spot": [spot_0],
+                "strike": [50000.0],
+                "time_to_expiry": [0.2],
+                "option_type": ["call"],
+                "implied_vol": [0.6],
+                "risk_free_rate": [0.01],
+            },
+            index=["BTC-OPT"],
+        )
+        returns = pd.DataFrame({"BTC-OPT": np.random.normal(0, 0.01, 300)})
+
+        def flaky_price(S, K, T, r, sigma, option_type):
+            if abs(float(S) - spot_0) > 1e-12:
+                raise ValueError("simulation path pricing failure")
+            return 0.001
+
+        monkeypatch.setattr(
+            "research.pricing.inverse_options.InverseOptionPricer.calculate_price",
+            staticmethod(flaky_price),
+        )
+
+        result = calc.monte_carlo_var(
+            positions,
+            returns,
+            greeks=None,
+            n_simulations=2000,
+            random_seed=7,
+        )
+
+        assert result.method == "monte_carlo"
+        assert np.isfinite(result.var_95)
+        assert np.isfinite(result.var_99)
+
     def test_monte_carlo_var_with_seed_is_reproducible(self):
         """Explicit seed should make Monte Carlo VaR deterministic."""
         calc = VaRCalculator(confidence_level=0.95)

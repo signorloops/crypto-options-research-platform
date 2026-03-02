@@ -473,6 +473,8 @@ def _build_report(
     regression_result: dict[str, Any] | None = None,
     change_log: dict[str, Any] | None = None,
     rollback_marker: dict[str, Any] | None = None,
+    performance_result: dict[str, Any] | None = None,
+    performance_required: bool = False,
 ) -> dict[str, Any]:
     latest_by_strategy: dict[str, dict[str, Any]] = {}
     previous_by_strategy: dict[str, dict[str, Any]] = {}
@@ -577,6 +579,26 @@ def _build_report(
     consistency_exceptions = [row for row in consistency_checks if row["status"] == "FAIL"]
     consistency_baseline_available = len(consistency_checks) > 0
 
+    performance_report = (
+        dict(performance_result)
+        if performance_result is not None
+        else {
+            "executed": False,
+            "summary": {"all_passed": None},
+            "error": "",
+            "path": "",
+        }
+    )
+    perf_all_passed = (
+        bool(performance_report.get("summary", {}).get("all_passed"))
+        if performance_report.get("summary", {}).get("all_passed") is not None
+        else None
+    )
+    if performance_required and perf_all_passed is None:
+        performance_check = False
+    else:
+        performance_check = perf_all_passed
+
     checklist = {
         "kpi_snapshot_updated": bool(snapshot_rows),
         "experiment_ids_assigned": bool(snapshot_rows)
@@ -596,6 +618,7 @@ def _build_report(
             if regression_result is not None and regression_result.get("executed")
             else None
         ),
+        "performance_baseline_passed": performance_check,
         "consistency_check_completed": (
             len(parse_errors) == 0
             and consistency_baseline_available
@@ -616,6 +639,8 @@ def _build_report(
         incomplete_tasks.append("回滚版本已标记")
     if checklist["minimum_regression_passed"] is not True:
         incomplete_tasks.append("最小回归通过")
+    if checklist["performance_baseline_passed"] is not True:
+        incomplete_tasks.append("性能基线达标")
     if not checklist["consistency_check_completed"]:
         incomplete_tasks.append("一致性检查完成")
     if not checklist["anomalies_attributed"]:
@@ -670,6 +695,7 @@ def _build_report(
             if rollback_marker is not None
             else {"executed": False, "tag": "", "error": "", "source": ""}
         ),
+        "performance_baseline": performance_report,
     }
 
 
@@ -776,6 +802,7 @@ def _to_markdown(report: dict[str, Any]) -> str:
         ("变更记录完整", report["checklist"]["change_log_complete"]),
         ("回滚版本已标记", report["checklist"]["rollback_version_marked"]),
         ("最小回归通过", report["checklist"]["minimum_regression_passed"]),
+        ("性能基线达标", report["checklist"]["performance_baseline_passed"]),
         ("一致性检查完成", report["checklist"]["consistency_check_completed"]),
         ("风险例外报告输出", report["checklist"]["risk_exception_report_output"]),
         ("异常项已归因", report["checklist"]["anomalies_attributed"]),
@@ -801,6 +828,25 @@ def _to_markdown(report: dict[str, Any]) -> str:
             lines.append("```")
     else:
         lines.append("_not executed_")
+    lines.append("")
+    lines.append("## Algorithm Performance Baseline")
+    lines.append("")
+    performance = report["performance_baseline"]
+    if performance.get("executed"):
+        perf_summary = performance.get("summary", {})
+        lines.append(f"- All passed: `{perf_summary.get('all_passed')}`")
+        lines.append(f"- Checks passed: `{perf_summary.get('checks_passed')}/{perf_summary.get('checks_total')}`")
+        metrics = performance.get("metrics", {})
+        var_stats = metrics.get("var_monte_carlo")
+        backtest_stats = metrics.get("backtest_engine")
+        if isinstance(var_stats, dict):
+            lines.append(f"- VaR Monte Carlo P95 (ms): `{_fmt(_to_float(var_stats.get('p95_ms')), 4)}`")
+        if isinstance(backtest_stats, dict):
+            lines.append(f"- Backtest Engine P95 (ms): `{_fmt(_to_float(backtest_stats.get('p95_ms')), 4)}`")
+    else:
+        lines.append("_not available_")
+        if performance.get("error"):
+            lines.append(f"- Error: `{performance['error']}`")
     lines.append("")
     lines.append("## Change Log (Auto)")
     lines.append("")
@@ -908,6 +954,16 @@ def main() -> int:
         help="Optional regression command to execute and include in the audit report.",
     )
     parser.add_argument(
+        "--performance-json",
+        default="artifacts/algorithm-performance-baseline.json",
+        help="Path to algorithm performance baseline JSON report.",
+    )
+    parser.add_argument(
+        "--require-performance",
+        action="store_true",
+        help="Mark audit as incomplete when performance baseline report is missing or failing.",
+    )
+    parser.add_argument(
         "--change-log-days",
         type=int,
         default=7,
@@ -984,6 +1040,28 @@ def main() -> int:
 
     change_log = _collect_recent_changes(repo_root, max(args.change_log_days, 1))
     rollback_marker = _detect_latest_tag(repo_root)
+    performance_json_path = (repo_root / args.performance_json).resolve()
+    if performance_json_path.exists():
+        try:
+            performance_result = _load_json(performance_json_path)
+            if "executed" not in performance_result:
+                performance_result["executed"] = True
+            performance_result["path"] = str(performance_json_path)
+            performance_result["error"] = ""
+        except Exception as exc:
+            performance_result = {
+                "executed": False,
+                "summary": {"all_passed": None},
+                "error": str(exc),
+                "path": str(performance_json_path),
+            }
+    else:
+        performance_result = {
+            "executed": False,
+            "summary": {"all_passed": None},
+            "error": "missing_performance_json",
+            "path": str(performance_json_path),
+        }
 
     report = _build_report(
         input_files,
@@ -992,6 +1070,8 @@ def main() -> int:
         regression_result=regression_result,
         change_log=change_log,
         rollback_marker=rollback_marker,
+        performance_result=performance_result,
+        performance_required=args.require_performance,
     )
 
     md_path = (repo_root / args.output_md).resolve()
@@ -1021,6 +1101,11 @@ def main() -> int:
         print(
             f"Weekly operating audit: {report['summary']['consistency_exceptions']} consistency exception(s)."
         )
+        had_issue = True
+        if args.strict:
+            return 2
+    if args.require_performance and report["checklist"]["performance_baseline_passed"] is not True:
+        print("Weekly operating audit: performance baseline missing or failing.")
         had_issue = True
         if args.strict:
             return 2

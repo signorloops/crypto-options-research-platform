@@ -29,6 +29,14 @@ from utils.logging_config import get_logger, log_extra
 
 logger = get_logger(__name__)
 
+HISTORICAL_LOAD_EXCEPTIONS = (
+    OSError,
+    ValueError,
+    ImportError,
+    pd.errors.EmptyDataError,
+    pd.errors.ParserError,
+)
+
 
 class ScenarioType(Enum):
     """Types of test scenarios."""
@@ -259,12 +267,20 @@ class ScenarioGenerator:
                 if suffix.endswith(".parquet"):
                     try:
                         raw = pd.read_parquet(path)
-                    except Exception:
+                    except HISTORICAL_LOAD_EXCEPTIONS as exc:
+                        logger.warning(
+                            "Skipping unreadable historical file",
+                            extra=log_extra(path=str(path), error=str(exc)),
+                        )
                         continue
                 elif suffix.endswith(".csv") or suffix.endswith(".csv.gz"):
                     try:
                         raw = pd.read_csv(path)
-                    except Exception:
+                    except HISTORICAL_LOAD_EXCEPTIONS as exc:
+                        logger.warning(
+                            "Skipping unreadable historical file",
+                            extra=log_extra(path=str(path), error=str(exc)),
+                        )
                         continue
                 else:
                     continue

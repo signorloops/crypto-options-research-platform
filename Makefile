@@ -147,7 +147,7 @@ complexity-audit-regression:
 		--strict-regression-only
 
 algorithm-performance-baseline:
-	$(PYTHON) scripts/governance/algorithm_performance_baseline.py \
+	PYTHONPATH=. $(PYTHON) scripts/governance/algorithm_performance_baseline.py \
 		--output-md artifacts/algorithm-performance-baseline.md \
 		--output-json artifacts/algorithm-performance-baseline.json \
 		--strict
@@ -165,6 +165,7 @@ live-deviation-snapshot:
 		--output-json artifacts/live-deviation-snapshot.json
 
 weekly-operating-audit:
+	$(MAKE) algorithm-performance-baseline
 	$(PYTHON) scripts/governance/weekly_operating_audit.py \
 		--inputs \
 			tests/fixtures/weekly_operating/backtest_results_20260209_174752.json \
@@ -172,9 +173,11 @@ weekly-operating-audit:
 			tests/fixtures/weekly_operating/backtest_full_20260209_175236.json \
 		--thresholds config/weekly_operating_thresholds.json \
 		--consistency-thresholds config/consistency_thresholds.json \
+		--performance-json artifacts/algorithm-performance-baseline.json \
 		--output-md artifacts/weekly-operating-audit.md \
 		--output-json artifacts/weekly-operating-audit.json \
 		--regression-cmd "$(PYTHON) -m pytest -q --noconftest tests/test_pricing_inverse.py tests/test_volatility.py tests/test_hawkes_comparison.py tests/test_research_dashboard.py" \
+		--require-performance \
 		--strict
 	$(MAKE) weekly-pnl-attribution
 	$(MAKE) weekly-canary-checklist

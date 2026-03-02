@@ -12,6 +12,15 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+OPTION_PRICING_EXCEPTIONS = (
+    ValueError,
+    TypeError,
+    ArithmeticError,
+    FloatingPointError,
+    OverflowError,
+    ZeroDivisionError,
+)
+
 
 @dataclass
 class VaRResult:
@@ -499,28 +508,32 @@ class VaRCalculator:
                 sigma=implied_vol,
                 option_type=option_type,
             )
-        except Exception:
+            revalued_price_btc = np.array(
+                [
+                    InverseOptionPricer.calculate_price(
+                        S=float(s),
+                        K=strike,
+                        T=shocked_tte,
+                        r=risk_free_rate,
+                        sigma=float(v),
+                        option_type=option_type,
+                    )
+                    for s, v in zip(shocked_spot, shocked_vol)
+                ],
+                dtype=float,
+            )
+        except OPTION_PRICING_EXCEPTIONS:
             return linear_component
 
+        if not np.isfinite(base_price_btc):
+            return linear_component
         base_price_usd = base_price_btc * spot_0
         if base_price_usd <= 1e-12:
             return linear_component
 
         quantity = position_value / base_price_usd
-        revalued_price_btc = np.array(
-            [
-                InverseOptionPricer.calculate_price(
-                    S=float(s),
-                    K=strike,
-                    T=shocked_tte,
-                    r=risk_free_rate,
-                    sigma=float(v),
-                    option_type=option_type,
-                )
-                for s, v in zip(shocked_spot, shocked_vol)
-            ],
-            dtype=float,
-        )
+        if not np.isfinite(revalued_price_btc).all() or not np.isfinite(quantity):
+            return linear_component
         revalued_price_usd = revalued_price_btc * shocked_spot
         return quantity * (revalued_price_usd - base_price_usd)
 

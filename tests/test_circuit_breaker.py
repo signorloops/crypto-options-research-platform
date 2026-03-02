@@ -1,7 +1,10 @@
 """
 Tests for Circuit Breaker system.
 """
+import asyncio
+import sys
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -710,6 +713,82 @@ class TestCircuitBreakerAlertIntegrations:
         assert "Circuit Breaker Alert" in text
         assert "WARNING" in text
         assert "critical drawdown" in text
+
+    def test_send_webhook_alert_logs_http_failures(self, monkeypatch, caplog):
+        calls: list[tuple[str, dict[str, object], float]] = []
+
+        class FakeTimeout:
+            def __init__(self, total: float):
+                self.total = total
+
+        class FakeResponse:
+            def __init__(self, status: int):
+                self.status = status
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            def post(self, url, json, timeout):
+                calls.append((url, json, timeout.total))
+                return FakeResponse(503)
+
+        fake_aiohttp = SimpleNamespace(ClientTimeout=FakeTimeout, ClientSession=FakeSession)
+        monkeypatch.setitem(sys.modules, "aiohttp", fake_aiohttp)
+        cb = CircuitBreaker(CircuitBreakerConfig(alert_timeout_seconds=0.0))
+
+        with caplog.at_level("ERROR"):
+            asyncio.run(
+                cb._send_webhook_alert(
+                    "https://example.com/webhook",
+                    CircuitState.RESTRICTED,
+                    [self._sample_violation()],
+                )
+            )
+
+        assert len(calls) == 1
+        assert calls[0][0] == "https://example.com/webhook"
+        assert calls[0][2] == pytest.approx(0.1)
+        assert "Failed to send webhook alert: 503" in caplog.text
+
+    def test_send_slack_alert_logs_transport_exceptions(self, monkeypatch, caplog):
+        class FakeTimeout:
+            def __init__(self, total: float):
+                self.total = total
+
+        class FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            def post(self, *_args, **_kwargs):
+                raise RuntimeError("network down")
+
+        fake_aiohttp = SimpleNamespace(ClientTimeout=FakeTimeout, ClientSession=FakeSession)
+        monkeypatch.setitem(sys.modules, "aiohttp", fake_aiohttp)
+        cb = CircuitBreaker(CircuitBreakerConfig(alert_timeout_seconds=2.0))
+
+        with caplog.at_level("ERROR"):
+            asyncio.run(
+                cb._send_slack_alert(
+                    "https://hooks.slack.com/services/a/b/c",
+                    CircuitState.WARNING,
+                    [self._sample_violation()],
+                )
+            )
+
+        assert "Failed to deliver Slack alert" in caplog.text
 
 
 class TestCircuitBreakerStatus:
