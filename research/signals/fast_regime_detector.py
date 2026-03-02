@@ -220,6 +220,14 @@ class FastVolatilityRegimeDetector:
             return True
         return (self._hmm_sample_count - self._hmm_last_train) >= self.config.hmm_retrain_interval
 
+    def _mapped_state_to_raw_state(self, regime: RegimeState) -> int:
+        """Map sorted regime index back to raw HMM state index."""
+        target = int(regime.value)
+        for raw_idx, mapped_idx in self._state_map.items():
+            if mapped_idx == target:
+                return int(raw_idx)
+        return target
+
     def _async_hmm_train(self) -> None:
         """在后台线程训练HMM。"""
         with self._hmm_lock:
@@ -337,8 +345,10 @@ class FastVolatilityRegimeDetector:
             return min(vol_change, 1.0)
 
         try:
-            current_idx = self.current_regime.value
+            current_idx = self._mapped_state_to_raw_state(self.current_regime)
             transmat = self._hmm_model.transmat_
+            if current_idx < 0 or current_idx >= transmat.shape[0]:
+                return 0.0
             stay_prob = transmat[current_idx, current_idx]
             return 1.0 - stay_prob
         except Exception:

@@ -55,9 +55,9 @@ def _calculate_max_drawdown(pnl_series: pd.Series) -> float:
         return 0.0
 
     running_max = pnl_series.expanding().max()
-    running_max_safe = running_max.replace(0, np.nan)
-    drawdown = (running_max_safe - pnl_series) / running_max_safe
-    max_dd = drawdown.max()
+    denominator = running_max.abs().where(running_max.abs() > 1e-12, 1.0)
+    drawdown = (pnl_series - running_max) / denominator
+    max_dd = drawdown.min()
     if np.isnan(max_dd):
         return 0.0
     return float(max_dd)
@@ -320,9 +320,10 @@ class BacktestEngine:
         trades = []
         timestamp = market_state.timestamp
 
-        # Use Poisson arrivals for smoother event intensity scaling.
-        arrival_intensity = float(np.clip(volume, 0.0, 3.0))
-        num_trades = int(np.clip(self.rng.poisson(arrival_intensity), 0, 3))
+        # Use Poisson arrivals with adaptive cap to preserve high-activity regimes.
+        arrival_intensity = float(max(volume, 0.0))
+        max_trades = int(np.clip(np.ceil(arrival_intensity) + 2, 1, 50))
+        num_trades = int(np.clip(self.rng.poisson(arrival_intensity), 0, max_trades))
 
         for _ in range(num_trades):
             imbalance = (
@@ -385,8 +386,8 @@ class BacktestEngine:
             self._inventory_history = self._inventory_history[remove_count:]
             self._crypto_balance_history = self._crypto_balance_history[remove_count:]
 
-    def _calculate_crypto_pnl(self, current_price: Optional[float] = None) -> float:
-        """Calculate realized + unrealized coin PnL."""
+    def _calculate_crypto_pnl_components(self, current_price: Optional[float] = None) -> Tuple[float, float]:
+        """Calculate realized and unrealized coin PnL components."""
         realized_pnl = self.crypto_balance - self.initial_crypto_balance
 
         unrealized_pnl = 0.0
@@ -400,6 +401,11 @@ class BacktestEngine:
                         inverse=True,
                     )
 
+        return realized_pnl, unrealized_pnl
+
+    def _calculate_crypto_pnl(self, current_price: Optional[float] = None) -> float:
+        """Calculate realized + unrealized coin PnL."""
+        realized_pnl, unrealized_pnl = self._calculate_crypto_pnl_components(current_price)
         return realized_pnl + unrealized_pnl
 
     def _bootstrap_risk_ci(
@@ -488,7 +494,10 @@ class BacktestEngine:
         crypto_balance_series = _history_to_series(self._crypto_balance_history)
 
         total_pnl_crypto = float(pnl_series.iloc[-1]) if len(pnl_series) > 0 else 0.0
-        total_pnl_usd = total_pnl_crypto * current_price
+        safe_price = float(current_price) if current_price is not None else 0.0
+        total_pnl_usd = total_pnl_crypto * safe_price
+        realized_pnl, unrealized_pnl = self._calculate_crypto_pnl_components(current_price)
+        inventory_pnl = unrealized_pnl
 
         sharpe = self._calculate_sharpe_ratio(pnl_series)
         max_dd = _calculate_max_drawdown(pnl_series)
@@ -510,9 +519,9 @@ class BacktestEngine:
             strategy_name=self.strategy.name,
             total_pnl_crypto=total_pnl_crypto,
             total_pnl_usd=total_pnl_usd,
-            realized_pnl=total_pnl_crypto,
-            unrealized_pnl=0,
-            inventory_pnl=0,
+            realized_pnl=realized_pnl,
+            unrealized_pnl=unrealized_pnl,
+            inventory_pnl=inventory_pnl,
             sharpe_ratio=sharpe,
             deflated_sharpe_ratio=deflated_sharpe,
             max_drawdown=max_dd,

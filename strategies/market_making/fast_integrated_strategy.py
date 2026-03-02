@@ -91,7 +91,10 @@ class FastIntegratedMarketMakingStrategy(MarketMakingStrategy):
 
         # 状态跟踪
         self._returns_history: List[float] = []
+        self._pnl_series_cache: pd.Series = pd.Series(dtype=float)
         self._current_greeks: Optional[Greeks] = None
+        self._realized_pnl: float = 0.0
+        self._current_price: float = 0.0
 
         # Greeks缓存
         self._greeks_cache: OrderedDict = OrderedDict()
@@ -165,10 +168,14 @@ class FastIntegratedMarketMakingStrategy(MarketMakingStrategy):
         """更新组合状态 (简化版)."""
         mid = state.order_book.mid_price or 0.0
 
-        # 简化的PnL计算
+        # 简化的PnL计算: realized cashflow + inverse unrealized.
         unrealized_pnl = 0.0
-        if position.avg_entry_price > 0:
+        if position.avg_entry_price > 0 and mid > 0:
             unrealized_pnl = position.size * (1.0 / position.avg_entry_price - 1.0 / mid)
+        current_pnl = self._realized_pnl + unrealized_pnl
+        self._pnl_series_cache.loc[state.timestamp] = current_pnl
+        if len(self._pnl_series_cache) > 2000:
+            self._pnl_series_cache = self._pnl_series_cache.iloc[-2000:]
 
         asset_returns_df = pd.DataFrame()
         if self._returns_history:
@@ -177,7 +184,8 @@ class FastIntegratedMarketMakingStrategy(MarketMakingStrategy):
         return PortfolioState(
             timestamp=state.timestamp,
             positions={position.instrument: position},
-            cash=unrealized_pnl,
+            cash=self._realized_pnl,
+            pnl_series=self._pnl_series_cache,
             asset_returns=asset_returns_df,
             initial_capital=abs(position.size) * mid if position.size != 0 else 10000.0,
         )
@@ -258,6 +266,7 @@ class FastIntegratedMarketMakingStrategy(MarketMakingStrategy):
         mid = state.order_book.mid_price
         if mid is None:
             raise ValueError("Cannot quote without valid order book")
+        self._current_price = mid
 
         circuit_state = self.circuit_breaker.state
         # 1. 检查熔断 (如果启用)
@@ -368,6 +377,18 @@ class FastIntegratedMarketMakingStrategy(MarketMakingStrategy):
             metadata=metadata,
         )
 
+    def on_fill(self, fill, position: Position) -> None:
+        """处理成交回调并更新已实现PnL."""
+        mark_price = self._current_price if self._current_price > 0 else fill.price
+        if mark_price <= 0:
+            return
+
+        premium_crypto = fill.price * fill.size / mark_price
+        if fill.side.value == "buy":
+            self._realized_pnl -= premium_crypto
+        else:
+            self._realized_pnl += premium_crypto
+
     def get_performance_stats(self) -> Dict:
         """获取性能统计."""
         avg_latency = self._total_latency_ms / max(1, self._quote_count)
@@ -383,7 +404,10 @@ class FastIntegratedMarketMakingStrategy(MarketMakingStrategy):
     def reset(self) -> None:
         """重置策略状态."""
         self._returns_history.clear()
+        self._pnl_series_cache = pd.Series(dtype=float)
         self._current_greeks = None
+        self._realized_pnl = 0.0
+        self._current_price = 0.0
         self._greeks_cache.clear()
         self._cache_hits = 0
         self._cache_misses = 0

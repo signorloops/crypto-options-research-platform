@@ -143,15 +143,23 @@ class PortfolioState:
 
     @property
     def daily_pnl(self) -> float:
-        """PnL for current day."""
+        """PnL over trailing 24h window ending at current timestamp."""
         if len(self.pnl_series) < 2:
             return 0.0
 
-        # Get today's data
-        today = self.timestamp.date()
-        today_data = self.pnl_series[
-            self.pnl_series.index.date == today
-        ]
+        if not isinstance(self.pnl_series.index, pd.DatetimeIndex):
+            return 0.0
+
+        window_end = pd.Timestamp(self.timestamp)
+        index_tz = self.pnl_series.index.tz
+        if index_tz is not None and window_end.tzinfo is None:
+            window_end = window_end.tz_localize(index_tz)
+        elif index_tz is None and window_end.tzinfo is not None:
+            window_end = window_end.tz_localize(None)
+        window_start = window_end - pd.Timedelta(hours=24)
+
+        window_mask = (self.pnl_series.index >= window_start) & (self.pnl_series.index <= window_end)
+        today_data = self.pnl_series[window_mask]
 
         if len(today_data) < 2:
             return 0.0
@@ -486,7 +494,8 @@ class CircuitBreaker:
         for instrument, position in portfolio.positions.items():
             if abs(position.size) <= 1e-12 or position.avg_entry_price <= 0:
                 continue
-            positions_data.append((instrument, abs(position.size) * position.avg_entry_price))
+            signed_notional = float(position.size) * float(position.avg_entry_price)
+            positions_data.append((instrument, signed_notional))
 
         if not positions_data:
             return None
@@ -500,8 +509,11 @@ class CircuitBreaker:
                 return None
             base = max(abs(portfolio.initial_capital), 1e-12)
             norm_returns = pnl_returns / base
+            proxy_value = float(sum(v for _, v in positions_data))
+            if abs(proxy_value) <= 1e-12:
+                return None
             positions_df = pd.DataFrame(
-                {"value": [sum(v for _, v in positions_data)]},
+                {"value": [proxy_value]},
                 index=["_portfolio_proxy"],
             )
             returns_df = pd.DataFrame({"_portfolio_proxy": norm_returns.values})

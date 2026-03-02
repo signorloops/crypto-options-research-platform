@@ -5,16 +5,18 @@ from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from core.types import (
     MarketState,
     OrderBook,
     OrderBookLevel,
     OrderSide,
+    Position,
     QuoteAction,
     Trade,
 )
-from research.backtest.engine import BacktestEngine, RealisticFillSimulator
+from research.backtest.engine import BacktestEngine, RealisticFillSimulator, _calculate_max_drawdown
 from research.backtest.engine import FillSimulatorConfig
 from strategies.market_making.naive import NaiveMarketMaker
 
@@ -347,6 +349,49 @@ class TestBacktestEngine:
         volumes = engine._prepare_event_volumes(df)
         np.testing.assert_allclose(volumes, np.array([2.0, 1.0, 0.0, 1.0, 0.3]))
 
+    def test_synthetic_trade_generation_scales_beyond_low_volume_cap(self):
+        """High activity events should produce more than 3 synthetic trades occasionally."""
+        strategy = NaiveMarketMaker()
+        engine = BacktestEngine(strategy, random_seed=7)
+        now = datetime.now(timezone.utc)
+        market_state = MarketState(
+            timestamp=now,
+            instrument="SYNTHETIC",
+            spot_price=100.0,
+            order_book=OrderBook(
+                timestamp=now,
+                instrument="SYNTHETIC",
+                bids=[OrderBookLevel(price=99.95, size=1.0)],
+                asks=[OrderBookLevel(price=100.05, size=1.0)],
+            ),
+            recent_trades=[],
+        )
+
+        trade_counts = [len(engine._generate_synthetic_trades(market_state, volume=15.0)) for _ in range(200)]
+        assert max(trade_counts) > 3
+
+    def test_compute_result_preserves_realized_unrealized_breakdown(self):
+        """Backtest result should expose realized/unrealized components consistently."""
+        strategy = NaiveMarketMaker()
+        engine = BacktestEngine(strategy, fill_simulator=None, initial_crypto_balance=1.0)
+        ts = datetime.now(timezone.utc)
+
+        engine.crypto_balance = 1.1
+        engine.positions["SYNTHETIC"] = Position("SYNTHETIC", 1.0, 100.0)
+        total = engine._calculate_crypto_pnl(90.0)
+        engine._pnl_history = [(ts, total)]
+        engine._inventory_history = [(ts, 1.0)]
+        engine._crypto_balance_history = [(ts, engine.crypto_balance)]
+
+        result = engine._compute_result(current_price=90.0)
+
+        expected_realized = 0.1
+        expected_unrealized = 1.0 * (1.0 / 100.0 - 1.0 / 90.0)
+        assert result.realized_pnl == pytest.approx(expected_realized)
+        assert result.unrealized_pnl == pytest.approx(expected_unrealized)
+        assert result.inventory_pnl == pytest.approx(expected_unrealized)
+        assert result.total_pnl_crypto == pytest.approx(expected_realized + expected_unrealized)
+
     def test_quote_uses_previous_snapshot_to_avoid_lookahead(self):
         """Strategy quote should only see t-1 snapshot information."""
 
@@ -437,3 +482,9 @@ class TestBacktestRiskMetrics:
 
         assert isinstance(result.max_drawdown, float)
         assert result.max_drawdown <= 0  # Drawdown is negative or zero
+
+    def test_drawdown_handles_zero_running_peak_without_silent_zero(self):
+        """Drawdown should remain negative when equity starts near zero then declines."""
+        pnl_series = pd.Series([0.0, -0.10, -0.20, -0.15])
+        max_dd = _calculate_max_drawdown(pnl_series)
+        assert max_dd == pytest.approx(-0.20)

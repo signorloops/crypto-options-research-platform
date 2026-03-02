@@ -93,6 +93,22 @@ class TestPortfolioState:
         # Daily PnL % = 3/1000 = 0.003
         assert state.daily_pnl_pct == pytest.approx(0.003, abs=0.0001)
 
+    def test_daily_pnl_uses_trailing_24h_window(self):
+        """Daily PnL should exclude points older than 24 hours."""
+        now = datetime.now(timezone.utc)
+        timestamps = [now - timedelta(hours=26), now - timedelta(hours=23), now]
+        pnl_series = pd.Series([10.0, 20.0, 30.0], index=timestamps)
+
+        state = PortfolioState(
+            timestamp=now,
+            positions={},
+            cash=1000.0,
+            pnl_series=pnl_series,
+            initial_capital=1000.0,
+        )
+
+        assert state.daily_pnl == pytest.approx(10.0)
+
     def test_position_concentration(self):
         """Test position concentration calculation."""
         from core.types import Position
@@ -518,6 +534,42 @@ class TestCircuitBreakerVaRAndPerInstrument:
 
         assert captured["positions_index"] == ["_portfolio_proxy"]
         assert captured["returns_columns"] == ["_portfolio_proxy"]
+
+    def test_var_inputs_preserve_position_directionality(self, monkeypatch):
+        """VaR inputs should retain long/short signs to avoid overstating hedged risk."""
+        cb = CircuitBreaker()
+        captured = {}
+
+        def fake_check_var_limit(positions_df, returns_df, portfolio_value):
+            captured["values"] = positions_df["value"].to_dict()
+            return None
+
+        monkeypatch.setattr(cb, "check_var_limit", fake_check_var_limit)
+        from core.types import Position
+
+        now = datetime.now(timezone.utc)
+        returns = pd.DataFrame(
+            {
+                "BTC": np.random.normal(0, 0.01, 60),
+                "ETH": np.random.normal(0, 0.01, 60),
+            }
+        )
+        portfolio = PortfolioState(
+            timestamp=now,
+            positions={
+                "BTC": Position("BTC", 1.0, 50000.0),
+                "ETH": Position("ETH", -1.0, 3000.0),
+            },
+            cash=1000.0,
+            pnl_series=pd.Series(np.cumsum(np.random.normal(0, 0.01, 60))),
+            asset_returns=returns,
+            initial_capital=100000.0,
+        )
+
+        cb._check_var_limit_from_portfolio(portfolio)
+
+        assert captured["values"]["BTC"] > 0
+        assert captured["values"]["ETH"] < 0
 
     def test_per_instrument_notional_limit(self):
         config = CircuitBreakerConfig(

@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from core.types import Greeks, MarketState, OrderBook, OrderBookLevel, Position
+from core.types import Fill, Greeks, MarketState, OrderBook, OrderBookLevel, OrderSide, Position
 from strategies.market_making.fast_integrated_strategy import (
     FastIntegratedMarketMakingStrategy,
     FastIntegratedStrategyConfig,
@@ -167,6 +167,26 @@ class TestFastRegimeDetector:
 
         assert detector._fallback_count == 1
         assert detector._threshold_inference_count == 1
+
+    def test_switch_probability_uses_raw_hmm_state_after_mapping(self):
+        """Switch probability should map sorted regime index back to raw HMM state."""
+        detector = FastVolatilityRegimeDetector(FastRegimeConfig(use_hmm=False))
+
+        class _Model:
+            transmat_ = np.array(
+                [
+                    [0.90, 0.10, 0.00],
+                    [0.05, 0.90, 0.05],
+                    [0.20, 0.10, 0.70],
+                ]
+            )
+
+        detector._hmm_model = _Model()
+        detector._hmm_fitted = True
+        detector._state_map = {0: 2, 1: 0, 2: 1}
+        detector.current_regime = RegimeState.HIGH  # mapped idx=2 => raw idx=0
+
+        assert detector.predict_regime_switch_probability() == pytest.approx(0.10)
 
 
 class TestFastIntegratedStrategy:
@@ -462,6 +482,27 @@ class TestFastIntegratedStrategy:
 
         strategy.hedger.should_hedge.assert_not_called()
         assert strategy._current_greeks is None
+
+    def test_on_fill_updates_realized_pnl_and_portfolio_cash(self):
+        """Fill callback should update realized cashflow used by risk checks."""
+        strategy = FastIntegratedMarketMakingStrategy()
+        state = self.create_market_state(50000.0)
+        position = Position("BTC-USD", 0.0, 50000.0)
+        strategy.quote(state, position)
+
+        fill = Fill(
+            timestamp=state.timestamp,
+            instrument="BTC-USD",
+            side=OrderSide.BUY,
+            price=1000.0,
+            size=0.1,
+            quote_id=None,
+        )
+        strategy.on_fill(fill, position)
+        assert strategy._realized_pnl < 0
+
+        portfolio = strategy._update_portfolio_state(state, position)
+        assert portfolio.cash == pytest.approx(strategy._realized_pnl)
 
     def test_return_calculation_uses_log_returns(self):
         """Fast strategy should use log returns consistent with standard strategy."""
