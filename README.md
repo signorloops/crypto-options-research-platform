@@ -1,75 +1,77 @@
 # CORP - Crypto Options Research Platform
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![CI](https://github.com/signorloops/crypto-options-research-platform/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/signorloops/crypto-options-research-platform/actions/workflows/ci.yml)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-加密货币期权研究与回测平台（专注币本位期权 / COIN-margined options）。
+A crypto options research and backtesting platform focused on coin-margined options (COIN-margined options).
 
-支持 Deribit/OKX 数据接入、实时流式处理、定价与波动率建模、做市/套利策略、风险控制与事件驱动回测。
+Supports Deribit/OKX data ingestion, real-time streaming, pricing and volatility modeling, market-making/arbitrage strategies, risk control, and event-driven backtesting.
 
-## 核心能力
+## Core Capabilities
 
-- 币本位定价与 Greeks
-  - Inverse option 定价、隐含波动率反解、Put-Call parity 校验
-- 波动率研究
-  - 历史波动率（RV/Parkinson/GK/RS/YZ）、EWMA/GARCH/HAR、IV 曲面与 SVI
-- 风险管理
-  - Greeks 聚合、VaR/CVaR（Parametric/Historical/FHS/EVT/MC）、4级 Circuit Breaker
-- 策略体系
-  - 做市：Naive、Avellaneda-Stoikov、Hawkes、Integrated、FastIntegrated、XGBoost、PPO
-  - 套利：跨交易所、期现基差、转换/反转、盒式套利
-- 回测与评测
-  - 事件驱动回测引擎、现实成交摩擦模拟、Strategy Arena、Hawkes 专项对比框架
-- 数据与工程
-  - Parquet + DuckDB + Redis 多层缓存，WebSocket 自动重连，健康检查与研究看板
-- 长期研究模块
-  - Rough Volatility、Jump Premia、Almgren-Chriss 最优执行
+- Coin-margined pricing and Greeks
+  - Inverse option pricing, implied volatility inversion, Put-Call parity checks
+- Volatility research
+  - Historical volatility (RV/Parkinson/GK/RS/YZ), EWMA/GARCH/HAR, IV surface and SVI
+- Risk management
+  - Greeks aggregation, VaR/CVaR (Parametric/Historical/FHS/EVT/MC), 4-level Circuit Breaker
+- Strategy framework
+  - Market making: Naive, Avellaneda-Stoikov, Hawkes, Integrated, FastIntegrated, XGBoost, PPO
+  - Arbitrage: cross-exchange, spot-futures basis, conversion/reversal, box spread arbitrage
+- Backtesting and evaluation
+  - Event-driven backtest engine, realistic execution-friction simulation, Strategy Arena, Hawkes comparison framework
+- Data and engineering
+  - Parquet + DuckDB + Redis multi-layer cache, WebSocket auto-reconnect, health checks, and research dashboard
+- Long-horizon research modules
+  - Rough Volatility, Jump Premia, Almgren-Chriss optimal execution
 
-## 快速开始
+## Quick Start
 
-### 安装
+### Installation
 
 ```bash
-# 克隆仓库
+# Clone repository
 git clone https://github.com/signorloops/crypto-options-research-platform.git
 cd crypto-options-research-platform
 
-# 创建并激活虚拟环境
+# Create and activate virtual environment
 python -m venv venv
 source venv/bin/activate  # macOS/Linux
-# 或 venv\Scripts\activate  # Windows
+# or venv\Scripts\activate  # Windows
 
-# 安装依赖（默认精简开发栈）
+# Install dependencies (default lightweight dev stack)
 pip install -e ".[dev]"
 
-# 可选：安装完整栈（ML + Notebook + 加速器）
+# Optional: full stack (ML + Notebook + accelerators)
 pip install -e ".[dev,full]"
 
-# 可选：环境变量
+# Optional: environment variables
 cp .env.example .env
 ```
 
-### 最小示例
+### Minimal Example
 
 ```python
 import numpy as np
 from research.volatility.historical import realized_volatility
 from research.pricing.inverse_options import InverseOptionPricer
 
-# 1) 历史波动率
+# 1) Historical volatility
 returns = np.random.normal(0, 0.02, 500)
 vol = realized_volatility(returns, annualize=True, periods=365)
 
-# 2) 币本位看涨定价
+# 2) Coin-margined call pricing
 price = InverseOptionPricer.calculate_price(
     S=50000, K=52000, T=30/365, r=0.03, sigma=vol, option_type="call"
 )
 print(f"RV={vol:.2%}, Inverse Call={price:.8f} BTC")
 ```
 
-## 架构总览
+## Architecture Overview
 
 ```mermaid
 graph TD
@@ -82,101 +84,101 @@ graph TD
     G --> H["arena + hawkes comparison"]
 ```
 
-## 项目结构
+## Project Structure
 
 ```text
 corp/
-├── core/                    # 类型系统、异常、验证、健康服务
-├── data/                    # 下载器、缓存、流式、重建
+├── core/                    # Type system, exceptions, validation, health services
+├── data/                    # Downloaders, cache, streaming, reconstruction
 ├── research/
-│   ├── pricing/             # inverse 定价、rough volatility
-│   ├── volatility/          # 历史/条件/隐含波动率模型
-│   ├── risk/                # Greeks、VaR、Circuit Breaker
-│   ├── signals/             # HMM regime、fast regime、jump premia
-│   ├── hedging/             # adaptive delta、quanto inverse hedging
+│   ├── pricing/             # Inverse pricing, rough volatility
+│   ├── volatility/          # Historical/conditional/implied volatility models
+│   ├── risk/                # Greeks, VaR, Circuit Breaker
+│   ├── signals/             # HMM regime, fast regime, jump premia
+│   ├── hedging/             # Adaptive delta, quanto inverse hedging
 │   ├── execution/           # Almgren-Chriss
-│   └── backtest/            # 回测引擎、策略竞技场、Hawkes专项评测
+│   └── backtest/            # Backtest engine, strategy arena, Hawkes evaluation
 ├── strategies/
-│   ├── market_making/       # 多做市策略
-│   └── arbitrage/           # 多套利策略
-├── execution/               # 容器入口与研究看板
-├── docs/                    # 文档
-└── tests/                   # 测试
+│   ├── market_making/       # Market-making strategies
+│   └── arbitrage/           # Arbitrage strategies
+├── execution/               # Container entrypoints and research dashboard
+├── docs/                    # Documentation
+└── tests/                   # Tests
 ```
 
-## 文档导航
+## Documentation
 
-文档入口已收敛为“索引优先”，避免在多个文件重复维护同一说明。
+Documentation follows an index-first pattern to avoid maintaining duplicate descriptions across files.
 
-- [周执行清单](docs/plans/weekly-operating-checklist.md)
-- [Q1 历史归档总览](docs/archive/2026-Q1-archive-summary.md)
+- [Weekly operating checklist](docs/plans/weekly-operating-checklist.md)
+- [Q1 historical archive summary](docs/archive/2026-Q1-archive-summary.md)
 
-常用专题：
+Common topics:
 
-- [架构文档](docs/architecture.md)
-- [理论手册](docs/theory.md)
-- [部署指南](docs/deployment.md)
+- [Architecture documentation](docs/architecture.md)
+- [Theory handbook](docs/theory.md)
+- [Deployment guide](docs/deployment.md)
 
-## 常用命令
+## Common Commands
 
 ```bash
-# 全量测试
+# Full test suite (excluding integration)
 pytest -q -m "not integration"
 
-# 显式运行集成测试（访问交易所 API）
+# Explicit integration tests (requires exchange APIs)
 RUN_INTEGRATION_TESTS=1 pytest -q -m "integration"
 
-# 覆盖率
+# Coverage
 pytest tests/ --cov=core --cov=data --cov=research --cov=strategies
 
-# 代码质量
+# Code quality
 black .
 ruff check . --fix
 mypy .
 
-# 工作区瘦身（先看计划，再执行）
+# Workspace slimming (review plan, then execute)
 make workspace-slim-report
 make workspace-slim-clean
 
-# 复杂度治理（严格/回归对比）
+# Complexity governance (strict/regression compare)
 make complexity-audit
 make complexity-audit-regression
 
-# 每周治理链路与发布前硬门禁
+# Weekly governance pipeline and pre-release hard gates
 make weekly-operating-audit
 make weekly-close-gate
 
-# 生产偏离快照
+# Production deviation snapshot
 make live-deviation-snapshot
 
-# 检查部署配置是否误用旧入口模块名
+# Check deployment config for legacy entrypoint names
 make check-service-entrypoint
 
-# 检查分支命名是否包含禁用关键字
+# Check branch names for banned keywords
 make branch-name-guard
 ```
 
-## 研究看板
+## Research Dashboard
 
 ```bash
 uvicorn execution.research_dashboard:app --host 0.0.0.0 --port 8501
 ```
 
-打开 `http://localhost:8501` 查看回测结果与统计。
+Open `http://localhost:8501` to inspect backtesting results and metrics.
 
-## 贡献
+## Contributing
 
-1. 创建分支
-2. 开发与测试
-3. 提交 PR
+1. Create a branch
+2. Develop and test
+3. Open a PR
 
-建议在提交前至少运行 `pytest -q -m "not integration"`。
+Before opening a PR, run at least `pytest -q -m "not integration"`.
 
-## 许可证
+## License
 
-MIT License，见 [LICENSE](LICENSE)。
+MIT License. See [LICENSE](LICENSE).
 
-## 致谢
+## Acknowledgements
 
 - [Deribit API](https://docs.deribit.com/)
 - [OKX API](https://www.okx.com/docs-v5/en/)
