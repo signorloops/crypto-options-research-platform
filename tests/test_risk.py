@@ -551,3 +551,23 @@ class TestStressTest:
         assert result["scenario_name"] == "Custom test scenario"
         assert result["spot_shock"] == -0.15
         assert result["vol_shock"] == 0.30
+
+    def test_stress_pct_uses_gross_exposure_for_dollar_neutral_books(self):
+        """Dollar-neutral books should use gross exposure denominator instead of net sum."""
+        st = StressTest()
+
+        positions = pd.DataFrame({"value": [100.0, -100.0]}, index=["LEG_A", "LEG_B"])
+        greeks = pd.DataFrame(
+            {"delta": [1.0, 0.0], "gamma": [0.0, 0.0], "vega": [0.0, 0.0]},
+            index=["LEG_A", "LEG_B"],
+        )
+
+        result = st.run_stress_test(
+            positions,
+            greeks,
+            {"description": "Gross exposure check", "spot_shock": -0.2, "vol_shock": 0.0},
+        )
+
+        assert np.isfinite(result["pct_of_portfolio"])
+        # PnL = 1.0 * (-0.2) * 100 = -20, gross exposure = 200 => -10%
+        assert result["pct_of_portfolio"] == pytest.approx(-10.0)

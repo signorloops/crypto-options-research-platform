@@ -491,22 +491,25 @@ class CircuitBreaker:
         if not positions_data:
             return None
 
-        positions_df = pd.DataFrame(
-            {"value": [v for _, v in positions_data]},
-            index=[k for k, _ in positions_data]
-        )
-
         returns_df = portfolio.asset_returns.copy()
         if returns_df.empty:
-            # Fallback proxy: portfolio PnL-based return replicated per instrument.
+            # Fallback proxy: use a single synthetic portfolio factor rather than
+            # duplicating identical returns across instruments.
             pnl_returns = portfolio.pnl_series.diff().dropna()
             if len(pnl_returns) < 30:
                 return None
             base = max(abs(portfolio.initial_capital), 1e-12)
             norm_returns = pnl_returns / base
-            returns_df = pd.DataFrame({
-                inst: norm_returns.values for inst, _ in positions_data
-            })
+            positions_df = pd.DataFrame(
+                {"value": [sum(v for _, v in positions_data)]},
+                index=["_portfolio_proxy"],
+            )
+            returns_df = pd.DataFrame({"_portfolio_proxy": norm_returns.values})
+        else:
+            positions_df = pd.DataFrame(
+                {"value": [v for _, v in positions_data]},
+                index=[k for k, _ in positions_data],
+            )
 
         portfolio_value = max(abs(portfolio.total_value), 1e-12)
         return self.check_var_limit(positions_df, returns_df, portfolio_value)
@@ -817,16 +820,26 @@ class CircuitBreaker:
                 self._var_calculator.filtered_historical_var(positions, returns),
             ]
             var_result = max(candidates, key=lambda x: x.var_95)
-        var_pct = var_result.var_95 / portfolio_value if portfolio_value > 0 else 0
+        var_95_pct = var_result.var_95 / portfolio_value if portfolio_value > 0 else 0.0
+        var_99_pct = var_result.var_99 / portfolio_value if portfolio_value > 0 else 0.0
 
-        if var_pct > self.config.var_95_limit_pct:
+        if var_99_pct > self.config.var_99_limit_pct:
+            return Violation(
+                timestamp=datetime.now(timezone.utc),
+                violation_type="var_99",
+                severity="critical",
+                current_value=var_99_pct,
+                limit_value=self.config.var_99_limit_pct,
+                message=f"VaR 99% {var_99_pct:.2%} exceeds limit {self.config.var_99_limit_pct:.2%}",
+            )
+        if var_95_pct > self.config.var_95_limit_pct:
             return Violation(
                 timestamp=datetime.now(timezone.utc),
                 violation_type="var_95",
-                severity="critical" if var_pct > self.config.var_99_limit_pct else "warning",
-                current_value=var_pct,
+                severity="warning",
+                current_value=var_95_pct,
                 limit_value=self.config.var_95_limit_pct,
-                message=f"VaR 95% {var_pct:.2%} exceeds limit {self.config.var_95_limit_pct:.2%}"
+                message=f"VaR 95% {var_95_pct:.2%} exceeds limit {self.config.var_95_limit_pct:.2%}",
             )
 
         return None

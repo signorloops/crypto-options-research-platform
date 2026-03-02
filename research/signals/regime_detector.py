@@ -268,6 +268,14 @@ class VolatilityRegimeDetector:
         order = np.argsort(np.asarray(risk_scores, dtype=float))
         return {int(old): int(new) for new, old in enumerate(order)}
 
+    def _mapped_state_to_raw_state(self, mapped_state: RegimeState) -> int:
+        """Convert mapped RegimeState index back to raw HMM state index."""
+        target = int(mapped_state.value)
+        for raw_idx, mapped_idx in self._state_map.items():
+            if int(mapped_idx) == target:
+                return int(raw_idx)
+        return target
+
     def _apply_sticky_transition(self, candidate: RegimeState, probs: np.ndarray) -> RegimeState:
         """Apply persistence and hysteresis to reduce regime flip noise."""
         if candidate == self.current_regime:
@@ -378,8 +386,10 @@ class VolatilityRegimeDetector:
         # Get transition matrix
         transmat = self.model.transmat_
 
-        # Current regime index
-        current_idx = self.current_regime.value
+        # Transition matrix is in raw HMM state space.
+        current_idx = self._mapped_state_to_raw_state(self.current_regime)
+        if current_idx < 0 or current_idx >= transmat.shape[0]:
+            return 0.0
 
         # Probability of staying in current regime
         stay_prob = transmat[current_idx, current_idx]

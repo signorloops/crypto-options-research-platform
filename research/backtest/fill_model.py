@@ -100,7 +100,11 @@ class RealisticFillSimulator:
         # Check each trade against our quote
         for trade in next_trades:
             # Check if trade timestamp is after our quote + latency
-            trade_delay_ms = (trade.timestamp - market_state.timestamp).total_seconds() * 1000
+            trade_delay = trade.timestamp - market_state.timestamp
+            if hasattr(trade_delay, "total_seconds"):
+                trade_delay_ms = float(trade_delay.total_seconds() * 1000)
+            else:
+                trade_delay_ms = float(trade_delay / np.timedelta64(1, "ms"))
             if trade_delay_ms < latency_ms:
                 continue  # Trade happened before our quote arrived
 

@@ -223,24 +223,11 @@ class BacktestEngine:
         self.strategy.on_fill(fill, updated_position)
         return updated_position
 
-    def _quote_with_lagged_price(
-        self,
-        prices: np.ndarray,
-        idx: int,
-        market_state: MarketState,
-        position: Position,
+    def _quote_with_lagged_snapshot(
+        self, quote_state: MarketState, position: Position
     ) -> QuoteAction:
-        """Query strategy quote on lagged price to avoid look-ahead bias."""
-        current_price = float(prices[idx])
-        lagged_price = float(prices[idx - 1]) if idx > 0 else current_price
-        lagged_market_state = MarketState(
-            timestamp=market_state.timestamp,
-            instrument=market_state.instrument,
-            spot_price=lagged_price,
-            order_book=market_state.order_book,
-            recent_trades=market_state.recent_trades,
-        )
-        return self.strategy.quote(lagged_market_state, position)
+        """Quote using information set available at order placement time."""
+        return self.strategy.quote(quote_state, position)
 
     def run(
         self,
@@ -262,6 +249,7 @@ class BacktestEngine:
 
         current_ob = self._create_dummy_order_book(prices[0])
         previous_quote: Optional[QuoteAction] = None
+        previous_market_state: Optional[MarketState] = None
 
         for i in range(n_events):
             price = float(prices[i])
@@ -280,11 +268,11 @@ class BacktestEngine:
                 event_volume=float(event_volumes[i]),
                 current_price=price,
             )
-            new_quote = self._quote_with_lagged_price(
-                prices=prices, idx=i, market_state=market_state, position=position
-            )
+            quote_state = previous_market_state if previous_market_state is not None else market_state
+            new_quote = self._quote_with_lagged_snapshot(quote_state=quote_state, position=position)
             self.quotes.append(new_quote)
             previous_quote = new_quote
+            previous_market_state = market_state
 
             self._record_state(timestamp, price)
 
@@ -332,7 +320,9 @@ class BacktestEngine:
         trades = []
         timestamp = market_state.timestamp
 
-        num_trades = min(3, max(0, int(volume * self.rng.random())))
+        # Use Poisson arrivals for smoother event intensity scaling.
+        arrival_intensity = float(np.clip(volume, 0.0, 3.0))
+        num_trades = int(np.clip(self.rng.poisson(arrival_intensity), 0, 3))
 
         for _ in range(num_trades):
             imbalance = (

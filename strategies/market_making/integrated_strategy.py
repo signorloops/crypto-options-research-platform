@@ -192,7 +192,8 @@ class IntegratedMarketMakingStrategy(MarketMakingStrategy):
         # 1. Update returns/regime on every tick (even when trading is halted).
         ret = self._calculate_return(mid, prev_price)
         if ret is not None:
-            self.regime_detector.update(ret)
+            detector_input = np.expm1(ret) if self.regime_detector.config.use_log_returns else ret
+            self.regime_detector.update(detector_input)
             self._returns_history.append(ret)
         current_regime = self.regime_detector.current_regime
 

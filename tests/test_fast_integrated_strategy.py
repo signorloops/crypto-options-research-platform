@@ -471,6 +471,27 @@ class TestFastIntegratedStrategy:
         assert r1 is None
         assert r2 == pytest.approx(np.log(1.1))
 
+    def test_regime_detector_receives_log_return_when_fast_config_has_no_log_flag(self):
+        """Fast detector config has no log-transform flag, so log returns are passed through."""
+        strategy = FastIntegratedMarketMakingStrategy()
+        captured = []
+
+        def _capture_update(ret):
+            captured.append(float(ret))
+            return strategy.regime_detector.current_regime
+
+        strategy.regime_detector.update = _capture_update
+        state1 = self.create_market_state(50000.0)
+        state2 = self.create_market_state(51000.0)
+        position = Position("BTC-USD", 0.0, 50000.0)
+
+        strategy.quote(state1, position)
+        strategy.quote(state2, position)
+
+        assert len(captured) == 1
+        assert captured[0] == pytest.approx(np.log(51000.0 / 50000.0))
+        assert strategy._returns_history[0] == pytest.approx(np.log(51000.0 / 50000.0))
+
 
 class TestFastVsStandardComparison:
     """Compare Fast strategy with standard version."""

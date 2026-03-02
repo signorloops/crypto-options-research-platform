@@ -175,6 +175,32 @@ class TestRegimeSwitchPrediction:
         alert, msg = detector.get_regime_switch_alert()
         assert alert is False
 
+    def test_switch_probability_uses_raw_hmm_state_after_mapping(self):
+        """Switch probability should use raw HMM transition row, not mapped regime index."""
+        detector = VolatilityRegimeDetector()
+        detector._is_fitted = True
+        detector._state_map = {2: 0, 0: 1, 1: 2}  # raw -> mapped
+        detector.current_regime = RegimeState.LOW  # mapped index 0 -> raw index 2
+        detector.model = SimpleNamespace(
+            transmat_=np.array(
+                [
+                    [0.90, 0.05, 0.05],
+                    [0.20, 0.70, 0.10],
+                    [0.10, 0.20, 0.70],
+                ]
+            )
+        )
+        now = datetime.now()
+        detector.regime_history = [
+            (now, RegimeState.LOW, np.array([0.7, 0.2, 0.1])),
+            (now, RegimeState.LOW, np.array([0.6, 0.3, 0.1])),
+        ]
+
+        prob = detector.predict_regime_switch_probability()
+
+        # LOW maps to raw state 2, so switch prob = 1 - transmat_[2,2] = 0.30
+        assert prob == pytest.approx(0.30)
+
 
 class TestRegimeStats:
     """Tests for regime statistics."""

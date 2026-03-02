@@ -453,7 +453,71 @@ class TestCircuitBreakerVaRAndPerInstrument:
         )
 
         violations = cb._check_all_limits(portfolio)
-        assert any(v.violation_type.startswith("var_95") or v.violation_type == "var_95" for v in violations)
+        assert any(v.violation_type.startswith("var_") for v in violations)
+
+    def test_check_var_limit_marks_var99_as_critical(self):
+        """Critical breach should be driven by VaR 99% threshold."""
+        config = CircuitBreakerConfig(
+            var_95_limit_pct=0.05,
+            var_99_limit_pct=0.10,
+            var_method="parametric",
+        )
+        cb = CircuitBreaker(config)
+
+        def fake_parametric_var(positions, returns):
+            from research.risk.var import VaRResult
+
+            return VaRResult(
+                var_95=80.0,
+                var_99=130.0,  # 13% on portfolio_value=1000
+                cvar_95=90.0,
+                cvar_99=150.0,
+                method="parametric",
+            )
+
+        cb._var_calculator.parametric_var = fake_parametric_var
+        positions = pd.DataFrame({"value": [1000.0]}, index=["BTC"])
+        returns = pd.DataFrame({"BTC": np.random.normal(0, 0.01, 64)})
+
+        violation = cb.check_var_limit(positions, returns, portfolio_value=1000.0)
+
+        assert violation is not None
+        assert violation.violation_type == "var_99"
+        assert violation.severity == "critical"
+
+    def test_var_fallback_uses_single_portfolio_proxy_factor(self, monkeypatch):
+        """Empty asset returns should map to one synthetic factor instead of duplicated columns."""
+        cb = CircuitBreaker()
+        captured = {}
+
+        def fake_check_var_limit(positions_df, returns_df, portfolio_value):
+            captured["positions_index"] = list(positions_df.index)
+            captured["returns_columns"] = list(returns_df.columns)
+            captured["portfolio_value"] = portfolio_value
+            return None
+
+        monkeypatch.setattr(cb, "check_var_limit", fake_check_var_limit)
+
+        from core.types import Position
+
+        idx = pd.date_range(start=datetime.now(timezone.utc) - timedelta(hours=40), periods=40, freq="h")
+        pnl_series = pd.Series(np.cumsum(np.random.normal(0, 0.01, len(idx))), index=idx)
+        portfolio = PortfolioState(
+            timestamp=idx[-1].to_pydatetime(),
+            positions={
+                "BTC": Position("BTC", 1.0, 50000.0),
+                "ETH": Position("ETH", 1.0, 3000.0),
+            },
+            cash=1000.0,
+            pnl_series=pnl_series,
+            asset_returns=pd.DataFrame(),
+            initial_capital=100000.0,
+        )
+
+        cb._check_var_limit_from_portfolio(portfolio)
+
+        assert captured["positions_index"] == ["_portfolio_proxy"]
+        assert captured["returns_columns"] == ["_portfolio_proxy"]
 
     def test_per_instrument_notional_limit(self):
         config = CircuitBreakerConfig(

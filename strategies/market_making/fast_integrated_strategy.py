@@ -293,7 +293,9 @@ class FastIntegratedMarketMakingStrategy(MarketMakingStrategy):
         if self.config.enable_regime_detection:
             ret = self._calculate_return(mid)
             if ret is not None:
-                self.regime_detector.update(ret)
+                use_log_returns = bool(getattr(self.regime_detector.config, "use_log_returns", False))
+                detector_input = np.expm1(ret) if use_log_returns else ret
+                self.regime_detector.update(detector_input)
                 self._returns_history.append(ret)
 
         current_regime = self.regime_detector.current_regime

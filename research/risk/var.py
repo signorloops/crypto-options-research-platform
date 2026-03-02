@@ -743,12 +743,15 @@ class StressTest:
 
                 total_pnl += delta_pnl + gamma_pnl + vega_pnl
 
+        gross_exposure = float(np.abs(positions["value"]).sum()) if "value" in positions else 0.0
+        pct_of_portfolio = (total_pnl / gross_exposure * 100) if gross_exposure > 1e-12 else 0.0
+
         return {
             "scenario_name": scenario.get("description", "Custom"),
             "spot_shock": spot_shock,
             "vol_shock": vol_shock,
             "estimated_pnl": total_pnl,
-            "pct_of_portfolio": total_pnl / positions["value"].sum() * 100,
+            "pct_of_portfolio": pct_of_portfolio,
         }
 
     def run_all_scenarios(self, positions: pd.DataFrame, greeks: pd.DataFrame) -> pd.DataFrame:

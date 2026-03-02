@@ -264,6 +264,24 @@ class TestReturnCalculation:
         assert len(strategy._returns_history) == 1
         assert strategy._returns_history[0] == pytest.approx(np.log(51000.0 / 50000.0))
 
+    def test_regime_detector_receives_simple_return_when_log_mode_enabled(self):
+        """Strategy should avoid passing log-return input into detector log transform again."""
+        strategy = IntegratedMarketMakingStrategy()
+        position = Position("BTC-USD", 0, 0)
+        captured = []
+
+        def _capture_update(ret):
+            captured.append(float(ret))
+            return strategy.regime_detector.current_regime
+
+        strategy.regime_detector.update = _capture_update
+        strategy.quote(create_test_market_state(price=50000.0), position)
+        strategy.quote(create_test_market_state(price=51000.0), position)
+
+        assert len(captured) == 1
+        assert captured[0] == pytest.approx((51000.0 / 50000.0) - 1.0)
+        assert strategy._returns_history[0] == pytest.approx(np.log(51000.0 / 50000.0))
+
 
 class TestPnLCalculation:
     """Tests for PnL calculation."""

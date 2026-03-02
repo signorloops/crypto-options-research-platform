@@ -347,6 +347,39 @@ class TestBacktestEngine:
         volumes = engine._prepare_event_volumes(df)
         np.testing.assert_allclose(volumes, np.array([2.0, 1.0, 0.0, 1.0, 0.3]))
 
+    def test_quote_uses_previous_snapshot_to_avoid_lookahead(self):
+        """Strategy quote should only see t-1 snapshot information."""
+
+        class SnapshotRecordingStrategy:
+            def __init__(self) -> None:
+                self.name = "SnapshotRecorder"
+                self.observed_spot_prices = []
+
+            def quote(self, state, position):
+                self.observed_spot_prices.append(float(state.spot_price))
+                mid = state.order_book.mid_price or state.spot_price
+                return QuoteAction(mid, 0.0, mid, 0.0, metadata={})
+
+            def on_fill(self, fill, position) -> None:
+                return None
+
+            def reset(self) -> None:
+                self.observed_spot_prices.clear()
+
+        strategy = SnapshotRecordingStrategy()
+        engine = BacktestEngine(strategy, random_seed=42)
+        df = pd.DataFrame(
+            {
+                "timestamp": pd.date_range("2024-01-01", periods=3, freq="1min"),
+                "price": [100.0, 110.0, 120.0],
+            }
+        )
+
+        engine.run(df)
+
+        # i=0 uses current snapshot; later ticks must use previous snapshot.
+        assert strategy.observed_spot_prices == [100.0, 100.0, 110.0]
+
 
 class TestBacktestWithDifferentStrategies:
     """Test backtest with multiple strategies."""
