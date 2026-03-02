@@ -34,6 +34,15 @@ MANUAL_CHECKLIST_ITEMS: list[str] = [
     "ADR",
 ]
 
+JSON_REPORT_EXCEPTIONS = (
+    OSError,
+    UnicodeError,
+    json.JSONDecodeError,
+    ValueError,
+    TypeError,
+    KeyError,
+)
+
 
 def _load_json(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as f:
@@ -490,7 +499,7 @@ def _build_report(
         try:
             raw = _load_json(path)
             rows = _extract_strategy_rows(raw, path)
-        except Exception as exc:  # pragma: no cover - defensive parser boundary
+        except JSON_REPORT_EXCEPTIONS as exc:  # pragma: no cover - defensive parser boundary
             parse_errors.append({"file": str(path), "error": str(exc)})
             continue
 
@@ -1048,7 +1057,7 @@ def main() -> int:
                 performance_result["executed"] = True
             performance_result["path"] = str(performance_json_path)
             performance_result["error"] = ""
-        except Exception as exc:
+        except JSON_REPORT_EXCEPTIONS as exc:
             performance_result = {
                 "executed": False,
                 "summary": {"all_passed": None},
