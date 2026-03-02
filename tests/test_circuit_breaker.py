@@ -628,6 +628,90 @@ class TestCircuitBreakerStateSeverityOrdering:
         assert cb._warning_count == {}
 
 
+class TestCircuitBreakerAlertIntegrations:
+    """Tests for webhook/slack alert integration behavior."""
+
+    @staticmethod
+    def _sample_violation() -> Violation:
+        return Violation(
+            timestamp=datetime.now(timezone.utc),
+            violation_type="drawdown",
+            severity="critical",
+            current_value=0.2,
+            limit_value=0.15,
+            message="critical drawdown",
+        )
+
+    def test_send_alert_schedules_configured_channels(self, monkeypatch):
+        config = CircuitBreakerConfig(
+            alert_enabled=True,
+            alert_webhook_url="https://example.com/webhook",
+            slack_webhook_url="https://hooks.slack.com/services/a/b/c",
+        )
+        cb = CircuitBreaker(config)
+        calls = {"webhook": 0, "slack": 0}
+
+        def fake_schedule_webhook(url, state, violations):
+            calls["webhook"] += 1
+            assert url == config.alert_webhook_url
+            assert state == CircuitState.RESTRICTED
+            assert len(violations) == 1
+
+        def fake_schedule_slack(url, state, violations):
+            calls["slack"] += 1
+            assert url == config.slack_webhook_url
+            assert state == CircuitState.RESTRICTED
+            assert len(violations) == 1
+
+        monkeypatch.setattr(cb, "_schedule_webhook_alert", fake_schedule_webhook)
+        monkeypatch.setattr(cb, "_schedule_slack_alert", fake_schedule_slack)
+
+        cb._send_alert(CircuitState.RESTRICTED, [self._sample_violation()])
+
+        assert calls["webhook"] == 1
+        assert calls["slack"] == 1
+
+    def test_send_alert_skips_channels_when_disabled(self, monkeypatch):
+        config = CircuitBreakerConfig(
+            alert_enabled=False,
+            alert_webhook_url="https://example.com/webhook",
+            slack_webhook_url="https://hooks.slack.com/services/a/b/c",
+        )
+        cb = CircuitBreaker(config)
+
+        monkeypatch.setattr(
+            cb,
+            "_schedule_webhook_alert",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not schedule webhook")),
+        )
+        monkeypatch.setattr(
+            cb,
+            "_schedule_slack_alert",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not schedule slack")),
+        )
+
+        cb._send_alert(CircuitState.RESTRICTED, [self._sample_violation()])
+
+    def test_build_alert_payload_contains_expected_fields(self):
+        cb = CircuitBreaker()
+        payload = cb._build_alert_payload(CircuitState.HALTED, [self._sample_violation()])
+
+        assert payload["state"] == "halted"
+        assert payload["severity"] == "critical"
+        assert payload["violation_count"] == 1
+        assert isinstance(payload["violations"], list)
+        assert payload["violations"][0]["type"] == "drawdown"
+
+    def test_build_slack_payload_contains_human_readable_text(self):
+        cb = CircuitBreaker()
+        payload = cb._build_slack_payload(CircuitState.WARNING, [self._sample_violation()])
+
+        text = payload["text"]
+        assert "Circuit Breaker Alert" in text
+        assert "WARNING" in text
+        assert "critical drawdown" in text
+
+
 class TestCircuitBreakerStatus:
     """Tests for get_status method."""
 

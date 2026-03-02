@@ -7,18 +7,23 @@ Implements a 4-tier circuit breaker system:
 - RESTRICTED: Only hedging/liquidation allowed
 - HALTED: All trading suspended
 """
+import asyncio
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from threading import Lock
-from typing import Dict, List, Optional, Tuple, Any
+import logging
+import os
+from threading import Lock, Thread
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
 from core.types import Position, Portfolio
 from research.risk.var import VaRCalculator, VaRResult
+
+logger = logging.getLogger(__name__)
 
 
 class CircuitState(Enum):
@@ -46,9 +51,6 @@ class Violation:
     current_value: float
     limit_value: float
     message: str
-
-
-import os
 
 @dataclass
 class CircuitBreakerConfig:
@@ -89,6 +91,12 @@ class CircuitBreakerConfig:
     per_instrument_notional_limit: float = float(os.getenv("CB_PER_INSTRUMENT_NOTIONAL_LIMIT", "inf"))
     per_instrument_warning_notional: float = float(os.getenv("CB_PER_INSTRUMENT_WARNING_NOTIONAL", "inf"))
     per_instrument_notional_limits: Dict[str, float] = field(default_factory=dict)
+
+    # Alert integrations
+    alert_enabled: bool = os.getenv("CB_ALERT_ENABLED", "true").lower() == "true"
+    alert_webhook_url: str = os.getenv("CB_ALERT_WEBHOOK_URL", os.getenv("ALERT_WEBHOOK_URL", ""))
+    slack_webhook_url: str = os.getenv("CB_SLACK_WEBHOOK_URL", "")
+    alert_timeout_seconds: float = float(os.getenv("CB_ALERT_TIMEOUT_SECONDS", "5"))
 
 
 def calculate_drawdown(pnl_series: pd.Series) -> Tuple[float, pd.Series]:
@@ -657,49 +665,148 @@ class CircuitBreaker:
 
     def _send_alert(self, state: CircuitState, violations: List[Violation]) -> None:
         """Send alert via logging/webhook when state degrades."""
-        import logging
-        logger = logging.getLogger(__name__)
-
         violation_msgs = "; ".join([v.message for v in violations[:3]])
         logger.critical(
             f"CIRCUIT BREAKER ALERT: State changed to {state.value.upper()}. "
             f"Violations: {violation_msgs}"
         )
 
-        # TODO: Add webhook/PagerDuty/Slack integration here
-        # webhook_url = os.getenv("ALERT_WEBHOOK_URL")
-        # if webhook_url:
-        #     asyncio.create_task(self._send_webhook_alert(webhook_url, state, violations))
+        if not self.config.alert_enabled:
+            return
 
-    async def _send_webhook_alert(self, webhook_url: str, state: CircuitState, violations: List[Violation]) -> None:
+        webhook_url = (self.config.alert_webhook_url or "").strip()
+        if webhook_url:
+            self._schedule_webhook_alert(webhook_url, state, violations)
+
+        slack_webhook_url = (self.config.slack_webhook_url or "").strip()
+        if slack_webhook_url:
+            self._schedule_slack_alert(slack_webhook_url, state, violations)
+
+    def _schedule_async_alert(
+        self,
+        coroutine_factory: Callable[[], Awaitable[None]],
+    ) -> None:
+        """Schedule async alert delivery without blocking risk checks."""
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(coroutine_factory())
+            return
+        except RuntimeError:
+            pass
+
+        def _runner() -> None:
+            try:
+                asyncio.run(coroutine_factory())
+            except Exception:
+                logger.exception("Background alert delivery failed")
+
+        Thread(target=_runner, daemon=True).start()
+
+    def _schedule_webhook_alert(
+        self,
+        webhook_url: str,
+        state: CircuitState,
+        violations: List[Violation],
+    ) -> None:
+        """Schedule generic webhook alert."""
+        self._schedule_async_alert(
+            lambda: self._send_webhook_alert(webhook_url, state, violations)
+        )
+
+    def _schedule_slack_alert(
+        self,
+        webhook_url: str,
+        state: CircuitState,
+        violations: List[Violation],
+    ) -> None:
+        """Schedule Slack-compatible webhook alert."""
+        self._schedule_async_alert(
+            lambda: self._send_slack_alert(webhook_url, state, violations)
+        )
+
+    @staticmethod
+    def _alert_severity(state: CircuitState) -> str:
+        """Map circuit state to alert severity label."""
+        return "critical" if state in [CircuitState.RESTRICTED, CircuitState.HALTED] else "warning"
+
+    def _build_alert_payload(self, state: CircuitState, violations: List[Violation]) -> Dict[str, Any]:
+        """Build structured payload for generic webhook integrations."""
+        return {
+            "severity": self._alert_severity(state),
+            "state": state.value,
+            "violation_count": len(violations),
+            "violations": [
+                {
+                    "type": v.violation_type,
+                    "severity": v.severity,
+                    "current": v.current_value,
+                    "limit": v.limit_value,
+                    "message": v.message,
+                }
+                for v in violations[:5]
+            ],
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def _build_slack_payload(self, state: CircuitState, violations: List[Violation]) -> Dict[str, Any]:
+        """Build Slack webhook payload."""
+        top_msgs = [f"- {v.message}" for v in violations[:5]]
+        lines = [
+            f"*Circuit Breaker Alert*: `{state.value.upper()}`",
+            f"*Severity*: `{self._alert_severity(state).upper()}`",
+            f"*Violation Count*: {len(violations)}",
+            "*Top Violations:*",
+        ]
+        if top_msgs:
+            lines.extend(top_msgs)
+        else:
+            lines.append("- (none)")
+
+        return {
+            "text": "\n".join(lines),
+            "username": "Risk Circuit Breaker",
+            "icon_emoji": ":rotating_light:",
+        }
+
+    async def _send_webhook_alert(
+        self,
+        webhook_url: str,
+        state: CircuitState,
+        violations: List[Violation],
+    ) -> None:
         """Send alert to webhook (async)."""
         try:
             import aiohttp
-            import json
 
-            payload = {
-                "severity": "critical" if state in [CircuitState.RESTRICTED, CircuitState.HALTED] else "warning",
-                "state": state.value,
-                "violations": [
-                    {
-                        "type": v.violation_type,
-                        "severity": v.severity,
-                        "current": v.current_value,
-                        "limit": v.limit_value,
-                        "message": v.message
-                    }
-                    for v in violations[:5]
-                ],
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
+            payload = self._build_alert_payload(state, violations)
+            timeout = aiohttp.ClientTimeout(total=max(self.config.alert_timeout_seconds, 0.1))
 
             async with aiohttp.ClientSession() as session:
-                async with session.post(webhook_url, json=payload, timeout=5) as response:
+                async with session.post(webhook_url, json=payload, timeout=timeout) as response:
                     if response.status >= 400:
-                        logger = logging.getLogger(__name__)
-                        logger.error(f"Failed to send webhook alert: {response.status}")
+                        logger.error("Failed to send webhook alert: %s", response.status)
         except Exception:
-            pass  # Fail silently for alerts
+            logger.exception("Failed to deliver webhook alert")
+
+    async def _send_slack_alert(
+        self,
+        webhook_url: str,
+        state: CircuitState,
+        violations: List[Violation],
+    ) -> None:
+        """Send alert to Slack incoming webhook (async)."""
+        try:
+            import aiohttp
+
+            payload = self._build_slack_payload(state, violations)
+            timeout = aiohttp.ClientTimeout(total=max(self.config.alert_timeout_seconds, 0.1))
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(webhook_url, json=payload, timeout=timeout) as response:
+                    if response.status >= 400:
+                        logger.error("Failed to send Slack alert: %s", response.status)
+        except Exception:
+            logger.exception("Failed to deliver Slack alert")
 
     def _record_violation(self, violation: Violation) -> None:
         """Record a risk limit violation."""
