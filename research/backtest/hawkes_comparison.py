@@ -146,21 +146,26 @@ class ScenarioGenerator:
         """Generate a single Hawkes scenario as market data."""
         params = HawkesParameters(mu=config.mu, alpha=config.alpha, beta=config.beta)
         process = HawkesProcess(params)
+        scenario_seed = int(config.seed + seed_offset)
+        rng = np.random.default_rng(scenario_seed)
 
         # Simulate event times
-        events = process.simulate(config.T, seed=config.seed + seed_offset)
+        events = process.simulate(config.T, rng=rng)
 
         # Generate price data based on events
-        return self._events_to_market_data(events, config)
+        return self._events_to_market_data(events, config, rng=rng)
 
     def _events_to_market_data(
         self,
         events: List[float],
-        config: HawkesScenarioConfig
+        config: HawkesScenarioConfig,
+        rng: Optional[np.random.Generator] = None,
     ) -> pd.DataFrame:
         """Convert Hawkes events to market DataFrame with price and volume."""
         if not events:
             return pd.DataFrame()
+        if rng is None:
+            rng = np.random.default_rng()
 
         # Create timestamps from event times
         base_time = datetime(2024, 1, 1)
@@ -181,12 +186,12 @@ class ScenarioGenerator:
 
             # Higher intensity = higher volatility
             local_vol = self.price_volatility * (1 + intensity)
-            price_change = np.random.normal(0, local_vol * current_price / 100)
+            price_change = float(rng.normal(0, local_vol * current_price / 100))
             current_price += price_change
             prices.append(current_price)
 
             # Volume proportional to intensity
-            volume = max(0.1, np.random.exponential(intensity * 10))
+            volume = max(0.1, float(rng.exponential(intensity * 10)))
             volumes.append(volume)
 
         df = pd.DataFrame({
@@ -390,7 +395,11 @@ class ScenarioGenerator:
         # Combine and sort
         all_events = sorted(events + spike_events)
 
-        return self._events_to_market_data(all_events, config)
+        return self._events_to_market_data(
+            all_events,
+            config,
+            rng=np.random.default_rng(4201),
+        )
 
     def _generate_liquidity_drought_scenario(self) -> pd.DataFrame:
         """Generate scenario with reduced trading activity."""
@@ -407,7 +416,11 @@ class ScenarioGenerator:
         process = HawkesProcess(params)
         events = process.simulate(config.T, seed=44)
 
-        return self._events_to_market_data(events, config)
+        return self._events_to_market_data(
+            events,
+            config,
+            rng=np.random.default_rng(4401),
+        )
 
     def _generate_inventory_stress_scenario(self) -> pd.DataFrame:
         """Generate scenario with persistent one-sided order flow."""
@@ -424,7 +437,11 @@ class ScenarioGenerator:
         events = process.simulate(config.T, seed=45)
 
         # Generate market data
-        df = self._events_to_market_data(events, config)
+        df = self._events_to_market_data(
+            events,
+            config,
+            rng=np.random.default_rng(4501),
+        )
 
         # Add directional bias to simulate one-sided flow
         df['price'] = df['price'] * (1 + np.linspace(0, 0.05, len(df)))

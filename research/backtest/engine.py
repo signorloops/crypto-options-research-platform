@@ -494,12 +494,12 @@ class BacktestEngine:
         if len(returns) > 1:
             time_span = (pnl_series.index[-1] - pnl_series.index[0]).total_seconds()
             periods_per_year = len(returns) * (365.0 * 24 * 3600) / max(time_span, 1)
-            annualization = np.sqrt(periods_per_year)
         else:
-            annualization = np.sqrt(365.0 * 24)
+            periods_per_year = 365.0 * 24
+        annualization = np.sqrt(periods_per_year)
 
         risk_free_rate = 0.0
-        excess_returns = returns - risk_free_rate / (365.0 * 24)
+        excess_returns = returns - risk_free_rate / periods_per_year
         return float((excess_returns.mean() / returns.std()) * annualization)
 
     def _execution_costs(self) -> Tuple[float, float]:
@@ -535,8 +535,9 @@ class BacktestEngine:
             else pd.Series(dtype=float)
         )
         sharpe_ci, drawdown_ci = self._bootstrap_risk_ci(returns_for_ci)
+        deflated_trials = max(2, int(getattr(self.strategy, "multiple_testing_trials", 2)))
         deflated_sharpe = self._deflated_sharpe_ratio(
-            float(sharpe), n_obs=len(returns_for_ci), n_trials=1
+            float(sharpe), n_obs=len(returns_for_ci), n_trials=deflated_trials
         )
         execution_cost, adverse_selection_cost = self._execution_costs()
 

@@ -79,7 +79,12 @@ class HawkesProcess:
 
         return intensity
 
-    def simulate(self, T: float, seed: Optional[int] = None) -> List[float]:
+    def simulate(
+        self,
+        T: float,
+        seed: Optional[int] = None,
+        rng: Optional[np.random.Generator] = None,
+    ) -> List[float]:
         """Simulate Hawkes process using Ogata's thinning algorithm.
 
         Uses O(1) recursive kernel update instead of O(n) full summation:
@@ -93,8 +98,8 @@ class HawkesProcess:
         Returns:
             List of event times
         """
-        if seed is not None:
-            np.random.seed(seed)
+        if rng is None:
+            rng = np.random.default_rng(seed)
 
         events = []
         t = 0.0
@@ -104,7 +109,7 @@ class HawkesProcess:
         lambda_max = self.params.mu
 
         while t < T:
-            u = np.random.exponential(1.0 / lambda_max)
+            u = float(rng.exponential(1.0 / lambda_max))
             t = t + u
 
             if t >= T:
@@ -114,7 +119,7 @@ class HawkesProcess:
             A = np.exp(-self.params.beta * (t - t_last)) * A
             lambda_t = self.params.mu + A
 
-            if np.random.uniform() <= lambda_t / lambda_max:
+            if float(rng.uniform()) <= lambda_t / lambda_max:
                 events.append(t)
                 A += self.params.alpha
                 lambda_max = lambda_t + self.params.alpha
@@ -131,11 +136,12 @@ class HawkesProcess:
         Returns:
             Tuple of (event_times, trade_sizes)
         """
-        times = self.simulate(T, seed)
+        rng = np.random.default_rng(seed)
+        times = self.simulate(T, rng=rng)
 
         # Generate trade sizes (log-normal: typical for financial data)
         # Mean = 1.0, std = 0.5 (in log space)
-        sizes = np.random.lognormal(mean=0.0, sigma=0.5, size=len(times))
+        sizes = rng.lognormal(mean=0.0, sigma=0.5, size=len(times))
 
         return times, sizes.tolist()
 
@@ -184,7 +190,12 @@ class PoissonProcess:
         self.intensity = intensity
         self.events: List[float] = []
 
-    def simulate(self, T: float, seed: Optional[int] = None) -> List[float]:
+    def simulate(
+        self,
+        T: float,
+        seed: Optional[int] = None,
+        rng: Optional[np.random.Generator] = None,
+    ) -> List[float]:
         """Simulate Poisson process.
 
         Args:
@@ -194,14 +205,14 @@ class PoissonProcess:
         Returns:
             List of event times
         """
-        if seed is not None:
-            np.random.seed(seed)
+        if rng is None:
+            rng = np.random.default_rng(seed)
 
         # Number of events ~ Poisson(λT)
-        n_events = np.random.poisson(self.intensity * T)
+        n_events = int(rng.poisson(self.intensity * T))
 
         # Event times ~ Uniform(0, T)
-        events = np.sort(np.random.uniform(0, T, n_events)).tolist()
+        events = np.sort(rng.uniform(0, T, n_events)).tolist()
 
         self.events = events
         return events

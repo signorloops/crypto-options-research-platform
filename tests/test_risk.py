@@ -433,6 +433,39 @@ class TestVaRCalculator:
         assert r1.cvar_95 == pytest.approx(r2.cvar_95)
         assert r1.cvar_99 == pytest.approx(r2.cvar_99)
 
+    def test_filtered_historical_var_with_seed_is_reproducible(self):
+        """Filtered historical VaR should be deterministic when seed is fixed."""
+        calc = VaRCalculator(confidence_level=0.95)
+        positions = pd.DataFrame({"value": [60000, 40000]}, index=["BTC", "ETH"])
+        returns = pd.DataFrame(
+            {
+                "BTC": np.random.normal(0, 0.02, 900),
+                "ETH": np.random.normal(0, 0.025, 900),
+            }
+        )
+
+        r1 = calc.filtered_historical_var(
+            positions,
+            returns,
+            holding_period=1,
+            lambda_param=0.94,
+            random_seed=2026,
+        )
+        r2 = calc.filtered_historical_var(
+            positions,
+            returns,
+            holding_period=1,
+            lambda_param=0.94,
+            random_seed=2026,
+        )
+
+        assert r1.method == "fhs"
+        assert r2.method == "fhs"
+        assert r1.var_95 == pytest.approx(r2.var_95)
+        assert r1.var_99 == pytest.approx(r2.var_99)
+        assert r1.cvar_95 == pytest.approx(r2.cvar_95)
+        assert r1.cvar_99 == pytest.approx(r2.cvar_99)
+
     def test_var_result_to_dict(self):
         """Test VaRResult conversion to dict."""
         result = VaRResult(

@@ -26,7 +26,7 @@ from research.backtest.hawkes_comparison import (
     ScenarioType,
     HawkesSpecificMetrics,
 )
-from data.generators.hawkes import HawkesProcess, HawkesParameters
+from data.generators.hawkes import HawkesProcess, HawkesParameters, PoissonProcess
 from strategies.market_making.hawkes_mm import HawkesIntensityMonitor, HawkesMarketMaker, HawkesMMConfig
 
 
@@ -130,6 +130,31 @@ class TestScenarioGenerator(unittest.TestCase):
         self.assertEqual(len(df), len(events))
         self.assertIn('price', df.columns)
         self.assertIn('volume', df.columns)
+
+    def test_hawkes_simulation_seed_does_not_mutate_global_numpy_rng(self):
+        """Local seeding in Hawkes process should not perturb global NumPy RNG state."""
+        np.random.seed(2026)
+        _ = np.random.random()  # advance once
+        expected_next = np.random.random()
+
+        np.random.seed(2026)
+        _ = np.random.random()  # same one-step advance
+        process = HawkesProcess(HawkesParameters(mu=0.1, alpha=0.4, beta=0.8))
+        _ = process.simulate(300.0, seed=42)
+        actual_next = np.random.random()
+
+        self.assertAlmostEqual(actual_next, expected_next)
+
+        np.random.seed(2027)
+        _ = np.random.random()
+        expected_next_poisson = np.random.random()
+
+        np.random.seed(2027)
+        _ = np.random.random()
+        poisson = PoissonProcess(intensity=0.2)
+        _ = poisson.simulate(300.0, seed=42)
+        actual_next_poisson = np.random.random()
+        self.assertAlmostEqual(actual_next_poisson, expected_next_poisson)
 
     def test_load_real_scenarios_reads_historical_files(self):
         """Historical loader should ingest local CSV data when available."""

@@ -148,11 +148,17 @@ class MarketMakingEnv:
     - Penalty for extreme spreads
     """
 
-    def __init__(self, market_data: pd.DataFrame, episode_length: int = 1000):
+    def __init__(
+        self,
+        market_data: pd.DataFrame,
+        episode_length: int = 1000,
+        random_seed: Optional[int] = None,
+    ):
         self.market_data = market_data.reset_index(drop=True)
         self.episode_length = episode_length
         self.current_step = 0
         self.episode_start = 0
+        self.rng = np.random.default_rng(random_seed)
 
         # State normalization parameters
         self.price_mean = market_data['price'].mean()
@@ -172,7 +178,11 @@ class MarketMakingEnv:
 
     def reset(self) -> np.ndarray:
         """Reset environment for new episode."""
-        self.episode_start = np.random.randint(0, len(self.market_data) - self.episode_length - 100)
+        max_start = len(self.market_data) - self.episode_length - 100
+        if max_start <= 0:
+            self.episode_start = 0
+        else:
+            self.episode_start = int(self.rng.integers(0, max_start))
         self.current_step = 0
         self.position = 0.0
         self.cash = 0.0
@@ -240,9 +250,11 @@ class MarketMakingEnv:
             fill_prob_ask = float(np.clip(fill_prob_ask * volume_factor, 0.0, self.max_fill_probability))
 
             # Simulate bid fill (someone sells to our bid)
-            if np.random.random() < fill_prob_bid:
+            if float(self.rng.random()) < fill_prob_bid:
                 # Adverse selection: when we get filled on bid, price often moves down
-                adverse_move = np.random.normal(-recent_volatility * 0.01, recent_volatility * 0.02)
+                adverse_move = float(
+                    self.rng.normal(-recent_volatility * 0.01, recent_volatility * 0.02)
+                )
                 effective_price = mid_price * (1 + adverse_move)
                 fill_pnl = (effective_price - bid_price) * quote_size
                 self.cash -= bid_price * quote_size
@@ -253,9 +265,11 @@ class MarketMakingEnv:
                 info['bid_fill'] = True
 
             # Simulate ask fill (someone buys from our ask)
-            if np.random.random() < fill_prob_ask:
+            if float(self.rng.random()) < fill_prob_ask:
                 # Adverse selection: when we get filled on ask, price often moves up
-                adverse_move = np.random.normal(recent_volatility * 0.01, recent_volatility * 0.02)
+                adverse_move = float(
+                    self.rng.normal(recent_volatility * 0.01, recent_volatility * 0.02)
+                )
                 effective_price = mid_price * (1 + adverse_move)
                 fill_pnl = (ask_price - effective_price) * quote_size
                 self.cash += ask_price * quote_size
@@ -294,6 +308,13 @@ class MarketMakingEnv:
         """Compute current state vector."""
         idx = self.episode_start + self.current_step
         current = self.market_data.iloc[idx]
+
+        def _safe_value(column: str, default: float) -> float:
+            if column in self.market_data.columns:
+                value = float(current[column])
+                if np.isfinite(value):
+                    return value
+            return float(default)
 
         # Normalized features
         price_norm = (current['price'] - self.price_mean) / self.price_std
@@ -334,30 +355,51 @@ class MarketMakingEnv:
         vol_mean = float(vol_win.mean()) if len(vol_win) > 0 else 1.0
         vol_std = float(vol_win.std()) if len(vol_win) > 1 else 1.0
         volume_z = (vol_now - vol_mean) / (vol_std + 1e-8)
+        spread_bps = _safe_value("spread_bps", max(5.0, min(120.0, float(volatility * 25.0))))
+        imbalance = _safe_value("imbalance", np.clip(ret_1 * 50.0, -1.0, 1.0))
+
+        bid_vol = _safe_value("bid_volume_5", np.nan)
+        ask_vol = _safe_value("ask_volume_5", np.nan)
+        if not np.isfinite(bid_vol):
+            bid_vol = _safe_value("bid_volume", np.nan)
+        if not np.isfinite(ask_vol):
+            ask_vol = _safe_value("ask_volume", np.nan)
+        if not (np.isfinite(bid_vol) and np.isfinite(ask_vol)):
+            bid_norm = float(np.clip(0.5 + 0.5 * imbalance, 0.0, 1.0))
+            ask_norm = 1.0 - bid_norm
+        else:
+            bid_total = max(float(bid_vol), 0.0)
+            ask_total = max(float(ask_vol), 0.0)
+            denom = bid_total + ask_total + 1e-8
+            bid_norm = bid_total / denom
+            ask_norm = ask_total / denom
+
+        delta = _safe_value("delta", 0.0)
+        vega = _safe_value("vega", 0.0)
 
         state = np.array([
             price_norm,                       # 1
             inventory_norm,                   # 2
             volatility,                       # 3
             float(volatility),                # 4 volatility_20 proxy
-            0.0,                              # 5 imbalance placeholder
-            20.0 / 100.0,                     # 6 spread_bps normalized
+            float(imbalance),                 # 5 imbalance
+            spread_bps / 100.0,               # 6 spread_bps normalized
             float(ret_1),                     # 7
             float(ret_5),                     # 8
             float(ret_10),                    # 9
             float(momentum),                  # 10
             vol_now / (vol_mean + 1e-8),      # 11 volume ratio
             float(volume_z),                  # 12
-            0.5,                              # 13 bid volume norm placeholder
-            0.5,                              # 14 ask volume norm placeholder
+            float(bid_norm),                  # 13 bid volume norm
+            float(ask_norm),                  # 14 ask volume norm
             np.sign(self.position),           # 15
             abs(self.position) / 10.0,        # 16
             min(1.0, abs(self.position) / 10.0),  # 17 inventory utilization
             time_left,                        # 18
             float(realized_skew),             # 19
             float(realized_kurt),             # 20
-            0.0,                              # 21 delta placeholder
-            0.0,                              # 22 vega placeholder
+            float(delta),                     # 21 delta
+            float(vega),                      # 22 vega
         ], dtype=np.float32)
 
         return state

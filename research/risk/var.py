@@ -266,6 +266,7 @@ class VaRCalculator:
         returns: pd.DataFrame,
         holding_period: int = 1,
         lambda_param: float = 0.94,
+        random_seed: int | None = None,
     ) -> VaRResult:
         """
         Filtered Historical Simulation (FHS):
@@ -295,7 +296,7 @@ class VaRCalculator:
         standardized = portfolio_returns / cond_vol
         latest_vol = cond_vol[-1]
 
-        rng = np.random.default_rng(42)
+        rng = np.random.default_rng(random_seed)
         n_sim = max(5000, len(portfolio_returns) * 20)
         sampled_resid = rng.choice(standardized, size=n_sim, replace=True)
         simulated_returns = sampled_resid * latest_vol * np.sqrt(holding_period)

@@ -25,6 +25,7 @@ class ASConfig:
     inventory_saturation: float = 0.8   # How fast inventory penalty saturates
     enable_online_calibration: bool = False
     calibration_window: int = 60
+    annualization_periods: float = 365.25 * 24 * 3600
     min_sigma: float = 0.05
     max_sigma: float = 2.0
     min_k: float = 0.1
@@ -86,7 +87,9 @@ class AvellanedaStoikov(MarketMakingStrategy):
         self._trade_intensity_window.append(intensity)
 
         if len(self._returns_window) >= 5:
-            sigma_raw = float(np.std(self._returns_window, ddof=1)) * np.sqrt(365.25 * 24 * 3600)
+            sigma_raw = float(np.std(self._returns_window, ddof=1)) * np.sqrt(
+                max(self.config.annualization_periods, 1.0)
+            )
             if np.isfinite(sigma_raw):
                 self.config.sigma = float(np.clip(sigma_raw, self.config.min_sigma, self.config.max_sigma))
 
@@ -243,7 +246,9 @@ class ASWithVolatilityAdaptation(AvellanedaStoikov):
 
         # Calculate realized volatility
         if len(self._returns_history) >= 10:
-            realized_vol = np.std(self._returns_history) * np.sqrt(365 * 24)  # Annualized
+            realized_vol = np.std(self._returns_history) * np.sqrt(
+                max(self.config.annualization_periods, 1.0)
+            )
             self.config.sigma = max(0.1, min(2.0, realized_vol))  # Clamp between 10% and 200%
 
         return super().quote(state, position)
