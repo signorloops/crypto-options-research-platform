@@ -92,13 +92,20 @@ class VPINCalculator:
         bucket_timestamps, buy_arr, sell_arr, total_arr = self._create_volume_buckets(df)
 
         if len(total_arr) < self.num_buckets:
-            # Not enough buckets, return neutral values
-            volume = df['size'] * df['price']
+            # Not enough buckets: use observed flow imbalance as fallback toxicity.
+            volume = np.maximum(df['size'].to_numpy(dtype=float) * df['price'].to_numpy(dtype=float), 0.0)
+            is_buy = df['side'].to_numpy() == 'buy'
+            buy_vol = np.where(is_buy, volume, 0.0)
+            sell_vol = np.where(is_buy, 0.0, volume)
+            total_vol = float(np.sum(volume))
+            fallback_vpin = 0.0
+            if total_vol > 0:
+                fallback_vpin = float(np.clip(np.abs(np.sum(buy_vol) - np.sum(sell_vol)) / total_vol, 0.0, 1.0))
             return VPINResult(
                 timestamps=df['timestamp'].values,
-                vpin_values=np.full(len(df), 0.5),
-                buy_volumes=volume.where(df['side'] == 'buy', 0).values,
-                sell_volumes=volume.where(df['side'] == 'sell', 0).values,
+                vpin_values=np.full(len(df), fallback_vpin),
+                buy_volumes=buy_vol,
+                sell_volumes=sell_vol,
                 volume_buckets=np.zeros(len(df))
             )
 
@@ -120,7 +127,8 @@ class VPINCalculator:
         window_total = cum_total[idx + 1] - cum_total[starts]
         window_imbalance = cum_imbalance[idx + 1] - cum_imbalance[starts]
         safe_total = np.where(window_total > 0, window_total, 1.0)
-        computed = np.where(window_total > 0, window_imbalance / (2.0 * safe_total), 0.0)
+        computed = np.where(window_total > 0, window_imbalance / safe_total, 0.0)
+        computed = np.clip(computed, 0.0, 1.0)
         vpin_values[valid] = computed[valid]
 
         return VPINResult(

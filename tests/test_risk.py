@@ -195,6 +195,48 @@ class TestGreeksRiskAnalyzer:
         # Portfolio should have net Greeks from both positions
         assert portfolio_greeks["BTC"].delta != 0
 
+    def test_inverse_portfolio_uses_tuple_implied_vol_for_usd_conversion(self, monkeypatch):
+        """Inverse conversion path should not rescan tuples to recover IV."""
+        analyzer = GreeksRiskAnalyzer(risk_free_rate=0.05)
+        as_of = datetime.now(timezone.utc)
+
+        captured = {}
+
+        def fake_price(S, K, T, r, sigma, option_type):
+            captured["sigma"] = sigma
+            return 0.001
+
+        monkeypatch.setattr(
+            "research.pricing.inverse_options.InverseOptionPricer.calculate_price",
+            staticmethod(fake_price),
+        )
+        monkeypatch.setattr(
+            Position,
+            "__eq__",
+            lambda self, other: (_ for _ in ()).throw(
+                AssertionError("analyze_portfolio should not rescan positions for IV")
+            ),
+        )
+
+        implied_vol = 0.27
+        positions = [
+            (
+                Position(instrument="BTC-CALL-100", size=1.0, avg_entry_price=5.0),
+                OptionContract(
+                    underlying="BTC-USD",
+                    strike=100.0,
+                    expiry=as_of + timedelta(days=30),
+                    option_type=OptionType.CALL,
+                    inverse=True,
+                ),
+                100.0,
+                implied_vol,
+            )
+        ]
+
+        analyzer.analyze_portfolio(positions, as_of)
+        assert captured["sigma"] == pytest.approx(implied_vol)
+
     def test_find_hedge_ratio(self):
         """Test hedge ratio calculation."""
         analyzer = GreeksRiskAnalyzer(risk_free_rate=0.05)

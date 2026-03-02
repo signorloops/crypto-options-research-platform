@@ -530,6 +530,101 @@ class TestMarkedHawkesControls(unittest.TestCase):
         self.assertIn("intensity", quote.metadata["control_signals"])
         self.assertIn("flow_imbalance", quote.metadata["control_signals"])
 
+    def test_quote_ingests_distinct_same_timestamp_trades(self):
+        """Trades sharing timestamp but different trade_id should all be ingested."""
+        strategy = HawkesMarketMaker(HawkesMMConfig())
+        ts = datetime(2024, 1, 1, 0, 0, 0)
+        order_book = OrderBook(
+            timestamp=ts,
+            instrument="BTC-USD",
+            bids=[OrderBookLevel(price=49995.0, size=2.0)],
+            asks=[OrderBookLevel(price=50005.0, size=2.0)],
+        )
+        recent_trades = [
+            Trade(
+                timestamp=ts,
+                instrument="BTC-USD",
+                price=50000.0,
+                size=1.0,
+                side=OrderSide.BUY,
+                trade_id="t-1",
+            ),
+            Trade(
+                timestamp=ts,
+                instrument="BTC-USD",
+                price=50000.5,
+                size=1.2,
+                side=OrderSide.SELL,
+                trade_id="t-2",
+            ),
+        ]
+        state = MarketState(
+            timestamp=ts + timedelta(seconds=1),
+            instrument="BTC-USD",
+            spot_price=50000.0,
+            order_book=order_book,
+            recent_trades=recent_trades,
+        )
+
+        strategy.quote(state, Position("BTC-USD", 0.0, 0.0))
+        self.assertEqual(strategy.trade_count, 2)
+
+    def test_quote_does_not_double_count_sliding_trade_window(self):
+        """Repeated recent_trades windows should only ingest newly seen trades."""
+        strategy = HawkesMarketMaker(HawkesMMConfig())
+        ts = datetime(2024, 1, 1, 0, 0, 0)
+        order_book = OrderBook(
+            timestamp=ts,
+            instrument="BTC-USD",
+            bids=[OrderBookLevel(price=49995.0, size=2.0)],
+            asks=[OrderBookLevel(price=50005.0, size=2.0)],
+        )
+
+        trade1 = Trade(
+            timestamp=ts,
+            instrument="BTC-USD",
+            price=50000.0,
+            size=1.0,
+            side=OrderSide.BUY,
+            trade_id="t-1",
+        )
+        trade2 = Trade(
+            timestamp=ts + timedelta(milliseconds=100),
+            instrument="BTC-USD",
+            price=50000.5,
+            size=1.2,
+            side=OrderSide.SELL,
+            trade_id="t-2",
+        )
+        trade3 = Trade(
+            timestamp=ts + timedelta(milliseconds=200),
+            instrument="BTC-USD",
+            price=50001.0,
+            size=0.9,
+            side=OrderSide.BUY,
+            trade_id="t-3",
+        )
+
+        state1 = MarketState(
+            timestamp=ts + timedelta(seconds=1),
+            instrument="BTC-USD",
+            spot_price=50000.0,
+            order_book=order_book,
+            recent_trades=[trade1, trade2],
+        )
+        strategy.quote(state1, Position("BTC-USD", 0.0, 0.0))
+
+        state2 = MarketState(
+            timestamp=ts + timedelta(seconds=2),
+            instrument="BTC-USD",
+            spot_price=50000.0,
+            order_book=order_book,
+            recent_trades=[trade1, trade2, trade3],
+        )
+        strategy.quote(state2, Position("BTC-USD", 0.0, 0.0))
+
+        self.assertEqual(strategy.trade_count, 3)
+
     def test_metrics_collector_workflow(self):
         """Test complete metrics collection workflow."""
         collector = HawkesMetricsCollector()

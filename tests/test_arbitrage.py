@@ -32,6 +32,11 @@ class TestCrossExchangeArbitrage:
         assert strategy.min_spread_bps == 50.0
         assert strategy.min_profit_pct == 0.1
 
+    def test_default_profit_threshold_uses_decimal_fraction(self):
+        """Default min_profit_pct should represent 0.1% as 0.001."""
+        strategy = CrossExchangeArbitrage()
+        assert strategy.min_profit_pct == pytest.approx(0.001)
+
     def test_set_exchange_fees(self):
         """Test setting exchange fees."""
         strategy = CrossExchangeArbitrage()

@@ -331,6 +331,36 @@ class HawkesMarketMaker(MarketMakingStrategy):
         self.last_trade_time: Optional[float] = None
         self.last_price: Optional[float] = None
         self.trade_count: int = 0
+        self._seen_trade_keys: set = set()
+        self._seen_trade_order: deque = deque()
+        self._seen_trade_key_limit: int = max(2000, self.config.estimation_window * 50)
+
+    def _build_trade_key(self, trade) -> Tuple:
+        """Build a stable key for deduplicating trade ingestion across quote calls."""
+        trade_id = getattr(trade, "trade_id", None)
+        if trade_id not in (None, ""):
+            return ("id", str(trade_id))
+
+        ts = trade.timestamp.timestamp() if hasattr(trade.timestamp, "timestamp") else float(trade.timestamp)
+        side_val = trade.side.value if hasattr(trade.side, "value") else trade.side
+        return (
+            "fallback",
+            str(getattr(trade, "instrument", "")),
+            float(ts),
+            float(getattr(trade, "price", 0.0)),
+            float(getattr(trade, "size", 1.0)),
+            str(side_val),
+        )
+
+    def _remember_trade_key(self, key: Tuple) -> None:
+        """Track recently ingested trades with bounded memory."""
+        if key in self._seen_trade_keys:
+            return
+        if len(self._seen_trade_order) >= self._seen_trade_key_limit:
+            oldest = self._seen_trade_order.popleft()
+            self._seen_trade_keys.discard(oldest)
+        self._seen_trade_order.append(key)
+        self._seen_trade_keys.add(key)
 
     def _compute_dynamic_spread(self, intensity: float, inventory: float) -> float:
         """Compute dynamic spread based on market intensity and inventory.
@@ -414,13 +444,16 @@ class HawkesMarketMaker(MarketMakingStrategy):
         # Update monitor with recent trades from market data if available
         if hasattr(state, 'recent_trades') and state.recent_trades:
             for trade in state.recent_trades:
-                if trade.timestamp != self.last_trade_time:
-                    side_val = trade.side.value if hasattr(trade.side, "value") else trade.side
-                    direction = 1 if side_val == 'buy' else -1 if side_val == 'sell' else 0
-                    trade_ts = trade.timestamp.timestamp() if hasattr(trade.timestamp, "timestamp") else float(trade.timestamp)
-                    self.monitor.add_trade(trade_ts, direction, size=float(getattr(trade, "size", 1.0)))
-                    self.last_trade_time = trade.timestamp
-                    self.trade_count += 1
+                trade_key = self._build_trade_key(trade)
+                if trade_key in self._seen_trade_keys:
+                    continue
+                side_val = trade.side.value if hasattr(trade.side, "value") else trade.side
+                direction = 1 if side_val == 'buy' else -1 if side_val == 'sell' else 0
+                trade_ts = trade.timestamp.timestamp() if hasattr(trade.timestamp, "timestamp") else float(trade.timestamp)
+                self.monitor.add_trade(trade_ts, direction, size=float(getattr(trade, "size", 1.0)))
+                self._remember_trade_key(trade_key)
+                self.last_trade_time = trade.timestamp
+                self.trade_count += 1
 
         # Compute current intensity
         intensity = self.monitor.get_intensity(current_time)

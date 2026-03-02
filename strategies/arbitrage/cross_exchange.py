@@ -58,7 +58,7 @@ class CrossExchangeArbitrage:
     def __init__(
         self,
         min_spread_bps: float = 50.0,  # 最小价差阈值 (基点)
-        min_profit_pct: float = 0.1,  # 最小利润率 (%)
+        min_profit_pct: float = 0.001,  # 最小净利润率（小数），0.001 = 0.1%
         max_position_size: float = 1.0,  # 最大头寸
         slippage_coeff: float = 0.00005,  # 滑点系数 (每单位仓位)
     ):
@@ -182,7 +182,7 @@ class CrossExchangeArbitrage:
         slippage = self._estimate_slippage_pct(self.max_position_size)
 
         # 计算净利润
-        profit_pct = (sell_price - buy_price) / buy_price - total_fee - slippage
+        profit_pct = (sell_price - buy_price) / buy_price - total_fee - slippage  # decimal fraction
 
         # 检查阈值
         if spread_bps >= self.min_spread_bps and profit_pct >= self.min_profit_pct:

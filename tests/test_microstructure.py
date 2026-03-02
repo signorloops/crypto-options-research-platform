@@ -147,6 +147,34 @@ class TestVPINCalculator:
         assert result.vpin_values.max() <= 1.0
         assert result.vpin_values.min() >= 0.0
 
+    def test_vpin_reaches_one_under_all_one_sided_flow(self):
+        """All-buy buckets should produce VPIN close to 1.0, not compressed to 0.5."""
+        calc = VPINCalculator(volume_bucket_size=100.0, num_buckets=4)
+        trades = pd.DataFrame(
+            {
+                "timestamp": pd.date_range("2024-01-01", periods=8, freq="1min"),
+                "price": np.full(8, 10.0),
+                "size": np.full(8, 10.0),  # each trade volume = 100 => one full bucket
+                "side": ["buy"] * 8,
+            }
+        )
+        result = calc.calculate(trades)
+        assert result.vpin_values[-1] == pytest.approx(1.0, abs=1e-9)
+
+    def test_insufficient_data_fallback_uses_flow_imbalance(self):
+        """Insufficient-bucket fallback should reflect observed buy/sell imbalance."""
+        calc = VPINCalculator(volume_bucket_size=1_000_000.0, num_buckets=10)
+        trades = pd.DataFrame(
+            {
+                "timestamp": pd.date_range("2024-01-01", periods=6, freq="1min"),
+                "price": np.full(6, 100.0),
+                "size": np.full(6, 1.0),
+                "side": ["buy"] * 6,
+            }
+        )
+        result = calc.calculate(trades)
+        assert np.allclose(result.vpin_values, 1.0)
+
     def test_vpin_result_get_high_toxicity_periods(self):
         """Test VPINResult.get_high_toxicity_periods method."""
         calc = VPINCalculator(volume_bucket_size=100, num_buckets=10)

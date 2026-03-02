@@ -163,6 +163,13 @@ class MarketMakingEnv:
         self.cash = 0.0
         self.trades: List[Dict] = []
 
+        # Action/fill safety bounds for stable simulation.
+        self.min_offset_bps = 1.0
+        self.max_offset_bps = 200.0
+        self.min_size_scale = 0.1
+        self.max_size_scale = 5.0
+        self.max_fill_probability = 0.99
+
     def reset(self) -> np.ndarray:
         """Reset environment for new episode."""
         self.episode_start = np.random.randint(0, len(self.market_data) - self.episode_length - 100)
@@ -179,7 +186,7 @@ class MarketMakingEnv:
 
         Action: [bid_offset_bps, ask_offset_bps, size_scale]
         """
-        bid_offset, ask_offset, size_scale = action
+        bid_offset, ask_offset, size_scale = self._sanitize_action(action)
 
         # Convert offsets to actual prices
         current_data = self.market_data.iloc[self.episode_start + self.current_step]
@@ -187,7 +194,7 @@ class MarketMakingEnv:
 
         bid_price = mid_price * (1 - bid_offset / 10000)
         ask_price = mid_price * (1 + ask_offset / 10000)
-        quote_size = max(0.1, size_scale)
+        quote_size = size_scale
 
         # Simulate fills based on market data
         # Use historical trades or price movements to determine fill probability
@@ -196,7 +203,13 @@ class MarketMakingEnv:
         done = next_step >= self.episode_length
 
         reward = 0.0
-        info = {'fills': 0, 'pnl': 0.0}
+        info = {
+            'fills': 0,
+            'pnl': 0.0,
+            'applied_bid_offset_bps': bid_offset,
+            'applied_ask_offset_bps': ask_offset,
+            'applied_size_scale': size_scale,
+        }
 
         if not done:
             # Instead of using next_price (look-ahead bias),
@@ -222,8 +235,9 @@ class MarketMakingEnv:
             fill_prob_ask = max(0.05, min(0.6, 0.3 * (20 / max(ask_offset, 5))))
 
             # Adjust for market conditions
-            fill_prob_bid *= min(2.0, recent_volume)
-            fill_prob_ask *= min(2.0, recent_volume)
+            volume_factor = min(2.0, max(0.0, float(recent_volume))) if np.isfinite(recent_volume) else 1.0
+            fill_prob_bid = float(np.clip(fill_prob_bid * volume_factor, 0.0, self.max_fill_probability))
+            fill_prob_ask = float(np.clip(fill_prob_ask * volume_factor, 0.0, self.max_fill_probability))
 
             # Simulate bid fill (someone sells to our bid)
             if np.random.random() < fill_prob_bid:
@@ -264,6 +278,17 @@ class MarketMakingEnv:
         next_state = self._get_state()
 
         return next_state, reward, done, info
+
+    def _sanitize_action(self, action: np.ndarray) -> Tuple[float, float, float]:
+        """Clip policy outputs to simulation-safe quoting bounds."""
+        arr = np.asarray(action, dtype=float).reshape(-1)
+        if arr.size != 3:
+            raise ValueError(f"Expected 3 action values, got {arr.size}")
+
+        bid_offset = float(np.clip(arr[0], self.min_offset_bps, self.max_offset_bps))
+        ask_offset = float(np.clip(arr[1], self.min_offset_bps, self.max_offset_bps))
+        size_scale = float(np.clip(arr[2], self.min_size_scale, self.max_size_scale))
+        return bid_offset, ask_offset, size_scale
 
     def _get_state(self) -> np.ndarray:
         """Compute current state vector."""

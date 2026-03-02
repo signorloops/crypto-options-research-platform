@@ -276,20 +276,16 @@ class GreeksRiskAnalyzer:
                     # Where V_BTC is the option price in BTC, Delta_BTC is dV/dS in BTC^2/USD
                     # Gamma_USD conversion: Gamma_BTC * S^3 (verified by dimensional analysis)
                     spot_safe = max(spot, 1e-6)
+                    iv_safe = float(iv)
+                    if not np.isfinite(iv_safe) or iv_safe <= 0:
+                        iv_safe = 1e-6
 
                     # Calculate option price for correct Delta conversion
                     from research.pricing.inverse_options import InverseOptionPricer
                     T = contract.time_to_expiry(as_of)
                     option_type = 'call' if contract.option_type.value == 'C' else 'put'
-                    # Get IV from the tuple (position, contract, spot, iv)
-                    # Find matching position data to get IV
-                    iv = 0.6  # default value
-                    for pos, contr, s, implied in currency_positions:
-                        if contr == contract and pos == position:
-                            iv = implied
-                            break
                     price_btc = InverseOptionPricer.calculate_price(
-                        spot_safe, contract.strike, T, self.risk_free_rate, iv, option_type
+                        spot_safe, contract.strike, T, self.risk_free_rate, iv_safe, option_type
                     )
 
                     # Correct USD Delta: V_BTC + S * Delta_BTC (in BTC, then convert to USD)
