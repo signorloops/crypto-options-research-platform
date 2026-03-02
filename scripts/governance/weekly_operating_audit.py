@@ -639,7 +639,7 @@ def _build_report(
         incomplete_tasks.append("回滚版本已标记")
     if checklist["minimum_regression_passed"] is not True:
         incomplete_tasks.append("最小回归通过")
-    if checklist["performance_baseline_passed"] is not True:
+    if performance_required and checklist["performance_baseline_passed"] is not True:
         incomplete_tasks.append("性能基线达标")
     if not checklist["consistency_check_completed"]:
         incomplete_tasks.append("一致性检查完成")

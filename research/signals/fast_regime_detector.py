@@ -199,6 +199,7 @@ class FastVolatilityRegimeDetector:
         try:
             result = future.result(timeout=self.config.hmm_timeout_ms / 1000.0)
             if isinstance(result, Exception):
+                logger.debug("Fast HMM inference failed; fallback to threshold", extra={"error": str(result)})
                 return None
             hidden_state, posteriors = result
         except concurrent.futures.TimeoutError:
@@ -257,7 +258,7 @@ class FastVolatilityRegimeDetector:
                             from sklearn.exceptions import ConvergenceWarning
 
                             warnings.filterwarnings("ignore", category=ConvergenceWarning)
-                        except Exception:
+                        except ImportError:
                             warnings.filterwarnings("ignore", message=".*converge.*")
                         self._hmm_model.fit(returns)
                     # Sort states by volatility so 0=LOW, 1=MEDIUM, 2=HIGH
@@ -355,7 +356,7 @@ class FastVolatilityRegimeDetector:
                 return 0.0
             stay_prob = transmat[current_idx, current_idx]
             return 1.0 - stay_prob
-        except Exception:
+        except (AttributeError, TypeError, ValueError, IndexError):
             return 0.0
 
     def get_spread_adjustment(self) -> float:

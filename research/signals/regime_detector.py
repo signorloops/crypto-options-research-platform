@@ -203,7 +203,7 @@ class VolatilityRegimeDetector:
                     from sklearn.exceptions import ConvergenceWarning
 
                     warnings.filterwarnings("ignore", category=ConvergenceWarning)
-                except Exception:
+                except ImportError:
                     warnings.filterwarnings("ignore", message=".*converge.*")
                 self.model.fit(X_norm)
 

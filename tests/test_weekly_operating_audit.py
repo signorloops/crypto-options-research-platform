@@ -335,6 +335,39 @@ def test_build_report_requires_performance_baseline_when_requested(tmp_path):
     assert "性能基线达标" in report["incomplete_tasks"]
 
 
+def test_build_report_does_not_require_performance_by_default(tmp_path):
+    module = _load_module()
+    result_path = tmp_path / "results" / "backtest_results_perf_optional.json"
+    _write(
+        result_path,
+        json.dumps(
+            {
+                "Stable": {
+                    "summary": {
+                        "total_pnl": 110.0,
+                        "sharpe_ratio": 1.0,
+                        "max_drawdown": -0.09,
+                    }
+                }
+            }
+        ),
+    )
+
+    report = module._build_report(
+        [result_path],
+        dict(module.DEFAULT_THRESHOLDS),
+        performance_result={
+            "executed": False,
+            "summary": {"all_passed": None},
+            "error": "missing_performance_json",
+        },
+        performance_required=False,
+    )
+
+    assert report["checklist"]["performance_baseline_passed"] is None
+    assert "性能基线达标" not in report["incomplete_tasks"]
+
+
 def test_main_strict_exits_nonzero_when_consistency_exceptions_exist(tmp_path, monkeypatch):
     module = _load_module()
     older = tmp_path / "results" / "backtest_results_old2.json"
