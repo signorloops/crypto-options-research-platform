@@ -92,6 +92,7 @@ class OrderBookReconstructor:
                     try:
                         callback(self.state.last_sequence, delta.sequence)
                     except Exception as e:
+                        # Gap callbacks are external hooks; preserve reconstruction control flow.
                         logger.error(f"Gap callback error: {e}")
 
                 return False

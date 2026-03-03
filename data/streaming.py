@@ -90,6 +90,7 @@ class WebSocketStream(ABC):
                 else:
                     callback(data)
             except Exception as e:
+                # Callback handlers are user-supplied; isolate failures per callback.
                 logger.error(f"Error in {event_type} callback: {e}")
 
     async def connect(self, instruments: List[str]) -> None:
@@ -184,6 +185,7 @@ class WebSocketStream(ABC):
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
+                    # Keep consumer loop alive even if one payload processing step fails.
                     logger.error(f"Error processing message: {e}")
 
         # Run producer and consumer concurrently
@@ -653,6 +655,7 @@ class MultiExchangeStream:
             except asyncio.CancelledError:
                 pass
             except Exception as exc:
+                # Async callbacks are extension points and should not crash stream fanout.
                 logger.error(f"Async {event_type} callback failed for {exchange}: {exc}")
 
         task.add_done_callback(_on_done)
@@ -666,6 +669,7 @@ class MultiExchangeStream:
                     task = asyncio.create_task(result)
                     self._track_callback_task(task, event_type, exchange)
             except Exception as e:
+                # Synchronous callback failures are isolated per callback.
                 logger.error(f"Error in {event_type} callback: {e}")
 
     def add_callback(self, event_type: str, callback: Callable) -> None:

@@ -594,6 +594,7 @@ class GreeksCacheManager:
                         5.0, self._fetch_cache.pop, instrument, None
                     )
             except Exception as e:
+                # fetch_func is caller-supplied; keep cache manager resilient to callback failures.
                 logger.error(
                     "Failed to fetch Greeks",
                     extra=log_extra(instrument=instrument, error=str(e))
@@ -613,6 +614,7 @@ class GreeksCacheManager:
             if greeks:
                 await self.redis.set_greeks(instrument, greeks)
         except Exception as e:
+            # Background refresh must not crash caller control flow on fetch callback failures.
             logger.warning(
                 "Greeks refresh failed",
                 extra=log_extra(instrument=instrument, error=str(e))
