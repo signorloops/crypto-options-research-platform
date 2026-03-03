@@ -4,17 +4,24 @@
 from __future__ import annotations
 
 import argparse
-import json
+import sys
 from pathlib import Path
 from typing import Any
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.governance.report_utils import load_json_object as _load_json_shared
+from scripts.governance.report_utils import write_markdown as _write_markdown_shared
+
 
 def _load_report(path: Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError(f"Invalid audit report JSON: {path}")
-    return data
+    return _load_json_shared(path)
+
+
+def _write_markdown(path: Path, content: str) -> None:
+    _write_markdown_shared(path, content)
 
 
 def _fmt_bool(value: Any) -> str:
@@ -128,8 +135,7 @@ def main() -> int:
     report = _load_report(audit_path)
     markdown = _build_markdown(report, owner=args.owner)
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(markdown, encoding="utf-8")
+    _write_markdown(output_path, markdown)
     print(f"Generated ADR draft: {output_path}")
     return 0
 
