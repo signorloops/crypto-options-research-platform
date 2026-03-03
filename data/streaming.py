@@ -73,6 +73,14 @@ class WebSocketStream(ABC):
         if event_type in self._callbacks and callback in self._callbacks[event_type]:
             self._callbacks[event_type].remove(callback)
 
+    def _next_reconnect_backoff(self) -> float:
+        """Increment reconnect count and return exponential backoff seconds."""
+        self._reconnect_count += 1
+        return min(
+            self.config.reconnect_interval * (2 ** (self._reconnect_count - 1)),
+            60.0,  # Max 60 second backoff
+        )
+
     async def _emit(self, event_type: str, data: Any) -> None:
         """Emit event to all registered callbacks."""
         for callback in self._callbacks.get(event_type, []):
@@ -114,12 +122,7 @@ class WebSocketStream(ABC):
                 if not self._running:
                     break
                 logger.warning("Connection closed, reconnecting...")
-                self._reconnect_count += 1
-                # Exponential backoff with max limit
-                backoff = min(
-                    self.config.reconnect_interval * (2 ** (self._reconnect_count - 1)),
-                    60.0  # Max 60 second backoff
-                )
+                backoff = self._next_reconnect_backoff()
                 logger.info(f"Reconnecting in {backoff:.1f}s (attempt {self._reconnect_count})")
                 await asyncio.sleep(backoff)
 
@@ -129,12 +132,7 @@ class WebSocketStream(ABC):
 
             except STREAM_CONNECTION_EXCEPTIONS as e:
                 logger.error(f"WebSocket error: {e}")
-                self._reconnect_count += 1
-                # Exponential backoff with max limit
-                backoff = min(
-                    self.config.reconnect_interval * (2 ** (self._reconnect_count - 1)),
-                    60.0
-                )
+                backoff = self._next_reconnect_backoff()
                 await asyncio.sleep(backoff)
 
     async def _handle_messages(self, websocket: Any) -> None:
@@ -444,20 +442,12 @@ class DeribitStream(WebSocketStream):
 
             except ConnectionClosed:
                 logger.warning("Connection closed, reconnecting...")
-                self._reconnect_count += 1
-                backoff = min(
-                    self.config.reconnect_interval * (2 ** (self._reconnect_count - 1)),
-                    60.0
-                )
+                backoff = self._next_reconnect_backoff()
                 await asyncio.sleep(backoff)
 
             except STREAM_CONNECTION_EXCEPTIONS as e:
                 logger.error(f"WebSocket error: {e}")
-                self._reconnect_count += 1
-                backoff = min(
-                    self.config.reconnect_interval * (2 ** (self._reconnect_count - 1)),
-                    60.0
-                )
+                backoff = self._next_reconnect_backoff()
                 await asyncio.sleep(backoff)
 
 
@@ -617,20 +607,12 @@ class OKXStream(WebSocketStream):
 
             except ConnectionClosed:
                 logger.warning("Connection closed, reconnecting...")
-                self._reconnect_count += 1
-                backoff = min(
-                    self.config.reconnect_interval * (2 ** (self._reconnect_count - 1)),
-                    60.0
-                )
+                backoff = self._next_reconnect_backoff()
                 await asyncio.sleep(backoff)
 
             except STREAM_CONNECTION_EXCEPTIONS as e:
                 logger.error(f"WebSocket error: {e}")
-                self._reconnect_count += 1
-                backoff = min(
-                    self.config.reconnect_interval * (2 ** (self._reconnect_count - 1)),
-                    60.0
-                )
+                backoff = self._next_reconnect_backoff()
                 await asyncio.sleep(backoff)
 
 
