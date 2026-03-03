@@ -5,14 +5,13 @@ Build a compact weekly Markdown summary from research-audit artifacts.
 from __future__ import annotations
 
 import argparse
-import json
 import os
 from typing import Any
 
-
-def _load_json(path: str) -> dict[str, Any]:
-    with open(path, "r", encoding="utf-8") as file_obj:
-        return json.load(file_obj)
+from validation_scripts.io_utils import (
+    load_json as _load_json,
+    write_text as _write_text,
+)
 
 
 def render_weekly_summary(
@@ -137,11 +136,7 @@ def main() -> None:
         ),
     )
 
-    directory = os.path.dirname(args.output_md)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-    with open(args.output_md, "w", encoding="utf-8") as file_obj:
-        file_obj.write(markdown)
+    _write_text(args.output_md, markdown)
 
     print(f"weekly_summary_md={args.output_md}")
 

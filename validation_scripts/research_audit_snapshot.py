@@ -6,17 +6,14 @@ from __future__ import annotations
 
 import argparse
 import io
-import json
-import os
 from datetime import datetime, timezone
 from typing import Any
 
 import pandas as pd
-
-
-def _load_json(path: str) -> dict[str, Any]:
-    with open(path, "r", encoding="utf-8") as file_obj:
-        return json.load(file_obj)
+from validation_scripts.io_utils import (
+    load_json as _load_json,
+    write_json as _write_json,
+)
 
 
 def parse_rough_jump_report(path: str) -> dict[str, dict[str, float]]:
@@ -107,12 +104,7 @@ def main() -> None:
         iv_report=iv_report, model_report=model_report, rough_jump_by_mode=rough_jump
     )
 
-    directory = os.path.dirname(args.output_json)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-    with open(args.output_json, "w", encoding="utf-8") as file_obj:
-        json.dump(snapshot, file_obj, indent=2, ensure_ascii=False)
-        file_obj.write("\n")
+    _write_json(args.output_json, snapshot)
 
     print(f"snapshot_json={args.output_json}")
 
