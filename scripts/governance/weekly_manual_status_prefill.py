@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -17,6 +16,7 @@ from scripts.governance.report_utils import load_json_object as _load_json_share
 from scripts.governance.report_utils import (
     as_bool as _as_bool_shared,
     load_optional_json_object as _load_optional_json_shared,
+    write_json as _write_json_shared,
 )
 
 MANUAL_KEYS: list[str] = [
@@ -41,6 +41,10 @@ def _load_optional_json(path: Path) -> dict[str, Any]:
 
 def _as_bool(value: Any) -> bool:
     return _as_bool_shared(value)
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    _write_json_shared(path, payload)
 
 
 def _as_int(value: Any) -> int | None:
@@ -137,10 +141,7 @@ def main() -> int:
     prefill = _derive_autofill(decision, attribution)
     updated_status, changed_keys = _apply_prefill(status, prefill)
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        json.dumps(updated_status, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    _write_json(output_path, updated_status)
 
     changed_text = ", ".join(changed_keys) if changed_keys else "none"
     print("Weekly manual status prefill: " f"updated_keys={changed_text}, output={output_path}")

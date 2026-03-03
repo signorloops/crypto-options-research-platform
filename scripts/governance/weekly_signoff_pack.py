@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +17,8 @@ from scripts.governance.report_utils import load_json_object as _load_json_share
 from scripts.governance.report_utils import (
     as_bool as _as_bool_shared,
     load_optional_json_object as _load_optional_json_shared,
+    write_json as _write_json_shared,
+    write_markdown as _write_markdown_shared,
 )
 
 MANUAL_ITEMS: list[tuple[str, str]] = [
@@ -60,6 +61,14 @@ def _load_optional_json(path: Path) -> dict[str, Any]:
 
 def _as_bool(value: Any) -> bool:
     return _as_bool_shared(value)
+
+
+def _write_markdown(path: Path, content: str) -> None:
+    _write_markdown_shared(path, content)
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    _write_json_shared(path, payload)
 
 
 def _normalize_manual_status(raw: dict[str, Any]) -> dict[str, Any]:
@@ -310,11 +319,7 @@ def main() -> int:
     manual_status_path = Path(args.manual_status_json).resolve()
     consistency_replay = _load_optional_json(Path(args.consistency_replay_json).resolve())
     if not manual_status_path.exists():
-        manual_status_path.parent.mkdir(parents=True, exist_ok=True)
-        manual_status_path.write_text(
-            json.dumps(_default_manual_status_template(), indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        _write_json(manual_status_path, _default_manual_status_template())
     manual_status = _load_optional_json(manual_status_path)
 
     report = _build_report(
@@ -328,10 +333,8 @@ def main() -> int:
 
     output_md = Path(args.output_md).resolve()
     output_json = Path(args.output_json).resolve()
-    output_md.parent.mkdir(parents=True, exist_ok=True)
-    output_json.parent.mkdir(parents=True, exist_ok=True)
-    output_md.write_text(_to_markdown(report), encoding="utf-8")
-    output_json.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    _write_markdown(output_md, _to_markdown(report))
+    _write_json(output_json, report)
 
     print(f"Weekly sign-off pack: {report['status']}.")
     if args.strict and report["status"] != "READY_FOR_CLOSE":
