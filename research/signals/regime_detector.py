@@ -17,6 +17,16 @@ from hmmlearn import hmm
 
 logger = logging.getLogger(__name__)
 
+REGIME_TRAINING_EXCEPTIONS = (
+    ValueError,
+    TypeError,
+    RuntimeError,
+    AttributeError,
+    IndexError,
+    np.linalg.LinAlgError,
+    FloatingPointError,
+)
+
 
 class RegimeState(Enum):
     """Volatility regime states."""
@@ -229,7 +239,7 @@ class VolatilityRegimeDetector:
             self._training_failures = 0
             self._last_training_error = ""
             return True
-        except Exception as e:
+        except REGIME_TRAINING_EXCEPTIONS as e:
             # Model fitting failed, will retry later
             self._training_failures += 1
             self._last_training_error = str(e)

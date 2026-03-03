@@ -27,6 +27,16 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+HMM_RUNTIME_EXCEPTIONS = (
+    ValueError,
+    TypeError,
+    RuntimeError,
+    AttributeError,
+    IndexError,
+    np.linalg.LinAlgError,
+    FloatingPointError,
+)
+
 
 class RegimeState(Enum):
     """Volatility regime states."""
@@ -188,7 +198,7 @@ class FastVolatilityRegimeDetector:
                 hidden_state = self._hmm_model.predict(X)[0]
                 _, posteriors = self._hmm_model.score_samples(X)
                 return hidden_state, posteriors[0]
-            except Exception as e:
+            except HMM_RUNTIME_EXCEPTIONS as e:
                 return e
 
         if self._inference_executor is None:
@@ -269,7 +279,7 @@ class FastVolatilityRegimeDetector:
                     self._hmm_fitted = True
                     self._hmm_last_train = self._hmm_sample_count
 
-            except Exception:
+            except HMM_RUNTIME_EXCEPTIONS:
                 # 训练失败时保留当前状态并记录可观测日志.
                 logger.exception("Fast HMM training failed; keeping previous regime model")
             finally:

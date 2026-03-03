@@ -21,6 +21,14 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+OKX_STREAM_EXCEPTIONS = (
+    OSError,
+    RuntimeError,
+    asyncio.TimeoutError,
+    ValueError,
+    TypeError,
+)
+
 
 class OKXAPIError(Exception):
     """OKX API error."""
@@ -62,7 +70,7 @@ class OKXClient(ExchangeInterface):
         for stream in self._active_streams:
             try:
                 await stream.disconnect()
-            except Exception as exc:
+            except OKX_STREAM_EXCEPTIONS as exc:
                 logger.warning(
                     "Failed to disconnect OKX stream",
                     extra=log_extra(error=str(exc)),
@@ -550,7 +558,7 @@ class OKXClient(ExchangeInterface):
         try:
             await stream.connect()
             self._active_streams.append(stream)
-        except Exception:
+        except OKX_STREAM_EXCEPTIONS:
             logger.exception(
                 "Failed to subscribe %s stream",
                 stream_kind,
@@ -558,7 +566,7 @@ class OKXClient(ExchangeInterface):
             )
             try:
                 await stream.disconnect()
-            except Exception as cleanup_exc:
+            except OKX_STREAM_EXCEPTIONS as cleanup_exc:
                 logger.warning(
                     "Failed to clean up %s stream after connect failure",
                     stream_kind,

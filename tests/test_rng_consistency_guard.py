@@ -9,6 +9,11 @@ import re
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TARGET_DIRS = ("data", "research", "strategies")
+ALLOWED_BROAD_EXCEPTION_FILES = {
+    "data/orderbook_reconstructor.py",
+    "data/redis_cache.py",
+    "data/streaming.py",
+}
 
 
 def _iter_target_python_files():
@@ -99,3 +104,23 @@ def test_no_except_exception_pass_in_production_code():
                     offenders.append(f"{rel}:{handler.lineno}")
 
     assert offenders == [], "Found forbidden 'except Exception: pass' usage:\n" + "\n".join(offenders)
+
+
+def test_broad_exception_catches_are_confined_to_callback_boundaries():
+    offenders: list[str] = []
+
+    for path in _iter_target_python_files():
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=rel)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Try):
+                continue
+            for handler in node.handlers:
+                if _except_type_contains_exception(handler) and rel not in ALLOWED_BROAD_EXCEPTION_FILES:
+                    offenders.append(f"{rel}:{handler.lineno}")
+
+    assert offenders == [], (
+        "Found broad 'except Exception' catches outside approved callback boundaries:\n"
+        + "\n".join(offenders)
+    )
