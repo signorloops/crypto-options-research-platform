@@ -2,6 +2,7 @@
 Tests for Circuit Breaker system.
 """
 import asyncio
+import json
 import sys
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -789,6 +790,49 @@ class TestCircuitBreakerAlertIntegrations:
             )
 
         assert "Failed to deliver Slack alert" in caplog.text
+
+    def test_persist_state_returns_false_on_redis_set_failure(self):
+        class BrokenRedis:
+            async def set(self, *_args, **_kwargs):
+                raise RuntimeError("redis down")
+
+        cb = CircuitBreaker()
+        cb.set_redis_client(BrokenRedis())
+
+        assert asyncio.run(cb.persist_state()) is False
+
+    def test_load_state_returns_false_on_invalid_json_payload(self):
+        class InvalidPayloadRedis:
+            async def get(self, *_args, **_kwargs):
+                return "{invalid-json"
+
+        cb = CircuitBreaker()
+        cb.set_redis_client(InvalidPayloadRedis())
+
+        assert asyncio.run(cb.load_state()) is False
+
+    def test_load_state_restores_serialized_fields(self):
+        now = datetime.now(timezone.utc)
+
+        class ValidRedis:
+            async def get(self, *_args, **_kwargs):
+                return json.dumps(
+                    {
+                        "state": "restricted",
+                        "last_state_change": now.isoformat(),
+                        "cooldown_until": (now + timedelta(minutes=5)).isoformat(),
+                        "consecutive_warnings": 2,
+                        "warning_count": {"drawdown": 1},
+                    }
+                )
+
+        cb = CircuitBreaker()
+        cb.set_redis_client(ValidRedis())
+
+        assert asyncio.run(cb.load_state()) is True
+        assert cb.state == CircuitState.RESTRICTED
+        assert cb._consecutive_warnings == 2
+        assert cb._warning_count == {"drawdown": 1}
 
 
 class TestCircuitBreakerStatus:

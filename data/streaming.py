@@ -11,12 +11,20 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Set, Union
 
 import websockets
-from websockets.exceptions import ConnectionClosed
+from websockets.exceptions import ConnectionClosed, WebSocketException
 
 from core.types import OrderBook, OrderBookLevel, Tick, Trade
 from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+STREAM_CONNECTION_EXCEPTIONS = (
+    OSError,
+    ConnectionError,
+    RuntimeError,
+    asyncio.TimeoutError,
+    WebSocketException,
+)
 
 
 @dataclass
@@ -119,7 +127,7 @@ class WebSocketStream(ABC):
                 logger.info("WebSocket connection cancelled")
                 break
 
-            except Exception as e:
+            except STREAM_CONNECTION_EXCEPTIONS as e:
                 logger.error(f"WebSocket error: {e}")
                 self._reconnect_count += 1
                 # Exponential backoff with max limit
@@ -443,7 +451,7 @@ class DeribitStream(WebSocketStream):
                 )
                 await asyncio.sleep(backoff)
 
-            except Exception as e:
+            except STREAM_CONNECTION_EXCEPTIONS as e:
                 logger.error(f"WebSocket error: {e}")
                 self._reconnect_count += 1
                 backoff = min(
@@ -616,7 +624,7 @@ class OKXStream(WebSocketStream):
                 )
                 await asyncio.sleep(backoff)
 
-            except Exception as e:
+            except STREAM_CONNECTION_EXCEPTIONS as e:
                 logger.error(f"WebSocket error: {e}")
                 self._reconnect_count += 1
                 backoff = min(

@@ -12,6 +12,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
+import json
 import logging
 import os
 from threading import Lock, Thread
@@ -24,6 +25,17 @@ from core.types import Position, Portfolio
 from research.risk.var import VaRCalculator, VaRResult
 
 logger = logging.getLogger(__name__)
+
+REDIS_STATE_EXCEPTIONS = (
+    AttributeError,
+    TypeError,
+    ValueError,
+    KeyError,
+    RuntimeError,
+    OSError,
+    json.JSONDecodeError,
+)
+ALERT_RUNNER_EXCEPTIONS = (RuntimeError, TypeError, ValueError, OSError)
 
 
 class CircuitState(Enum):
@@ -306,9 +318,6 @@ class CircuitBreaker:
             return False
 
         try:
-            import json
-            from datetime import timezone
-
             state_data = {
                 "state": self.state.value,
                 "last_state_change": self._last_state_change.isoformat() if self._last_state_change else None,
@@ -325,7 +334,7 @@ class CircuitBreaker:
                 ex=3600  # 1 hour expiration
             )
             return True
-        except Exception:
+        except REDIS_STATE_EXCEPTIONS:
             logger.exception("Failed to persist circuit breaker state to Redis")
             return False
 
@@ -340,8 +349,6 @@ class CircuitBreaker:
             return False
 
         try:
-            import json
-
             key = f"{self._redis_key_prefix}:state"
             data = await self._redis_client.get(key)
 
@@ -363,7 +370,7 @@ class CircuitBreaker:
             self._warning_count = state_data.get("warning_count", {})
 
             return True
-        except Exception:
+        except REDIS_STATE_EXCEPTIONS:
             logger.exception("Failed to load circuit breaker state from Redis")
             return False
 
@@ -701,7 +708,7 @@ class CircuitBreaker:
         def _runner() -> None:
             try:
                 asyncio.run(coroutine_factory())
-            except Exception:
+            except ALERT_RUNNER_EXCEPTIONS:
                 logger.exception("Background alert delivery failed")
 
         Thread(target=_runner, daemon=True).start()
@@ -781,7 +788,12 @@ class CircuitBreaker:
         """Send alert to webhook (async)."""
         try:
             import aiohttp
+        except ImportError:
+            logger.exception("Failed to deliver webhook alert")
+            return
+        client_error = getattr(aiohttp, "ClientError", RuntimeError)
 
+        try:
             payload = self._build_alert_payload(state, violations)
             timeout = aiohttp.ClientTimeout(total=max(self.config.alert_timeout_seconds, 0.1))
 
@@ -789,7 +801,7 @@ class CircuitBreaker:
                 async with session.post(webhook_url, json=payload, timeout=timeout) as response:
                     if response.status >= 400:
                         logger.error("Failed to send webhook alert: %s", response.status)
-        except Exception:
+        except (client_error, asyncio.TimeoutError, RuntimeError, ValueError, TypeError, OSError):
             logger.exception("Failed to deliver webhook alert")
 
     async def _send_slack_alert(
@@ -801,7 +813,12 @@ class CircuitBreaker:
         """Send alert to Slack incoming webhook (async)."""
         try:
             import aiohttp
+        except ImportError:
+            logger.exception("Failed to deliver Slack alert")
+            return
+        client_error = getattr(aiohttp, "ClientError", RuntimeError)
 
+        try:
             payload = self._build_slack_payload(state, violations)
             timeout = aiohttp.ClientTimeout(total=max(self.config.alert_timeout_seconds, 0.1))
 
@@ -809,7 +826,7 @@ class CircuitBreaker:
                 async with session.post(webhook_url, json=payload, timeout=timeout) as response:
                     if response.status >= 400:
                         logger.error("Failed to send Slack alert: %s", response.status)
-        except Exception:
+        except (client_error, asyncio.TimeoutError, RuntimeError, ValueError, TypeError, OSError):
             logger.exception("Failed to deliver Slack alert")
 
     def _record_violation(self, violation: Violation) -> None:
