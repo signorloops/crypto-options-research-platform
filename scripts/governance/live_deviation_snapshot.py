@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import os
 import sys
 from datetime import datetime, timezone
@@ -22,6 +21,18 @@ from data.quote_integration import (
     build_cex_defi_deviation_dataset_live,
 )
 from execution.research_dashboard import build_cross_market_deviation_report
+from scripts.governance.report_utils import (
+    write_json as _write_json_shared,
+    write_markdown as _write_markdown_shared,
+)
+
+
+def _write_markdown(path: Path, content: str) -> None:
+    _write_markdown_shared(path, content)
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    _write_json_shared(path, payload)
 
 
 def _format_markdown(report: dict[str, Any]) -> str:
@@ -169,10 +180,8 @@ def main() -> int:
 
     md_path = Path(args.output_md).resolve()
     json_path = Path(args.output_json).resolve()
-    md_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.parent.mkdir(parents=True, exist_ok=True)
-    md_path.write_text(_format_markdown(report), encoding="utf-8")
-    json_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    _write_markdown(md_path, _format_markdown(report))
+    _write_json(json_path, report)
 
     n_alerts = int(report["summary"]["n_alerts"])
     if args.strict and n_alerts > 0:

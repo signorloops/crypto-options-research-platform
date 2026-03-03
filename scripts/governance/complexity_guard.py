@@ -11,9 +11,19 @@ import argparse
 import ast
 import json
 import statistics
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Sequence
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.governance.report_utils import (
+    write_json as _write_json_shared,
+    write_markdown as _write_markdown_shared,
+)
 
 
 @dataclass
@@ -31,6 +41,14 @@ class Thresholds:
     max_methods_per_class: int
     max_classes_over_method_soft_limit: int
     soft_method_count_per_class: int
+
+
+def _write_markdown(path: Path, content: str) -> None:
+    _write_markdown_shared(path, content)
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    _write_json_shared(path, payload)
 
 
 def _load_config(path: Path) -> Dict:
@@ -417,10 +435,8 @@ def main() -> int:
         report["baseline"] = str(baseline_path)
         report["regressions"] = _compute_regressions(report, baseline_metrics)
 
-    md_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.parent.mkdir(parents=True, exist_ok=True)
-    md_path.write_text(_to_markdown(report), encoding="utf-8")
-    json_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    _write_markdown(md_path, _to_markdown(report))
+    _write_json(json_path, report)
 
     if args.strict_regression_only and not args.baseline_json:
         print("Complexity check: --strict-regression-only requires --baseline-json.")

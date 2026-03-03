@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 import time
 from datetime import datetime, timezone
@@ -21,7 +20,19 @@ if str(REPO_ROOT) not in sys.path:
 from data.generators.synthetic import CompleteMarketSimulator
 from research.backtest.engine import BacktestEngine
 from research.risk.var import VaRCalculator
+from scripts.governance.report_utils import (
+    write_json as _write_json_shared,
+    write_markdown as _write_markdown_shared,
+)
 from strategies.market_making.naive import NaiveMarketMaker
+
+
+def _write_markdown(path: Path, content: str) -> None:
+    _write_markdown_shared(path, content)
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    _write_json_shared(path, payload)
 
 
 def _summarize_ms(samples_ms: list[float]) -> dict[str, float]:
@@ -224,11 +235,8 @@ def main() -> int:
 
     output_md = Path(args.output_md).resolve()
     output_json = Path(args.output_json).resolve()
-    output_md.parent.mkdir(parents=True, exist_ok=True)
-    output_json.parent.mkdir(parents=True, exist_ok=True)
-
-    output_md.write_text(markdown, encoding="utf-8")
-    output_json.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    _write_markdown(output_md, markdown)
+    _write_json(output_json, report)
 
     print(
         "Algorithm performance baseline: "

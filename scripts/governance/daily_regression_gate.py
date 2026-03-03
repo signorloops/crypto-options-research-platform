@@ -4,17 +4,34 @@
 from __future__ import annotations
 
 import argparse
-import json
 import shlex
 import subprocess
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.governance.report_utils import (
+    write_json as _write_json_shared,
+    write_markdown as _write_markdown_shared,
+)
+
 DEFAULT_COMMANDS = [
     "python -m pytest -q tests/test_pricing_inverse.py tests/test_volatility.py tests/test_hawkes_comparison.py tests/test_research_dashboard.py"
 ]
+
+
+def _write_markdown(path: Path, content: str) -> None:
+    _write_markdown_shared(path, content)
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    _write_json_shared(path, payload)
 
 
 def _run_command(command: str, cwd: Path) -> dict[str, Any]:
@@ -118,10 +135,8 @@ def main() -> int:
 
     md_path = Path(args.output_md).resolve()
     json_path = Path(args.output_json).resolve()
-    md_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.parent.mkdir(parents=True, exist_ok=True)
-    md_path.write_text(_to_markdown(report), encoding="utf-8")
-    json_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    _write_markdown(md_path, _to_markdown(report))
+    _write_json(json_path, report)
 
     if not report["summary"]["all_passed"]:
         print(f"Daily regression gate: {report['summary']['failed']} command(s) failed.")
