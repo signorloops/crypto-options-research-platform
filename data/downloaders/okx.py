@@ -60,12 +60,20 @@ class OKXClient(ExchangeInterface):
     async def disconnect(self) -> None:
         """Close session and all WebSocket streams."""
         for stream in self._active_streams:
-            await stream.disconnect()
+            try:
+                await stream.disconnect()
+            except Exception as exc:
+                logger.warning(
+                    "Failed to disconnect OKX stream",
+                    extra=log_extra(error=str(exc)),
+                )
         self._active_streams.clear()
 
         if self._session:
-            await self._session.close()
-            self._session = None
+            try:
+                await self._session.close()
+            finally:
+                self._session = None
 
     async def _request(
         self,

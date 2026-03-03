@@ -233,3 +233,29 @@ async def test_subscribe_trades_disconnects_stream_on_connect_failure(monkeypatc
 
     disconnect_mock.assert_awaited_once()
     assert len(client._active_streams) == 0
+
+
+@pytest.mark.asyncio
+async def test_disconnect_continues_when_stream_disconnect_fails():
+    client = OKXClient()
+    ok_disconnect = AsyncMock()
+
+    class BrokenStream:
+        async def disconnect(self):
+            raise RuntimeError("stream cleanup failed")
+
+    class HealthyStream:
+        def __init__(self):
+            self.disconnect = ok_disconnect
+
+    client._active_streams = [BrokenStream(), HealthyStream()]
+    session = AsyncMock()
+    session.close = AsyncMock()
+    client._session = session
+
+    await client.disconnect()
+
+    ok_disconnect.assert_awaited_once()
+    session.close.assert_awaited_once()
+    assert client._active_streams == []
+    assert client._session is None
