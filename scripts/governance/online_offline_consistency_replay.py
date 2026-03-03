@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +17,8 @@ from scripts.governance.report_utils import (
     format_markdown_table as _format_table_shared,
     load_json_object as _load_json_shared,
     load_optional_json_object as _load_optional_json_shared,
+    write_json as _write_json_shared,
+    write_markdown as _write_markdown_shared,
 )
 
 DEFAULT_THRESHOLDS: dict[str, float] = {
@@ -266,10 +267,8 @@ def main() -> int:
 
     output_md = (repo_root / args.output_md).resolve()
     output_json = (repo_root / args.output_json).resolve()
-    output_md.parent.mkdir(parents=True, exist_ok=True)
-    output_json.parent.mkdir(parents=True, exist_ok=True)
-    output_md.write_text(_to_markdown(report), encoding="utf-8")
-    output_json.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    _write_markdown_shared(output_md, _to_markdown(report))
+    _write_json_shared(output_json, report)
 
     print(f"Online/offline consistency replay: {report['status']}.")
     if args.strict and report["status"] != "PASS":

@@ -60,3 +60,15 @@ def format_markdown_table(rows: Sequence[dict[str, Any]], columns: Sequence[str]
     for row in rows:
         body.append("| " + " | ".join(str(row.get(c, "")) for c in columns) + " |")
     return "\n".join([header, sep, *body])
+
+
+def write_markdown(path: Path, content: str) -> None:
+    """Write markdown content, creating parent directories as needed."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def write_json(path: Path, payload: dict[str, Any]) -> None:
+    """Write JSON payload with stable formatting and UTF-8 encoding."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")

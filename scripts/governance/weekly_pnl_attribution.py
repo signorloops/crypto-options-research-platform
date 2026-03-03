@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +18,8 @@ from scripts.governance.report_utils import (
     discover_input_files as _discover_files_shared,
     format_markdown_table as _format_table_shared,
     load_json_object as _load_json_shared,
+    write_json as _write_json_shared,
+    write_markdown as _write_markdown_shared,
 )
 
 METRIC_KEYS = {
@@ -280,10 +281,8 @@ def main() -> int:
 
     md_path = (repo_root / args.output_md).resolve()
     json_path = (repo_root / args.output_json).resolve()
-    md_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.parent.mkdir(parents=True, exist_ok=True)
-    md_path.write_text(_to_markdown(report), encoding="utf-8")
-    json_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    _write_markdown_shared(md_path, _to_markdown(report))
+    _write_json_shared(json_path, report)
 
     if report["summary"]["strategies"] == 0:
         print("Weekly PnL attribution: no strategy rows extracted.")

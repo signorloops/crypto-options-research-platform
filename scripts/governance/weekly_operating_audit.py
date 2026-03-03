@@ -22,6 +22,8 @@ from scripts.governance.report_utils import (
     discover_input_files as _discover_files_shared,
     format_markdown_table as _format_table_shared,
     load_json_object as _load_json_shared,
+    write_json as _write_json_shared,
+    write_markdown as _write_markdown_shared,
 )
 
 DEFAULT_THRESHOLDS: dict[str, float] = {
@@ -984,13 +986,8 @@ def main() -> int:
             close_detail=close_detail,
             signoff_payload=signoff_payload,
         )
-        close_gate_md.parent.mkdir(parents=True, exist_ok=True)
-        close_gate_json.parent.mkdir(parents=True, exist_ok=True)
-        close_gate_md.write_text(_close_gate_to_markdown(close_report), encoding="utf-8")
-        close_gate_json.write_text(
-            json.dumps(close_report, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        _write_markdown_shared(close_gate_md, _close_gate_to_markdown(close_report))
+        _write_json_shared(close_gate_json, close_report)
 
     if args.close_gate_only:
         close_ready, close_detail, signoff_payload = _evaluate_close_gate(signoff_json_path)
@@ -1075,10 +1072,8 @@ def main() -> int:
 
     md_path = (repo_root / args.output_md).resolve()
     json_path = (repo_root / args.output_json).resolve()
-    md_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.parent.mkdir(parents=True, exist_ok=True)
-    md_path.write_text(_to_markdown(report), encoding="utf-8")
-    json_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    _write_markdown_shared(md_path, _to_markdown(report))
+    _write_json_shared(json_path, report)
 
     had_issue = False
     if report["summary"]["exceptions"] > 0:
