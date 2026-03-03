@@ -241,7 +241,7 @@ class ScenarioGenerator:
                 if not df.empty:
                     scenarios[period_name] = df
                     logger.info(f"Loaded real data for period: {period_name}")
-            except Exception as e:
+            except HISTORICAL_LOAD_EXCEPTIONS as e:
                 logger.warning(f"Failed to load data for {period_name}: {e}")
 
         return scenarios

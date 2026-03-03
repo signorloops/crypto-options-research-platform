@@ -16,6 +16,15 @@ from utils.logging_config import get_logger, log_extra
 
 logger = get_logger(__name__)
 
+DUCKDB_ERROR_TYPE = getattr(duckdb, "Error", RuntimeError)
+DUCKDB_OPERATION_EXCEPTIONS = (
+    DUCKDB_ERROR_TYPE,
+    ValueError,
+    TypeError,
+    OSError,
+    RuntimeError,
+)
+
 
 def _sanitize_identifier(name: str) -> str:
     """Validate and sanitize SQL identifier (table/column name)."""
@@ -155,7 +164,7 @@ class DuckDBCache:
             )
             return count
 
-        except Exception as e:
+        except DUCKDB_OPERATION_EXCEPTIONS as e:
             logger.error(
                 "Failed to load Parquet",
                 extra=log_extra(pattern=pattern, error=str(e))
@@ -184,7 +193,7 @@ class DuckDBCache:
                 "Loaded DataFrame into DuckDB",
                 extra=log_extra(table=table_name, rows=len(df))
             )
-        except Exception as e:
+        except DUCKDB_OPERATION_EXCEPTIONS as e:
             logger.error(
                 "Failed to load DataFrame",
                 extra=log_extra(table=table_name, error=str(e))
@@ -208,7 +217,7 @@ class DuckDBCache:
             else:
                 result = self.con.execute(sql).fetchdf()
             return result
-        except Exception as e:
+        except DUCKDB_OPERATION_EXCEPTIONS as e:
             logger.error("Query failed", extra=log_extra(sql=sql[:100], error=str(e)))
             raise
 
@@ -217,7 +226,7 @@ class DuckDBCache:
         try:
             result = self.con.execute(sql).fetchone()
             return result[0] if result else None
-        except Exception as e:
+        except DUCKDB_OPERATION_EXCEPTIONS as e:
             logger.error("Query scalar failed", extra=log_extra(sql=sql[:100], error=str(e)))
             raise
 
@@ -443,7 +452,7 @@ class DuckDBCache:
             try:
                 self.con.close()
                 logger.info("DuckDB connection closed")
-            except Exception as e:
+            except DUCKDB_OPERATION_EXCEPTIONS as e:
                 logger.warning("Error closing DuckDB connection", extra=log_extra(error=str(e)))
             finally:
                 self.con = None

@@ -506,16 +506,11 @@ class OKXClient(ExchangeInterface):
         callback: Callable[[OrderBook], None]
     ) -> None:
         """Subscribe to real-time order book updates via WebSocket."""
-        from data.streaming import OKXStream
-
-        stream = OKXStream(instruments, order_book_callback=callback)
-        try:
-            await stream.connect()
-            self._active_streams.append(stream)
-        except Exception:
-            logger.exception("Failed to subscribe order book stream", extra=log_extra(count=len(instruments)))
-            await stream.disconnect()
-            raise
+        await self._subscribe_stream(
+            instruments=instruments,
+            callback=callback,
+            stream_kind="order_book",
+        )
 
     async def subscribe_trades(
         self,
@@ -523,13 +518,42 @@ class OKXClient(ExchangeInterface):
         callback: Callable[[Trade], None]
     ) -> None:
         """Subscribe to real-time trade updates via WebSocket."""
+        await self._subscribe_stream(
+            instruments=instruments,
+            callback=callback,
+            stream_kind="trade",
+        )
+
+    async def _subscribe_stream(
+        self,
+        instruments: List[str],
+        callback: Callable[[Any], None],
+        stream_kind: str,
+    ) -> None:
+        """Create/connect an OKX stream and track it for lifecycle management."""
         from data.streaming import OKXStream
 
-        stream = OKXStream(instruments, trade_callback=callback)
+        stream_kwargs = (
+            {"order_book_callback": callback}
+            if stream_kind == "order_book"
+            else {"trade_callback": callback}
+        )
+        stream = OKXStream(instruments, **stream_kwargs)
         try:
             await stream.connect()
             self._active_streams.append(stream)
         except Exception:
-            logger.exception("Failed to subscribe trade stream", extra=log_extra(count=len(instruments)))
-            await stream.disconnect()
+            logger.exception(
+                "Failed to subscribe %s stream",
+                stream_kind,
+                extra=log_extra(count=len(instruments)),
+            )
+            try:
+                await stream.disconnect()
+            except Exception as cleanup_exc:
+                logger.warning(
+                    "Failed to clean up %s stream after connect failure",
+                    stream_kind,
+                    extra=log_extra(error=str(cleanup_exc)),
+                )
             raise

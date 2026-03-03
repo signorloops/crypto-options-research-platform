@@ -182,3 +182,54 @@ async def test_current_iv_term_structure_extracts_atm(monkeypatch):
     assert not df.empty
     assert "atm_iv" in df.columns
     assert df["atm_iv"].iloc[0] == pytest.approx(0.5)
+
+
+@pytest.mark.asyncio
+async def test_subscribe_order_book_tracks_stream_on_success(monkeypatch):
+    client = OKXClient()
+    created = {}
+
+    class DummyStream:
+        def __init__(self, instruments, order_book_callback=None, trade_callback=None):
+            created["instruments"] = list(instruments)
+            created["order_cb"] = order_book_callback
+            created["trade_cb"] = trade_callback
+
+        async def connect(self):
+            return None
+
+        async def disconnect(self):
+            return None
+
+    monkeypatch.setattr("data.streaming.OKXStream", DummyStream)
+    callback = lambda _ob: None
+
+    await client.subscribe_order_book(["BTC-USD-SWAP"], callback)
+
+    assert len(client._active_streams) == 1
+    assert created["instruments"] == ["BTC-USD-SWAP"]
+    assert created["order_cb"] is callback
+    assert created["trade_cb"] is None
+
+
+@pytest.mark.asyncio
+async def test_subscribe_trades_disconnects_stream_on_connect_failure(monkeypatch):
+    client = OKXClient()
+    disconnect_mock = AsyncMock()
+
+    class DummyStream:
+        def __init__(self, instruments, order_book_callback=None, trade_callback=None):
+            self.disconnect = disconnect_mock
+            self.trade_callback = trade_callback
+            self.order_book_callback = order_book_callback
+
+        async def connect(self):
+            raise RuntimeError("ws connect failed")
+
+    monkeypatch.setattr("data.streaming.OKXStream", DummyStream)
+
+    with pytest.raises(RuntimeError, match="ws connect failed"):
+        await client.subscribe_trades(["BTC-USD-SWAP"], lambda _trade: None)
+
+    disconnect_mock.assert_awaited_once()
+    assert len(client._active_streams) == 0

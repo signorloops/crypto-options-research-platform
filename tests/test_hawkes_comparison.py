@@ -218,6 +218,31 @@ class TestScenarioGenerator(unittest.TestCase):
             self.assertIn("scenario_source", out.columns)
             self.assertEqual(out["scenario_source"].iloc[0], "synthetic_proxy")
 
+    def test_load_real_scenarios_continues_when_one_period_fails(self):
+        """Per-period loader errors should be isolated and not abort the full batch."""
+        original_loader = self.generator._load_period_data
+
+        def flaky_loader(start, end, data_dir):
+            if start.month == 2:
+                raise ValueError("synthetic failure")
+            return original_loader(start, end, data_dir)
+
+        self.generator._load_period_data = flaky_loader  # type: ignore[method-assign]
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                scenarios = self.generator.load_real_scenarios(
+                    [
+                        (datetime(2024, 1, 1), datetime(2024, 1, 2)),
+                        (datetime(2024, 2, 1), datetime(2024, 2, 2)),
+                    ],
+                    data_dir=tmpdir,
+                )
+        finally:
+            self.generator._load_period_data = original_loader  # type: ignore[method-assign]
+
+        self.assertIn("202401_202401", scenarios)
+        self.assertNotIn("202402_202402", scenarios)
+
 
 class TestHawkesMetricsCollector(unittest.TestCase):
     """Test Hawkes-specific metrics collection."""

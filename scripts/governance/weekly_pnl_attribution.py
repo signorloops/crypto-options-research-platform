@@ -34,6 +34,15 @@ METRIC_KEYS = {
     ],
 }
 
+JSON_REPORT_EXCEPTIONS = (
+    OSError,
+    UnicodeError,
+    json.JSONDecodeError,
+    ValueError,
+    TypeError,
+    KeyError,
+)
+
 
 def _load_json(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as f:
@@ -152,7 +161,7 @@ def _build_report(input_files: list[Path]) -> dict[str, Any]:
         try:
             raw = _load_json(path)
             rows = _extract_rows(raw, path)
-        except Exception as exc:  # pragma: no cover - defensive parser boundary
+        except JSON_REPORT_EXCEPTIONS as exc:  # pragma: no cover - defensive parser boundary
             parse_errors.append({"file": str(path), "error": str(exc)})
             continue
 

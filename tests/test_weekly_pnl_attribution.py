@@ -98,3 +98,31 @@ def test_discover_input_files_searches_nested_result_directories(tmp_path):
     found = module._discover_input_files(tmp_path / "results", "backtest*.json")
 
     assert nested in found
+
+
+def test_build_report_tolerates_invalid_json_and_keeps_valid_rows(tmp_path):
+    module = _load_module()
+    valid = tmp_path / "results" / "backtest_results_valid.json"
+    invalid = tmp_path / "results" / "backtest_results_invalid.json"
+    _write(
+        valid,
+        json.dumps(
+            {
+                "Strategy-A": {
+                    "summary": {
+                        "spread_capture": 10.0,
+                        "adverse_selection_cost": 2.0,
+                        "inventory_cost": 1.0,
+                        "hedging_cost": 0.5,
+                    }
+                }
+            }
+        ),
+    )
+    _write(invalid, "{not-json")
+
+    report = module._build_report([valid, invalid])
+
+    assert report["summary"]["strategies"] == 1
+    assert report["summary"]["parse_errors"] == 1
+    assert report["attribution_snapshot"][0]["strategy"] == "Strategy-A"
