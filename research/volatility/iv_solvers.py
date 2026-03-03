@@ -19,6 +19,16 @@ from utils.logging_config import get_logger, log_extra
 
 logger = get_logger(__name__)
 
+JAECKEL_FALLBACK_EXCEPTIONS = (
+    ValueError,
+    TypeError,
+    ArithmeticError,
+    FloatingPointError,
+    OverflowError,
+    ZeroDivisionError,
+    RuntimeError,
+)
+
 
 def black_scholes_price(
     S: float, K: float, T: float, r: float, sigma: float, is_call: bool = True
@@ -327,7 +337,7 @@ def implied_volatility_jaeckel(
             iv = _jaeckel_iv(market_price, S, K, T, r, flag)
             if np.isfinite(iv):
                 return float(np.clip(iv, 0.0, 5.0))
-        except Exception as exc:  # pragma: no cover - fallback path
+        except JAECKEL_FALLBACK_EXCEPTIONS as exc:  # pragma: no cover - fallback path
             logger.debug(
                 "Jaeckel solver failed, fallback to local LBR",
                 extra=log_extra(error=str(exc), strike=K, expiry=T),
