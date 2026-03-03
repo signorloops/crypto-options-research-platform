@@ -39,6 +39,12 @@ def test_regime_detector_benchmark_does_not_mutate_global_numpy_rng():
     assert actual_next == expected_next
 
 
+def test_constructor_rejects_non_positive_iterations():
+    module = _load_module()
+    with pytest.raises(ValueError):
+        module.LatencyBenchmark(iterations=0)
+
+
 def test_main_rejects_non_positive_iterations(monkeypatch):
     module = _load_module()
     monkeypatch.setattr(

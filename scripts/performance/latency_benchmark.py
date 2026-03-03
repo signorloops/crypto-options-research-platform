@@ -30,6 +30,8 @@ class LatencyBenchmark:
     """Benchmark latency for critical paths."""
 
     def __init__(self, iterations: int = 1000):
+        if iterations <= 0:
+            raise ValueError("iterations must be positive")
         self.iterations = iterations
         self.results: Dict[str, List[float]] = {}
         self.last_all_passed: bool = False
