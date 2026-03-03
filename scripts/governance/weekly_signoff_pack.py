@@ -13,12 +13,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.governance.report_utils import load_json_object as _load_json_shared
 from scripts.governance.report_utils import (
-    as_bool as _as_bool_shared,
-    load_optional_json_object as _load_optional_json_shared,
-    write_json as _write_json_shared,
-    write_markdown as _write_markdown_shared,
+    as_bool as _as_bool,
+    load_json_object as _load_json,
+    load_optional_json_object as _load_optional_json,
+    write_json as _write_json,
+    write_markdown as _write_markdown,
 )
 
 MANUAL_ITEMS: list[tuple[str, str]] = [
@@ -49,28 +49,6 @@ TASK_TO_MANUAL_KEY: dict[str, str] = {
 TASK_CANONICAL_LABEL: dict[str, str] = {
     "收益归因表": "收益归因表确认",
 }
-
-
-def _load_json(path: Path) -> dict[str, Any]:
-    return _load_json_shared(path)
-
-
-def _load_optional_json(path: Path) -> dict[str, Any]:
-    return _load_optional_json_shared(path)
-
-
-def _as_bool(value: Any) -> bool:
-    return _as_bool_shared(value)
-
-
-def _write_markdown(path: Path, content: str) -> None:
-    _write_markdown_shared(path, content)
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    _write_json_shared(path, payload)
-
-
 def _normalize_manual_status(raw: dict[str, Any]) -> dict[str, Any]:
     status: dict[str, Any] = {}
     for key, _label in MANUAL_ITEMS:

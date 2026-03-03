@@ -12,16 +12,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.governance.report_utils import load_json_object as _load_json_shared
-from scripts.governance.report_utils import write_markdown as _write_markdown_shared
-
-
-def _load_report(path: Path) -> dict[str, Any]:
-    return _load_json_shared(path)
-
-
-def _write_markdown(path: Path, content: str) -> None:
-    _write_markdown_shared(path, content)
+from scripts.governance.report_utils import load_json_object as _load_report
+from scripts.governance.report_utils import write_markdown as _write_markdown
 
 
 def _fmt_bool(value: Any) -> str:

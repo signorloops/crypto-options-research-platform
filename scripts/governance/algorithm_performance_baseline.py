@@ -21,18 +21,10 @@ from data.generators.synthetic import CompleteMarketSimulator
 from research.backtest.engine import BacktestEngine
 from research.risk.var import VaRCalculator
 from scripts.governance.report_utils import (
-    write_json as _write_json_shared,
-    write_markdown as _write_markdown_shared,
+    write_json as _write_json,
+    write_markdown as _write_markdown,
 )
 from strategies.market_making.naive import NaiveMarketMaker
-
-
-def _write_markdown(path: Path, content: str) -> None:
-    _write_markdown_shared(path, content)
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    _write_json_shared(path, payload)
 
 
 def _validate_positive_int(value: int) -> bool:

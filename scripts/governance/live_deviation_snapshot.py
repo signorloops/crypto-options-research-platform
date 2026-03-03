@@ -22,17 +22,9 @@ from data.quote_integration import (
 )
 from execution.research_dashboard import build_cross_market_deviation_report
 from scripts.governance.report_utils import (
-    write_json as _write_json_shared,
-    write_markdown as _write_markdown_shared,
+    write_json as _write_json,
+    write_markdown as _write_markdown,
 )
-
-
-def _write_markdown(path: Path, content: str) -> None:
-    _write_markdown_shared(path, content)
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    _write_json_shared(path, payload)
 
 
 def _format_markdown(report: dict[str, Any]) -> str:
