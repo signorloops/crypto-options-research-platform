@@ -104,7 +104,7 @@ class DuckDBCache:
 
             # Configure for optimal performance
             self._configure()
-        except Exception:
+        except DUCKDB_OPERATION_EXCEPTIONS:
             self.close()
             raise
 

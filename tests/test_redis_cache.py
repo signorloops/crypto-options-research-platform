@@ -8,6 +8,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from redis.exceptions import RedisError
 
 from data.redis_cache import GreeksCacheManager, RedisCache
 
@@ -275,7 +276,7 @@ class TestRedisCache:
     @pytest.mark.asyncio
     async def test_health_check_failure(self, redis_cache, mock_redis):
         """Test health check failure."""
-        mock_redis.ping = AsyncMock(side_effect=Exception('Connection refused'))
+        mock_redis.ping = AsyncMock(side_effect=RedisError('Connection refused'))
 
         result = await redis_cache.health_check()
 

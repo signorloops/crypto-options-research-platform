@@ -17,6 +17,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 import redis.asyncio as redis
 from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import RedisError
 
 from utils.logging_config import get_logger, log_extra
 
@@ -86,7 +87,7 @@ class RedisCache:
             logger.error("Redis connection failed", extra=log_extra(error=str(e)))
             self._pool = None
             raise
-        except Exception as e:
+        except (RedisError, OSError, ValueError, TypeError) as e:
             logger.error("Unexpected error connecting to Redis", extra=log_extra(error=str(e)))
             self._pool = None
             raise
@@ -108,7 +109,7 @@ class RedisCache:
         except RedisConnectionError:
             logger.warning("Redis health check failed: connection error")
             return False
-        except Exception as exc:
+        except (RedisError, OSError, ValueError, TypeError) as exc:
             logger.warning("Redis health check failed", extra=log_extra(error=str(exc)))
             return False
 

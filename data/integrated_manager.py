@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 import pandas as pd
+from redis.exceptions import RedisError
 
 from data.cache import DataCache, DataManager
 from data.cache_policy import (
@@ -24,11 +25,13 @@ from data.cache_policy import (
     invalidation_patterns,
     realtime_ttls,
 )
-from data.duckdb_cache import DuckDBCache
+from data.duckdb_cache import DUCKDB_OPERATION_EXCEPTIONS, DuckDBCache
 from data.redis_cache import GreeksCacheManager, RedisCache
 from utils.logging_config import get_logger, log_extra
 
 logger = get_logger(__name__)
+
+REDIS_CONNECT_EXCEPTIONS = (RedisError, OSError, ValueError, TypeError, RuntimeError)
 
 
 class IntegratedDataManager:
@@ -107,7 +110,7 @@ class IntegratedDataManager:
                     await self.redis.connect()
                     self.greeks_manager = GreeksCacheManager(self.redis)
                     logger.info("Redis connected successfully")
-                except Exception as e:
+                except REDIS_CONNECT_EXCEPTIONS as e:
                     logger.warning(f"Failed to connect to Redis: {e}")
                     self.redis = None
                     self.greeks_manager = None
@@ -116,7 +119,7 @@ class IntegratedDataManager:
                 try:
                     self.duckdb = DuckDBCache(self.duckdb_path)
                     logger.info("DuckDB initialized successfully")
-                except Exception as e:
+                except DUCKDB_OPERATION_EXCEPTIONS as e:
                     logger.warning(f"Failed to initialize DuckDB: {e}")
                     self.duckdb = None
 
