@@ -114,3 +114,38 @@ def test_main_strict_returns_nonzero_on_failed_checks(tmp_path, monkeypatch):
 
     exit_code = module.main()
     assert exit_code == 2
+
+
+def test_main_returns_nonzero_on_invalid_positive_numeric_args(tmp_path, monkeypatch):
+    module = _load_module()
+    output_md = tmp_path / "artifacts" / "algorithm-performance-baseline.md"
+    output_json = tmp_path / "artifacts" / "algorithm-performance-baseline.json"
+    run_called = {"value": False}
+
+    def _should_not_run(_args):
+        run_called["value"] = True
+        return _sample_report(all_passed=True)
+
+    monkeypatch.setattr(module, "_run_suite", _should_not_run)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "algorithm_performance_baseline.py",
+            "--var-iterations",
+            "0",
+            "--backtest-p95-threshold-ms",
+            "-1",
+            "--output-md",
+            str(output_md),
+            "--output-json",
+            str(output_json),
+        ],
+    )
+
+    exit_code = module.main()
+
+    assert exit_code == 2
+    assert run_called["value"] is False
+    assert output_md.exists() is False
+    assert output_json.exists() is False

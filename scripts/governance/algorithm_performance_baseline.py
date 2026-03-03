@@ -35,6 +35,14 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     _write_json_shared(path, payload)
 
 
+def _validate_positive_int(value: int) -> bool:
+    return isinstance(value, int) and value > 0
+
+
+def _validate_positive_float(value: float) -> bool:
+    return isinstance(value, (int, float)) and float(value) > 0.0
+
+
 def _summarize_ms(samples_ms: list[float]) -> dict[str, float]:
     values = np.asarray(samples_ms, dtype=float)
     return {
@@ -229,6 +237,31 @@ def main() -> int:
         help="Return non-zero when any performance check fails.",
     )
     args = parser.parse_args()
+
+    validations = [
+        ("--var-iterations", _validate_positive_int(args.var_iterations)),
+        ("--var-simulations", _validate_positive_int(args.var_simulations)),
+        (
+            "--backtest-iterations",
+            _validate_positive_int(args.backtest_iterations),
+        ),
+        ("--backtest-hours", _validate_positive_int(args.backtest_hours)),
+        (
+            "--var-p95-threshold-ms",
+            _validate_positive_float(args.var_p95_threshold_ms),
+        ),
+        (
+            "--backtest-p95-threshold-ms",
+            _validate_positive_float(args.backtest_p95_threshold_ms),
+        ),
+    ]
+    invalid_flags = [flag for flag, ok in validations if not ok]
+    if invalid_flags:
+        print(
+            "Algorithm performance baseline: invalid positive numeric args: "
+            f"{', '.join(invalid_flags)}."
+        )
+        return 2
 
     report = _run_suite(args)
     markdown = _render_markdown(report)
