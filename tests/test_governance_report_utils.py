@@ -14,6 +14,8 @@ from scripts.governance.report_utils import (
     format_markdown_table,
     load_json_object,
     load_optional_json_object,
+    write_json,
+    write_markdown,
 )
 
 
@@ -65,3 +67,20 @@ def test_as_bool_normalizes_common_scalar_values():
     assert as_bool("yes") is True
     assert as_bool("false") is False
     assert as_bool(0) is False
+
+
+def test_write_markdown_creates_parent_dirs(tmp_path):
+    output = tmp_path / "nested" / "report.md"
+    write_markdown(output, "# Demo")
+
+    assert output.exists()
+    assert output.read_text(encoding="utf-8") == "# Demo"
+
+
+def test_write_json_uses_stable_utf8_format(tmp_path):
+    output = tmp_path / "nested" / "report.json"
+    write_json(output, {"msg": "中文", "n": 1})
+
+    assert output.exists()
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload == {"msg": "中文", "n": 1}
