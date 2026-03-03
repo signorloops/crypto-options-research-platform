@@ -137,6 +137,13 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    if float(args.align_tolerance_seconds) < 0:
+        print("Live deviation snapshot: align-tolerance-seconds must be non-negative.")
+        return 2
+    if float(args.threshold_bps) <= 0:
+        print("Live deviation snapshot: threshold-bps must be positive.")
+        return 2
+
     cex_file = args.cex_file or os.getenv("CEX_QUOTES_FILE", "")
     cex_provider = args.cex_provider or os.getenv("CEX_QUOTES_PROVIDER", "")
     defi_file = args.defi_file or os.getenv("DEFI_QUOTES_FILE", "")

@@ -123,6 +123,40 @@ def test_main_strict_returns_nonzero_when_alerts_exist(tmp_path, monkeypatch):
     assert exit_code == 2
 
 
+def test_main_returns_nonzero_when_threshold_bps_is_non_positive(monkeypatch):
+    module = _load_module()
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "live_deviation_snapshot.py",
+            "--threshold-bps",
+            "0",
+        ],
+    )
+
+    exit_code = module.main()
+    assert exit_code == 2
+
+
+def test_main_returns_nonzero_when_align_tolerance_is_negative(monkeypatch):
+    module = _load_module()
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "live_deviation_snapshot.py",
+            "--align-tolerance-seconds",
+            "-1",
+            "--threshold-bps",
+            "200",
+        ],
+    )
+
+    exit_code = module.main()
+    assert exit_code == 2
+
+
 def test_script_runs_via_file_entrypoint(tmp_path):
     cex_path = tmp_path / "cex.csv"
     defi_path = tmp_path / "defi.csv"
