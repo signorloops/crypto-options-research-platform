@@ -15,6 +15,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.governance.report_utils import (
+    JSON_REPORT_EXCEPTIONS,
     discover_input_files as _discover_files_shared,
     format_markdown_table as _format_table_shared,
     load_json_object as _load_json_shared,
@@ -44,16 +45,6 @@ METRIC_KEYS = {
         "gamma_hedging_cost",
     ],
 }
-
-JSON_REPORT_EXCEPTIONS = (
-    OSError,
-    UnicodeError,
-    json.JSONDecodeError,
-    ValueError,
-    TypeError,
-    KeyError,
-)
-
 
 def _load_json(path: Path) -> dict[str, Any]:
     return _load_json_shared(path)

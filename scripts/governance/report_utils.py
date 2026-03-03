@@ -7,6 +7,15 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+JSON_REPORT_EXCEPTIONS = (
+    OSError,
+    UnicodeError,
+    json.JSONDecodeError,
+    ValueError,
+    TypeError,
+    KeyError,
+)
+
 
 def load_json_object(path: Path) -> dict[str, Any]:
     """Load JSON file and ensure top-level object is a dictionary."""
