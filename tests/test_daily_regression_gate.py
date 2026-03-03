@@ -84,3 +84,31 @@ def test_main_strict_returns_nonzero_on_failed_command(tmp_path, monkeypatch):
     report = json.loads(output_json.read_text(encoding="utf-8"))
     assert report["summary"]["all_passed"] is False
     assert report["summary"]["failed"] == 1
+
+
+def test_main_handles_empty_command_as_failed_without_crashing(tmp_path, monkeypatch):
+    module = _load_module()
+    output_md = tmp_path / "daily.md"
+    output_json = tmp_path / "daily.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "daily_regression_gate.py",
+            "--cmd",
+            "",
+            "--output-md",
+            str(output_md),
+            "--output-json",
+            str(output_json),
+            "--strict",
+        ],
+    )
+
+    exit_code = module.main()
+
+    assert exit_code == 2
+    report = json.loads(output_json.read_text(encoding="utf-8"))
+    assert report["summary"]["all_passed"] is False
+    assert report["results"][0]["return_code"] == 127
+    assert report["results"][0]["output_tail"] == "empty command"

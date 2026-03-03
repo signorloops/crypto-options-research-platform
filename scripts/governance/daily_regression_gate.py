@@ -25,6 +25,8 @@ DEFAULT_COMMANDS = [
     "python -m pytest -q tests/test_pricing_inverse.py tests/test_volatility.py tests/test_hawkes_comparison.py tests/test_research_dashboard.py"
 ]
 
+SUBPROCESS_RUN_EXCEPTIONS = (OSError, ValueError, IndexError)
+
 
 def _write_markdown(path: Path, content: str) -> None:
     _write_markdown_shared(path, content)
@@ -46,12 +48,20 @@ def _run_command(command: str, cwd: Path) -> dict[str, Any]:
             "duration_sec": 0.0,
             "output_tail": str(exc),
         }
+    if not argv:
+        return {
+            "command": command,
+            "return_code": 127,
+            "passed": False,
+            "duration_sec": 0.0,
+            "output_tail": "empty command",
+        }
 
     try:
         completed = subprocess.run(argv, cwd=cwd, text=True, capture_output=True, check=False)
         return_code = completed.returncode
         combined_output = f"{completed.stdout}\n{completed.stderr}".strip()
-    except OSError as exc:
+    except SUBPROCESS_RUN_EXCEPTIONS as exc:
         return_code = 127
         combined_output = str(exc)
 
