@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
-import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -12,6 +10,10 @@ import numpy as np
 
 from research.pricing.inverse_options import InverseOptionPricer
 from research.pricing.inverse_power_options import InversePowerOptionPricer
+from validation_scripts.io_utils import (
+    write_json as _write_json,
+    write_text as _write_text,
+)
 
 
 def build_validation_grid() -> list[dict[str, Any]]:
@@ -156,15 +158,8 @@ def main() -> None:
     report = run_validation(n_paths=args.n_paths, seed=args.seed)
     markdown = render_markdown(report)
 
-    for output_path, payload in (
-        (args.output_md, markdown),
-        (args.output_json, json.dumps(report, indent=2, ensure_ascii=False) + "\n"),
-    ):
-        directory = os.path.dirname(output_path)
-        if directory:
-            os.makedirs(directory, exist_ok=True)
-        with open(output_path, "w", encoding="utf-8") as file_obj:
-            file_obj.write(payload)
+    _write_text(args.output_md, markdown)
+    _write_json(args.output_json, report)
 
     print(f"inverse_power_validation_md={args.output_md}")
     print(f"inverse_power_validation_json={args.output_json}")

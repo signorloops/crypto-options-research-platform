@@ -5,8 +5,6 @@ Generate a deterministic jump-premia stability report for research audit.
 from __future__ import annotations
 
 import argparse
-import json
-import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -14,6 +12,10 @@ import numpy as np
 import pandas as pd
 
 from research.signals.jump_risk_premia import JumpRiskPremiaEstimator
+from validation_scripts.io_utils import (
+    write_json as _write_json,
+    write_text as _write_text,
+)
 
 
 def build_synthetic_prices(
@@ -138,15 +140,8 @@ def main() -> None:
     report = build_report(prices=prices, window=args.window, jump_zscore=args.jump_zscore)
     markdown = render_markdown(report)
 
-    for output_path, payload in (
-        (args.output_md, markdown),
-        (args.output_json, json.dumps(report, indent=2, ensure_ascii=False) + "\n"),
-    ):
-        directory = os.path.dirname(output_path)
-        if directory:
-            os.makedirs(directory, exist_ok=True)
-        with open(output_path, "w", encoding="utf-8") as file_obj:
-            file_obj.write(payload)
+    _write_text(args.output_md, markdown)
+    _write_json(args.output_json, report)
 
     print(f"jump_premia_md={args.output_md}")
     print(f"jump_premia_json={args.output_json}")

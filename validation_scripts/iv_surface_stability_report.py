@@ -5,7 +5,6 @@ Generate an IV surface stability and no-arbitrage report.
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 import time
@@ -20,6 +19,11 @@ if PROJECT_ROOT not in sys.path:
 
 from research.volatility.implied import VolatilitySurface, black_scholes_price
 from research.volatility.surface_audit import audit_surface_stability
+from validation_scripts.io_utils import (
+    load_json as _load_json,
+    write_json as _write_json,
+    write_text as _write_text,
+)
 
 
 def _build_synthetic_surface(seed: int) -> VolatilitySurface:
@@ -135,14 +139,6 @@ def evaluate_quality_gates(
     return violations
 
 
-def _write_text(path: str, content: str) -> None:
-    directory = os.path.dirname(path)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as file_obj:
-        file_obj.write(content)
-
-
 def _cache_key(seed: int) -> str:
     return f"iv-surface-stability-seed-{int(seed)}-v1"
 
@@ -224,17 +220,13 @@ def main() -> None:
     start = time.perf_counter()
 
     if args.fast_calibration and os.path.exists(cache_file):
-        with open(cache_file, "r", encoding="utf-8") as file_obj:
-            report = json.load(file_obj)
+        report = _load_json(cache_file)
         cache_hit = True
     else:
         surface = _build_synthetic_surface(seed=args.seed)
         report = audit_surface_stability(surface=surface)
         if args.fast_calibration:
-            os.makedirs(args.cache_dir, exist_ok=True)
-            with open(cache_file, "w", encoding="utf-8") as file_obj:
-                json.dump(_strip_runtime_metadata(report), file_obj, indent=2, ensure_ascii=False)
-                file_obj.write("\n")
+            _write_json(cache_file, _strip_runtime_metadata(report))
 
     elapsed = time.perf_counter() - start
     report = _attach_runtime_metadata(
@@ -247,13 +239,7 @@ def main() -> None:
 
     md = _render_markdown(report)
     _write_text(args.output_md, md)
-
-    json_dir = os.path.dirname(args.output_json)
-    if json_dir:
-        os.makedirs(json_dir, exist_ok=True)
-    with open(args.output_json, "w", encoding="utf-8") as file_obj:
-        json.dump(report, file_obj, indent=2, ensure_ascii=False)
-        file_obj.write("\n")
+    _write_json(args.output_json, report)
 
     print(f"Markdown report: {args.output_md}")
     print(f"JSON report: {args.output_json}")
