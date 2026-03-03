@@ -5,9 +5,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.governance.report_utils import (
+    format_markdown_table as _format_table_shared,
+    load_json_object as _load_json_shared,
+)
 
 DEFAULT_THRESHOLDS: dict[str, float] = {
     "max_offline_consistency_exceptions": 0,
@@ -17,11 +27,7 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
 
 
 def _load_json(path: Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError(f"Invalid JSON object: {path}")
-    return data
+    return _load_json_shared(path)
 
 
 def _load_optional_json(path: Path) -> dict[str, Any]:
@@ -162,14 +168,7 @@ def _fmt_float(value: float | None, digits: int = 4) -> str:
 
 
 def _format_table(rows: list[dict[str, Any]], columns: list[str]) -> str:
-    if not rows:
-        return "_none_"
-    header = "| " + " | ".join(columns) + " |"
-    sep = "| " + " | ".join(["---"] * len(columns)) + " |"
-    body = []
-    for row in rows:
-        body.append("| " + " | ".join(str(row.get(c, "")) for c in columns) + " |")
-    return "\n".join([header, sep, *body])
+    return _format_table_shared(rows, columns)
 
 
 def _to_markdown(report: dict[str, Any]) -> str:

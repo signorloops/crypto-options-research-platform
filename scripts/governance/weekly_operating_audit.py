@@ -7,10 +7,21 @@ import argparse
 import json
 import shlex
 import subprocess
+import sys
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.governance.report_utils import (
+    discover_input_files as _discover_files_shared,
+    format_markdown_table as _format_table_shared,
+    load_json_object as _load_json_shared,
+)
 
 DEFAULT_THRESHOLDS: dict[str, float] = {
     "min_sharpe": 0.5,
@@ -45,11 +56,7 @@ JSON_REPORT_EXCEPTIONS = (
 
 
 def _load_json(path: Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError(f"Expected top-level object in {path}")
-    return data
+    return _load_json_shared(path)
 
 
 def _to_text_list(value: Any) -> list[str]:
@@ -310,8 +317,7 @@ def _extract_strategy_rows(raw: dict[str, Any], source: Path) -> list[dict[str, 
 
 
 def _discover_input_files(results_dir: Path, pattern: str) -> list[Path]:
-    candidates = sorted(results_dir.rglob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
-    return [p for p in candidates if p.is_file()]
+    return _discover_files_shared(results_dir, pattern)
 
 
 def _fmt(v: float | None, digits: int = 6) -> str:
@@ -321,14 +327,7 @@ def _fmt(v: float | None, digits: int = 6) -> str:
 
 
 def _format_table(rows: Sequence[dict[str, Any]], columns: Sequence[str]) -> str:
-    if not rows:
-        return "_none_"
-    header = "| " + " | ".join(columns) + " |"
-    sep = "| " + " | ".join(["---"] * len(columns)) + " |"
-    body = []
-    for row in rows:
-        body.append("| " + " | ".join(str(row.get(c, "")) for c in columns) + " |")
-    return "\n".join([header, sep, *body])
+    return _format_table_shared(rows, columns)
 
 
 def _load_thresholds(path: Path) -> dict[str, float]:
