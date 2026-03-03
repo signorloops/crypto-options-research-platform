@@ -48,7 +48,11 @@ def _build_report(audit: dict[str, Any], attribution: dict[str, Any]) -> dict[st
     rollback_marker = audit.get("rollback_marker", {})
     consistency_exceptions = int(summary.get("consistency_exceptions", 0) or 0)
     risk_exceptions = int(summary.get("exceptions", 0) or 0)
-    regression_ok = bool(regression.get("passed"))
+    checklist_regression = checklist.get("minimum_regression_passed")
+    if isinstance(checklist_regression, bool):
+        regression_ok = checklist_regression
+    else:
+        regression_ok = bool(regression.get("passed"))
 
     blockers: list[str] = []
     warnings: list[str] = []

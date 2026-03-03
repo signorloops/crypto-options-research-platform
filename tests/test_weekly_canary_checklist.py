@@ -47,6 +47,42 @@ def test_build_report_recommends_proceed_when_no_blockers():
     assert report["blockers"] == []
 
 
+def test_build_report_uses_checklist_regression_when_regression_block_missing():
+    module = _load_module()
+    audit = {
+        "summary": {"exceptions": 0, "consistency_exceptions": 0},
+        "checklist": {"minimum_regression_passed": True, "rollback_version_marked": True},
+        "regression": {},
+        "thresholds": {"min_sharpe": 0.5},
+        "rollback_marker": {"tag": "v0.1.0"},
+        "kpi_snapshot": [],
+    }
+    attribution = {"attribution_snapshot": []}
+
+    report = module._build_report(audit, attribution)
+
+    assert report["recommendation"] == "PROCEED_CANARY"
+    assert "minimum_regression_failed" not in report["blockers"]
+
+
+def test_build_report_checklist_regression_takes_precedence_over_regression_block():
+    module = _load_module()
+    audit = {
+        "summary": {"exceptions": 0, "consistency_exceptions": 0},
+        "checklist": {"minimum_regression_passed": False, "rollback_version_marked": True},
+        "regression": {"passed": True},
+        "thresholds": {"min_sharpe": 0.5},
+        "rollback_marker": {"tag": "v0.1.0"},
+        "kpi_snapshot": [],
+    }
+    attribution = {"attribution_snapshot": []}
+
+    report = module._build_report(audit, attribution)
+
+    assert report["recommendation"] == "HOLD"
+    assert "minimum_regression_failed" in report["blockers"]
+
+
 def test_main_strict_exits_nonzero_when_hold(tmp_path, monkeypatch):
     module = _load_module()
     audit_json = tmp_path / "audit.json"
