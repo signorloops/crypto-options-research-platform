@@ -19,11 +19,11 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.governance.report_utils import (
     JSON_REPORT_EXCEPTIONS,
-    discover_input_files as _discover_files_shared,
-    format_markdown_table as _format_table_shared,
-    load_json_object as _load_json_shared,
-    write_json as _write_json_shared,
-    write_markdown as _write_markdown_shared,
+    discover_input_files as _discover_input_files,
+    format_markdown_table as _format_table,
+    load_json_object as _load_json,
+    write_json as _write_json,
+    write_markdown as _write_markdown,
 )
 
 DEFAULT_THRESHOLDS: dict[str, float] = {
@@ -47,10 +47,6 @@ MANUAL_CHECKLIST_ITEMS: list[str] = [
     "变更与回滚记录",
     "ADR",
 ]
-
-def _load_json(path: Path) -> dict[str, Any]:
-    return _load_json_shared(path)
-
 
 def _to_text_list(value: Any) -> list[str]:
     if not isinstance(value, list):
@@ -309,18 +305,10 @@ def _extract_strategy_rows(raw: dict[str, Any], source: Path) -> list[dict[str, 
     return rows
 
 
-def _discover_input_files(results_dir: Path, pattern: str) -> list[Path]:
-    return _discover_files_shared(results_dir, pattern)
-
-
 def _fmt(v: float | None, digits: int = 6) -> str:
     if v is None:
         return "n/a"
     return f"{v:.{digits}f}"
-
-
-def _format_table(rows: Sequence[dict[str, Any]], columns: Sequence[str]) -> str:
-    return _format_table_shared(rows, columns)
 
 
 def _load_thresholds(path: Path) -> dict[str, float]:
@@ -986,8 +974,8 @@ def main() -> int:
             close_detail=close_detail,
             signoff_payload=signoff_payload,
         )
-        _write_markdown_shared(close_gate_md, _close_gate_to_markdown(close_report))
-        _write_json_shared(close_gate_json, close_report)
+        _write_markdown(close_gate_md, _close_gate_to_markdown(close_report))
+        _write_json(close_gate_json, close_report)
 
     if args.close_gate_only:
         close_ready, close_detail, signoff_payload = _evaluate_close_gate(signoff_json_path)
@@ -1072,8 +1060,8 @@ def main() -> int:
 
     md_path = (repo_root / args.output_md).resolve()
     json_path = (repo_root / args.output_json).resolve()
-    _write_markdown_shared(md_path, _to_markdown(report))
-    _write_json_shared(json_path, report)
+    _write_markdown(md_path, _to_markdown(report))
+    _write_json(json_path, report)
 
     had_issue = False
     if report["summary"]["exceptions"] > 0:

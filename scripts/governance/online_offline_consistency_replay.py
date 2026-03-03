@@ -14,11 +14,11 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.governance.report_utils import (
-    format_markdown_table as _format_table_shared,
-    load_json_object as _load_json_shared,
-    load_optional_json_object as _load_optional_json_shared,
-    write_json as _write_json_shared,
-    write_markdown as _write_markdown_shared,
+    format_markdown_table as _format_table,
+    load_json_object as _load_json,
+    load_optional_json_object as _load_optional_json,
+    write_json as _write_json,
+    write_markdown as _write_markdown,
 )
 
 DEFAULT_THRESHOLDS: dict[str, float] = {
@@ -26,14 +26,6 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "max_online_alerts": 0,
     "max_online_abs_deviation_bps": 300.0,
 }
-
-
-def _load_json(path: Path) -> dict[str, Any]:
-    return _load_json_shared(path)
-
-
-def _load_optional_json(path: Path) -> dict[str, Any]:
-    return _load_optional_json_shared(path)
 
 
 def _as_float(value: Any) -> float | None:
@@ -167,10 +159,6 @@ def _fmt_float(value: float | None, digits: int = 4) -> str:
     return f"{value:.{digits}f}"
 
 
-def _format_table(rows: list[dict[str, Any]], columns: list[str]) -> str:
-    return _format_table_shared(rows, columns)
-
-
 def _to_markdown(report: dict[str, Any]) -> str:
     summary = report["summary"]
     lines: list[str] = []
@@ -267,8 +255,8 @@ def main() -> int:
 
     output_md = (repo_root / args.output_md).resolve()
     output_json = (repo_root / args.output_json).resolve()
-    _write_markdown_shared(output_md, _to_markdown(report))
-    _write_json_shared(output_json, report)
+    _write_markdown(output_md, _to_markdown(report))
+    _write_json(output_json, report)
 
     print(f"Online/offline consistency replay: {report['status']}.")
     if args.strict and report["status"] != "PASS":

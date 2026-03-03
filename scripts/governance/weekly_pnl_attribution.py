@@ -15,11 +15,11 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.governance.report_utils import (
     JSON_REPORT_EXCEPTIONS,
-    discover_input_files as _discover_files_shared,
-    format_markdown_table as _format_table_shared,
-    load_json_object as _load_json_shared,
-    write_json as _write_json_shared,
-    write_markdown as _write_markdown_shared,
+    discover_input_files as _discover_input_files,
+    format_markdown_table as _format_table,
+    load_json_object as _load_json,
+    write_json as _write_json,
+    write_markdown as _write_markdown,
 )
 
 METRIC_KEYS = {
@@ -46,10 +46,6 @@ METRIC_KEYS = {
         "gamma_hedging_cost",
     ],
 }
-
-def _load_json(path: Path) -> dict[str, Any]:
-    return _load_json_shared(path)
-
 
 def _to_float(value: Any) -> float | None:
     if value is None or isinstance(value, bool):
@@ -127,18 +123,10 @@ def _extract_rows(raw: dict[str, Any], source: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def _discover_input_files(results_dir: Path, pattern: str) -> list[Path]:
-    return _discover_files_shared(results_dir, pattern)
-
-
 def _fmt(v: float | None, digits: int = 6) -> str:
     if v is None:
         return "n/a"
     return f"{v:.{digits}f}"
-
-
-def _format_table(rows: list[dict[str, Any]], columns: list[str]) -> str:
-    return _format_table_shared(rows, columns)
 
 
 def _build_report(input_files: list[Path]) -> dict[str, Any]:
@@ -281,8 +269,8 @@ def main() -> int:
 
     md_path = (repo_root / args.output_md).resolve()
     json_path = (repo_root / args.output_json).resolve()
-    _write_markdown_shared(md_path, _to_markdown(report))
-    _write_json_shared(json_path, report)
+    _write_markdown(md_path, _to_markdown(report))
+    _write_json(json_path, report)
 
     if report["summary"]["strategies"] == 0:
         print("Weekly PnL attribution: no strategy rows extracted.")
