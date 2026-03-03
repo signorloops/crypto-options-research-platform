@@ -159,15 +159,16 @@ class TestTradeFlowSimulator:
 
     def test_trade_generation(self):
         """Test basic trade generation."""
+        rng = np.random.default_rng(20260304)
         # Create simple price path
         price_df = pd.DataFrame({
             'timestamp': pd.date_range('2024-01-01', periods=100, freq='h'),
-            'price': 50000 + np.cumsum(np.random.randn(100) * 10),
-            'returns': np.random.randn(100) * 0.001
+            'price': 50000 + np.cumsum(rng.normal(0, 10, 100)),
+            'returns': rng.normal(0, 0.001, 100)
         })
 
         sim = TradeFlowSimulator(base_arrival_rate=5)
-        trades = sim.generate(price_df)
+        trades = sim.generate(price_df, rng=np.random.default_rng(20260305))
 
         assert len(trades) > 0
         assert 'timestamp' in trades.columns
@@ -177,6 +178,7 @@ class TestTradeFlowSimulator:
 
     def test_informed_trades(self):
         """Test that informed trades are larger."""
+        rng = np.random.default_rng(20260306)
         price_df = pd.DataFrame({
             'timestamp': pd.date_range('2024-01-01', periods=100, freq='h'),
             'price': np.ones(100) * 50000,
@@ -184,7 +186,7 @@ class TestTradeFlowSimulator:
         })
 
         sim = TradeFlowSimulator(informed_trade_prob=0.2)
-        trades = sim.generate(price_df)
+        trades = sim.generate(price_df, rng=rng)
 
         # Check that we have the informed flag
         if 'is_informed' in trades.columns:
