@@ -132,9 +132,18 @@ class TestOrderBookSimulator:
     def test_volatility_impact(self):
         """Test that volatility affects spread and depth."""
         sim = OrderBookSimulator()
+        seed = 20260304
 
-        ob_normal = sim.generate_snapshot(mid_price=50000, volatility_regime=1.0)
-        ob_high_vol = sim.generate_snapshot(mid_price=50000, volatility_regime=2.0)
+        ob_normal = sim.generate_snapshot(
+            mid_price=50000,
+            volatility_regime=1.0,
+            rng=np.random.default_rng(seed),
+        )
+        ob_high_vol = sim.generate_snapshot(
+            mid_price=50000,
+            volatility_regime=2.0,
+            rng=np.random.default_rng(seed),
+        )
 
         # High vol should have wider spread
         assert ob_high_vol.spread > ob_normal.spread

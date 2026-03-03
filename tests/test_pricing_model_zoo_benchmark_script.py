@@ -5,11 +5,13 @@ Tests for model-zoo benchmark script fixture I/O.
 from pathlib import Path
 
 import numpy as np
+import sys
 
 from validation_scripts.pricing_model_zoo_benchmark import (
     _build_synthetic_quotes,
     evaluate_benchmark_quality_gates,
     load_quotes_json,
+    main,
     render_benchmark_markdown,
     run_benchmark,
     save_benchmark_json,
@@ -125,3 +127,59 @@ def test_render_benchmark_markdown_contains_ranking_and_gate_status():
     assert "| 1 | bates |" in markdown
     assert "## Quality Gates" in markdown
     assert "- PASS" in markdown
+
+
+def test_main_strict_returns_nonzero_when_quality_gate_fails(monkeypatch):
+    fixture_path = Path("validation_scripts/fixtures/model_zoo_quotes_seed42.json")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "pricing_model_zoo_benchmark.py",
+            "--quotes-json",
+            str(fixture_path),
+            "--expected-best-model",
+            "heston",
+            "--strict",
+        ],
+    )
+
+    exit_code = main()
+    assert exit_code == 2
+
+
+def test_main_writes_json_and_markdown_outputs(tmp_path, monkeypatch):
+    fixture_path = Path("validation_scripts/fixtures/model_zoo_quotes_seed42.json")
+    output_json = tmp_path / "benchmark.json"
+    output_md = tmp_path / "benchmark.md"
+    output_quotes = tmp_path / "quotes.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "pricing_model_zoo_benchmark.py",
+            "--quotes-json",
+            str(fixture_path),
+            "--save-quotes-json",
+            str(output_quotes),
+            "--output-json",
+            str(output_json),
+            "--output-md",
+            str(output_md),
+            "--expected-best-model",
+            "bates",
+            "--max-best-rmse",
+            "120",
+            "--strict",
+        ],
+    )
+
+    exit_code = main()
+    assert exit_code == 0
+    assert output_quotes.exists()
+    assert output_json.exists()
+    assert output_md.exists()
+    assert '"quotes_source": "json:validation_scripts/fixtures/model_zoo_quotes_seed42.json"' in output_json.read_text(
+        encoding="utf-8"
+    )
+    assert "## Ranking" in output_md.read_text(encoding="utf-8")
