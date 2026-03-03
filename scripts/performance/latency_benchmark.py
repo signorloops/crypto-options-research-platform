@@ -95,13 +95,13 @@ class LatencyBenchmark:
 
         detector = VolatilityRegimeDetector()
         # Pre-train with some data
-        np.random.seed(42)
-        for ret in np.random.normal(0, 0.001, 50):
+        rng = np.random.default_rng(42)
+        for ret in rng.normal(0, 0.001, 50):
             detector.update(ret)
 
         latencies = []
         for _ in range(self.iterations):
-            ret = np.random.normal(0, 0.001)
+            ret = float(rng.normal(0, 0.001))
             latency = self._measure(detector.update, ret)
             latencies.append(latency)
 
@@ -136,8 +136,8 @@ class LatencyBenchmark:
         strategy = IntegratedMarketMakingStrategy()
 
         # Pre-train regime detector to avoid HMM errors
-        np.random.seed(42)
-        for ret in np.random.normal(0, 0.001, 100):
+        rng = np.random.default_rng(42)
+        for ret in rng.normal(0, 0.001, 100):
             strategy.regime_detector.update(ret)
 
         # Create market state
@@ -172,8 +172,8 @@ class LatencyBenchmark:
         strategy = IntegratedMarketMakingStrategy()
 
         # Pre-train regime detector
-        np.random.seed(42)
-        for ret in np.random.normal(0, 0.001, 100):
+        rng = np.random.default_rng(42)
+        for ret in rng.normal(0, 0.001, 100):
             strategy.regime_detector.update(ret)
 
         timestamp = datetime.now(timezone.utc)
@@ -329,6 +329,8 @@ def main():
     )
     parser.add_argument("--quiet", action="store_true", help="Reduce console output")
     args = parser.parse_args()
+    if args.iterations <= 0:
+        parser.error("--iterations must be positive")
 
     benchmark = LatencyBenchmark(iterations=args.iterations)
     selected = None
