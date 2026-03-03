@@ -5,8 +5,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.governance.report_utils import load_json_object as _load_json_shared
 
 MANUAL_KEYS: list[str] = [
     "gray_release_completed",
@@ -21,11 +28,7 @@ ROLE_KEYS: list[str] = ["research", "engineering", "risk"]
 
 
 def _load_json(path: Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError(f"Invalid JSON object: {path}")
-    return data
+    return _load_json_shared(path)
 
 
 def _load_optional_json(path: Path) -> dict[str, Any]:
