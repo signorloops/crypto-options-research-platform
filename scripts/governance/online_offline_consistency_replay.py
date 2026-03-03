@@ -17,6 +17,7 @@ if str(REPO_ROOT) not in sys.path:
 from scripts.governance.report_utils import (
     format_markdown_table as _format_table_shared,
     load_json_object as _load_json_shared,
+    load_optional_json_object as _load_optional_json_shared,
 )
 
 DEFAULT_THRESHOLDS: dict[str, float] = {
@@ -31,9 +32,7 @@ def _load_json(path: Path) -> dict[str, Any]:
 
 
 def _load_optional_json(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    return _load_json(path)
+    return _load_optional_json_shared(path)
 
 
 def _as_float(value: Any) -> float | None:

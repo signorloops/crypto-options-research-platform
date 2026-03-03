@@ -9,9 +9,11 @@ from pathlib import Path
 import pytest
 
 from scripts.governance.report_utils import (
+    as_bool,
     discover_input_files,
     format_markdown_table,
     load_json_object,
+    load_optional_json_object,
 )
 
 
@@ -50,3 +52,16 @@ def test_format_markdown_table_renders_rows():
     assert "| k |" in table
     assert "| v1 |" in table
     assert "| v2 |" in table
+
+
+def test_load_optional_json_object_missing_returns_empty(tmp_path):
+    missing = tmp_path / "missing.json"
+    assert load_optional_json_object(missing) == {}
+
+
+def test_as_bool_normalizes_common_scalar_values():
+    assert as_bool(True) is True
+    assert as_bool(1) is True
+    assert as_bool("yes") is True
+    assert as_bool("false") is False
+    assert as_bool(0) is False

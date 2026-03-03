@@ -15,6 +15,10 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.governance.report_utils import load_json_object as _load_json_shared
+from scripts.governance.report_utils import (
+    as_bool as _as_bool_shared,
+    load_optional_json_object as _load_optional_json_shared,
+)
 
 MANUAL_ITEMS: list[tuple[str, str]] = [
     ("gray_release_completed", "灰度发布完成"),
@@ -51,19 +55,11 @@ def _load_json(path: Path) -> dict[str, Any]:
 
 
 def _load_optional_json(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    return _load_json(path)
+    return _load_optional_json_shared(path)
 
 
 def _as_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return value != 0
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "y"}
-    return False
+    return _as_bool_shared(value)
 
 
 def _normalize_manual_status(raw: dict[str, Any]) -> dict[str, Any]:
