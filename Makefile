@@ -147,7 +147,7 @@ complexity-audit-regression:
 		--strict-regression-only
 
 algorithm-performance-baseline:
-	PYTHONPATH=. $(PYTHON) scripts/governance/algorithm_performance_baseline.py \
+	$(PYTHON) scripts/governance/algorithm_performance_baseline.py \
 		--output-md artifacts/algorithm-performance-baseline.md \
 		--output-json artifacts/algorithm-performance-baseline.json \
 		--strict
