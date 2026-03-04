@@ -43,6 +43,20 @@ class VaRResult:
         }
 
 
+@dataclass(frozen=True)
+class _OptionRevaluationInputs:
+    """Validated option inputs needed for full revaluation PnL simulation."""
+
+    option_type: str
+    underlying_idx: int
+    spot_0: float
+    strike: float
+    time_to_expiry: float
+    implied_vol: float
+    risk_free_rate: float
+    vol_of_vol: float
+
+
 class VaRCalculator:
     """
     Calculate Value at Risk for portfolios.
@@ -437,6 +451,95 @@ class VaRCalculator:
         vega_pnl = greek_row.get("vega", 0) * rng.normal(0, 0.05, n_simulations) * position_value
         return delta_pnl + gamma_pnl + vega_pnl
 
+    @staticmethod
+    def _parse_option_revaluation_inputs(
+        *,
+        row: pd.Series,
+        option_type: str,
+        default_asset_idx: int,
+        column_index: dict[object, int],
+    ) -> _OptionRevaluationInputs | None:
+        underlying_asset = row.get("underlying_asset", row.name)
+        underlying_idx = column_index.get(underlying_asset, default_asset_idx)
+        try:
+            spot_0 = float(row["spot"])
+            strike = float(row["strike"])
+            time_to_expiry = float(row["time_to_expiry"])
+            implied_vol = float(row["implied_vol"])
+            risk_free_rate = float(row.get("risk_free_rate", 0.0))
+            vol_of_vol = float(row.get("vol_of_vol", 0.20))
+        except (TypeError, ValueError):
+            return None
+        if spot_0 <= 0 or strike <= 0 or implied_vol <= 0:
+            return None
+        return _OptionRevaluationInputs(
+            option_type=option_type,
+            underlying_idx=underlying_idx,
+            spot_0=spot_0,
+            strike=strike,
+            time_to_expiry=time_to_expiry,
+            implied_vol=implied_vol,
+            risk_free_rate=risk_free_rate,
+            vol_of_vol=vol_of_vol,
+        )
+
+    @staticmethod
+    def _simulate_revaluation_price_paths(
+        *,
+        inputs: _OptionRevaluationInputs,
+        underlying_returns: np.ndarray,
+        n_simulations: int,
+        holding_period: int,
+        leverage_correlation: float,
+        rng: Any,
+    ) -> tuple[float, np.ndarray] | None:
+        shocked_spot = np.clip(inputs.spot_0 * np.exp(underlying_returns), 1e-8, None)
+        vol_shock_scale = max(inputs.vol_of_vol, 1e-6) * np.sqrt(holding_period / 365.25)
+        vol_shock = rng.normal(0.0, vol_shock_scale, n_simulations)
+        if abs(leverage_correlation) > 1e-8:
+            vol_shock += -leverage_correlation * underlying_returns
+        shocked_vol = np.clip(inputs.implied_vol * (1.0 + vol_shock), 0.01, 5.0)
+        shocked_tte = max(1e-8, inputs.time_to_expiry - holding_period / 365.25)
+
+        from research.pricing.inverse_options import InverseOptionPricer
+
+        try:
+            base_price_btc = InverseOptionPricer.calculate_price(
+                S=inputs.spot_0,
+                K=inputs.strike,
+                T=max(inputs.time_to_expiry, 1e-8),
+                r=inputs.risk_free_rate,
+                sigma=inputs.implied_vol,
+                option_type=inputs.option_type,
+            )
+            revalued_price_btc = np.array(
+                [
+                    InverseOptionPricer.calculate_price(
+                        S=float(s),
+                        K=inputs.strike,
+                        T=shocked_tte,
+                        r=inputs.risk_free_rate,
+                        sigma=float(v),
+                        option_type=inputs.option_type,
+                    )
+                    for s, v in zip(shocked_spot, shocked_vol)
+                ],
+                dtype=float,
+            )
+        except OPTION_PRICING_EXCEPTIONS:
+            return None
+
+        if not np.isfinite(base_price_btc):
+            return None
+        base_price_usd = base_price_btc * inputs.spot_0
+        if base_price_usd <= 1e-12:
+            return None
+
+        revalued_price_usd = revalued_price_btc * shocked_spot
+        if not np.isfinite(revalued_price_usd).all():
+            return None
+        return base_price_usd, revalued_price_usd
+
     def _single_position_full_revaluation_pnl(
         self,
         idx: object,
@@ -471,70 +574,31 @@ class VaRCalculator:
                 )
             return linear_component
 
-        underlying_asset = row.get("underlying_asset", idx)
-        underlying_idx = column_index.get(underlying_asset, default_asset_idx)
-
-        try:
-            spot_0 = float(row["spot"])
-            strike = float(row["strike"])
-            time_to_expiry = float(row["time_to_expiry"])
-            implied_vol = float(row["implied_vol"])
-            risk_free_rate = float(row.get("risk_free_rate", 0.0))
-            vol_of_vol = float(row.get("vol_of_vol", 0.20))
-        except (TypeError, ValueError):
+        inputs = self._parse_option_revaluation_inputs(
+            row=row,
+            option_type=option_type,
+            default_asset_idx=default_asset_idx,
+            column_index=column_index,
+        )
+        if inputs is None:
             return linear_component
 
-        if spot_0 <= 0 or strike <= 0 or implied_vol <= 0:
+        underlying_returns = simulated_returns[:, inputs.underlying_idx]
+        revalued = self._simulate_revaluation_price_paths(
+            inputs=inputs,
+            underlying_returns=underlying_returns,
+            n_simulations=n_simulations,
+            holding_period=holding_period,
+            leverage_correlation=leverage_correlation,
+            rng=rng,
+        )
+        if revalued is None:
             return linear_component
 
-        underlying_returns = simulated_returns[:, underlying_idx]
-        shocked_spot = np.clip(spot_0 * np.exp(underlying_returns), 1e-8, None)
-
-        vol_shock_scale = max(vol_of_vol, 1e-6) * np.sqrt(holding_period / 365.25)
-        vol_shock = rng.normal(0.0, vol_shock_scale, n_simulations)
-        if abs(leverage_correlation) > 1e-8:
-            vol_shock += -leverage_correlation * underlying_returns
-        shocked_vol = np.clip(implied_vol * (1.0 + vol_shock), 0.01, 5.0)
-        shocked_tte = max(1e-8, time_to_expiry - holding_period / 365.25)
-
-        from research.pricing.inverse_options import InverseOptionPricer
-
-        try:
-            base_price_btc = InverseOptionPricer.calculate_price(
-                S=spot_0,
-                K=strike,
-                T=max(time_to_expiry, 1e-8),
-                r=risk_free_rate,
-                sigma=implied_vol,
-                option_type=option_type,
-            )
-            revalued_price_btc = np.array(
-                [
-                    InverseOptionPricer.calculate_price(
-                        S=float(s),
-                        K=strike,
-                        T=shocked_tte,
-                        r=risk_free_rate,
-                        sigma=float(v),
-                        option_type=option_type,
-                    )
-                    for s, v in zip(shocked_spot, shocked_vol)
-                ],
-                dtype=float,
-            )
-        except OPTION_PRICING_EXCEPTIONS:
-            return linear_component
-
-        if not np.isfinite(base_price_btc):
-            return linear_component
-        base_price_usd = base_price_btc * spot_0
-        if base_price_usd <= 1e-12:
-            return linear_component
-
+        base_price_usd, revalued_price_usd = revalued
         quantity = position_value / base_price_usd
-        if not np.isfinite(revalued_price_btc).all() or not np.isfinite(quantity):
+        if not np.isfinite(quantity):
             return linear_component
-        revalued_price_usd = revalued_price_btc * shocked_spot
         return quantity * (revalued_price_usd - base_price_usd)
 
     def _option_schema_pnl(
