@@ -318,14 +318,7 @@ class InverseOptionPricer:
             option_type=option_type,
             context=context,
         )
-
-        return InverseGreeks(
-            delta=delta,
-            gamma=gamma,
-            theta=theta,
-            vega=vega,
-            rho=rho
-        )
+        return InverseGreeks(delta=delta, gamma=gamma, theta=theta, vega=vega, rho=rho)
 
     @staticmethod
     def _calculate_delta_from_d(
@@ -806,37 +799,17 @@ def calculate_position_value(
     avg_entry_price_usd: float,
     inverse: bool = True
 ) -> Tuple[float, float, float]:
-    """
-    计算期权头寸的当前价值和盈亏。
-
-    Args:
-        S: 当前标的价 (USD)
-        K: 行权价 (USD)
-        T: 剩余时间（年）
-        r: 利率
-        sigma: 波动率
-        size: 头寸大小（正数=多头，负数=空头）
-        option_type: "call" 或 "put"
-        avg_entry_price_usd: 平均入场价（期权价格，单位BTC）
-        inverse: 是否币本位
-
-    Returns:
-        (当前期权价值BTC, 未实现盈亏BTC, 市值BTC)
-    """
+    """Compute current option value, unrealized PnL, and market value for a position."""
     InverseOptionPricer._validate_option_type(option_type)
     InverseOptionPricer._validate_inputs(S, K, T, r, sigma)
 
     if inverse:
-        # 币本位计算
         current_option_value = InverseOptionPricer.calculate_price(S, K, T, r, sigma, option_type)
-        # 未实现盈亏 = 头寸大小 * (当前期权价值 - 入场期权价值)
         unrealized_pnl = size * (current_option_value - avg_entry_price_usd)
         market_value = size * current_option_value
     else:
-        # U本位计算
         from scipy.stats import norm
         if T <= InverseOptionPricer.EPSILON:
-            # 到期边界：回落到内在价值，避免 sqrt(T) 除零。
             if option_type == "call":
                 current_option_value = max(0.0, S - K)
             else:

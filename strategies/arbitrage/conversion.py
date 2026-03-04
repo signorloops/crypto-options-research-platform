@@ -185,16 +185,13 @@ class ConversionArbitrage:
         if resolved is None:
             return None
         call_price, put_price, spot_price, strike, expiry = resolved
-
         parity = self.calculate_parity_deviation(
             call_price, put_price, spot_price, strike, expiry
         )
-
         deviation = parity['deviation']
         T = parity['time_to_expiry']
         if spot_price <= 0 or T <= 0:
             return None
-
         total_cost = 3 * self.transaction_cost * spot_price
         strategy_profit = _strategy_and_profit_from_deviation(
             deviation=deviation,
@@ -203,12 +200,9 @@ class ConversionArbitrage:
         if strategy_profit is None:
             return None
         strategy, profit = strategy_profit
-
         if profit / spot_price < self.min_profit:
             return None
-
         annualized_return = (profit / spot_price) / T
-
         return _build_conversion_opportunity(
             underlying=underlying,
             strike=strike,

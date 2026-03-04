@@ -54,16 +54,13 @@ def fit_ssvi(surface, ssvi_params_cls: Type, expiry_tol: float = 0.01):
     x_exp = np.array(atm_expiries, dtype=float)
     y_theta = np.maximum(np.array(atm_total_vars, dtype=float), 1e-10)
     y_theta = np.maximum.accumulate(y_theta)
-
     def theta_of_t(t: np.ndarray) -> np.ndarray:
         return np.interp(t, x_exp, y_theta, left=y_theta[0], right=y_theta[-1])
-
     if HAS_SCIPY_OPT:
         k_obs = np.array([p.log_moneyness for p in surface.points], dtype=float)
         t_obs = np.array([float(p.expiry) for p in surface.points], dtype=float)
         w_obs = np.array([p.volatility**2 * p.expiry for p in surface.points], dtype=float)
         w_obs = np.maximum(w_obs, 1e-10)
-
         def objective(x: np.ndarray) -> float:
             params = ssvi_params_cls(rho=float(x[0]), eta=float(x[1]), lam=float(x[2]))
             theta = theta_of_t(t_obs)
@@ -75,7 +72,6 @@ def fit_ssvi(surface, ssvi_params_cls: Type, expiry_tol: float = 0.01):
             if params.eta > eta_upper:
                 penalty += 1e5 * (params.eta - eta_upper) ** 2
             return float(np.mean((w_model - w_obs) ** 2) + penalty)
-
         init = np.array([-0.2, 1.0, 0.2], dtype=float)
         bounds = [(-0.999, 0.999), (1e-4, 10.0), (0.0, 0.5)]
         result = minimize(objective, init, method="L-BFGS-B", bounds=bounds)
@@ -83,10 +79,8 @@ def fit_ssvi(surface, ssvi_params_cls: Type, expiry_tol: float = 0.01):
         rho, eta, lam = float(x[0]), float(x[1]), float(x[2])
     else:
         rho, eta, lam = -0.2, 1.0, 0.2
-
     eta_upper = 2.0 / (np.sqrt(np.max(y_theta)) * (1.0 + abs(rho) + 1e-8))
     eta = float(np.clip(eta, 1e-4, eta_upper))
-
     surface._ssvi_params = ssvi_params_cls(rho=rho, eta=eta, lam=lam)
     surface._ssvi_atm_expiries = x_exp
     surface._ssvi_atm_total_vars = y_theta

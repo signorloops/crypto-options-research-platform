@@ -231,7 +231,6 @@ class RealisticFillSimulator:
         our_size = quote.bid_size if our_side == OrderSide.BUY else quote.ask_size
         if our_size <= 0:
             return None
-
         fill_prob = self._estimate_fill_probability(
             quote=quote,
             trade=trade,
@@ -242,9 +241,7 @@ class RealisticFillSimulator:
         )
         if self.rng.random() > fill_prob:
             return None
-
         fill_size = min(trade.size, our_size)
-
         base_price = quote.bid_price if our_side == OrderSide.BUY else quote.ask_price
         fill_price, slippage_cost = _apply_slippage_to_fill(
             base_price=base_price,
@@ -255,7 +252,6 @@ class RealisticFillSimulator:
             cost_against_side_fn=self._cost_against_side,
         )
         self.slippage_cost += slippage_cost
-
         fill_price, transaction_cost, adverse_selection_cost = _apply_post_slippage_costs(
             fill_price=fill_price,
             side=our_side,
@@ -267,7 +263,6 @@ class RealisticFillSimulator:
         )
         self.transaction_cost_paid += transaction_cost
         self.adverse_selection_cost += adverse_selection_cost
-
         return Fill(
             timestamp=trade.timestamp,
             instrument=market_state.instrument,

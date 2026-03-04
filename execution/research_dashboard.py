@@ -420,7 +420,6 @@ async def _build_live_deviation_report(
             status_code=422,
             detail="Either cex_file or cex_provider is required (query or env)",
         )
-
     try:
         if cex_source:
             dataset = build_cex_defi_deviation_dataset(
@@ -428,11 +427,7 @@ async def _build_live_deviation_report(
                 Path(defi_source),
                 align_tolerance_seconds=align_tolerance_seconds,
             )
-            source_meta = {
-                "mode": "file",
-                "cex_file": cex_source,
-                "defi_file": defi_source,
-            }
+            source_meta = {"mode": "file", "cex_file": cex_source, "defi_file": defi_source}
         else:
             dataset = await build_cex_defi_deviation_dataset_live(
                 provider,
@@ -440,15 +435,9 @@ async def _build_live_deviation_report(
                 underlying=underlying,
                 align_tolerance_seconds=align_tolerance_seconds,
             )
-            source_meta = {
-                "mode": "provider",
-                "cex_provider": provider,
-                "underlying": underlying,
-                "defi_file": defi_source,
-            }
+            source_meta = {"mode": "provider", "cex_provider": provider, "underlying": underlying, "defi_file": defi_source}
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc))
-
     report = build_cross_market_deviation_report(dataset, threshold_bps=float(threshold_bps))
     report["sources"] = {
         **source_meta,
