@@ -48,6 +48,13 @@ class LatencyBenchmark:
         end = time.perf_counter()
         return (end - start) * 1000  # Convert to milliseconds
 
+    @staticmethod
+    def _warmup_regime_detector(detector: VolatilityRegimeDetector, count: int, seed: int) -> None:
+        """Warm up regime detector using deterministic synthetic returns."""
+        rng = np.random.default_rng(seed)
+        for ret in rng.normal(0, 0.001, count):
+            detector.update(ret)
+
     def _benchmark_registry(self) -> Dict[str, Callable[[], Dict]]:
         return {
             "greeks_calculation": self.benchmark_greeks_calculation,
@@ -96,10 +103,9 @@ class LatencyBenchmark:
         self._log(f"Benchmarking Regime Detector ({self.iterations} iterations)...")
 
         detector = VolatilityRegimeDetector()
-        # Pre-train with some data
-        rng = np.random.default_rng(42)
-        for ret in rng.normal(0, 0.001, 50):
-            detector.update(ret)
+        self._warmup_regime_detector(detector, count=50, seed=42)
+
+        rng = np.random.default_rng(43)
 
         latencies = []
         for _ in range(self.iterations):
@@ -136,11 +142,7 @@ class LatencyBenchmark:
         self._log(f"Benchmarking Quote Generation ({self.iterations} iterations)...")
 
         strategy = IntegratedMarketMakingStrategy()
-
-        # Pre-train regime detector to avoid HMM errors
-        rng = np.random.default_rng(42)
-        for ret in rng.normal(0, 0.001, 100):
-            strategy.regime_detector.update(ret)
+        self._warmup_regime_detector(strategy.regime_detector, count=100, seed=42)
 
         # Create market state
         timestamp = datetime.now(timezone.utc)
@@ -172,11 +174,7 @@ class LatencyBenchmark:
         self._log(f"Benchmarking End-to-End ({self.iterations} iterations)...")
 
         strategy = IntegratedMarketMakingStrategy()
-
-        # Pre-train regime detector
-        rng = np.random.default_rng(42)
-        for ret in rng.normal(0, 0.001, 100):
-            strategy.regime_detector.update(ret)
+        self._warmup_regime_detector(strategy.regime_detector, count=100, seed=42)
 
         timestamp = datetime.now(timezone.utc)
 
