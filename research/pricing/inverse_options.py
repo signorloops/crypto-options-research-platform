@@ -364,6 +364,65 @@ class InverseOptionPricer:
         )
 
     @staticmethod
+    def _stabilize_iv_estimate(
+        raw_sigma: float,
+        T: float,
+        *,
+        stabilize_short_maturity: bool,
+        short_maturity_threshold: float,
+        anchor_sigma: Optional[float],
+        max_anchor_deviation: float,
+    ) -> float:
+        if not stabilize_short_maturity:
+            return float(raw_sigma)
+        if T <= 0 or T > short_maturity_threshold:
+            return float(raw_sigma)
+        if anchor_sigma is None or not np.isfinite(anchor_sigma) or anchor_sigma <= 0:
+            return float(raw_sigma)
+
+        anchor = float(np.clip(anchor_sigma, 0.001, 5.0))
+        deviation = float(max(max_anchor_deviation, 1e-6))
+        bounded = float(np.clip(raw_sigma, anchor - deviation, anchor + deviation))
+        maturity_ratio = float(
+            np.clip(T / max(short_maturity_threshold, InverseOptionPricer.EPSILON), 0.0, 1.0)
+        )
+        weight = 0.60 * (1.0 - maturity_ratio)
+        stabilized = (1.0 - weight) * bounded + weight * anchor
+        return float(np.clip(stabilized, 0.001, 5.0))
+
+    @staticmethod
+    def _newton_iv_update(
+        *,
+        price: float,
+        S: float,
+        K: float,
+        T: float,
+        r: float,
+        option_type: Literal["call", "put"],
+        sigma: float,
+        rel_tol: float,
+        price_scale: float,
+    ) -> tuple[Optional[float], bool, bool]:
+        try:
+            model_price = InverseOptionPricer.calculate_price(S, K, T, r, sigma, option_type)
+            diff = model_price - price
+            if abs(diff) < rel_tol * price_scale:
+                return sigma, True, False
+
+            greeks = InverseOptionPricer.calculate_greeks(S, K, T, r, sigma, option_type)
+            vega = greeks.vega / InverseOptionPricer.VEGA_SCALING
+            if abs(vega) < 1e-14:
+                return None, False, True
+
+            step = np.clip(diff / vega, -0.5, 0.5)
+            sigma_new = float(np.clip(sigma - step, 0.001, 5.0))
+            if abs(sigma_new - sigma) < 1e-6:
+                return sigma_new, True, False
+            return sigma_new, False, False
+        except (ValueError, FloatingPointError, RuntimeError):
+            return None, False, True
+
+    @staticmethod
     def calculate_greeks(
         S: float,
         K: float,
@@ -465,62 +524,43 @@ class InverseOptionPricer:
         price_scale = max(abs(price), InverseOptionPricer.EPSILON)
         rel_tol = tol
 
-        def _stabilize_iv(raw_sigma: float) -> float:
-            if not stabilize_short_maturity:
-                return float(raw_sigma)
-            if T <= 0 or T > short_maturity_threshold:
-                return float(raw_sigma)
-            if anchor_sigma is None or not np.isfinite(anchor_sigma) or anchor_sigma <= 0:
-                return float(raw_sigma)
-
-            anchor = float(np.clip(anchor_sigma, 0.001, 5.0))
-            deviation = float(max(max_anchor_deviation, 1e-6))
-            bounded = float(np.clip(raw_sigma, anchor - deviation, anchor + deviation))
-
-            maturity_ratio = float(np.clip(T / max(short_maturity_threshold, InverseOptionPricer.EPSILON), 0.0, 1.0))
-            weight = 0.60 * (1.0 - maturity_ratio)
-            stabilized = (1.0 - weight) * bounded + weight * anchor
-            return float(np.clip(stabilized, 0.001, 5.0))
-
-        for i in range(max_iter):
-            try:
-                model_price = InverseOptionPricer.calculate_price(S, K, T, r, sigma, option_type)
-                diff = model_price - price
-
-                # 使用相对误差检查收敛
-                if abs(diff) < rel_tol * price_scale:
-                    return _stabilize_iv(sigma)
-
-                # Vega作为导数（每单位波动率，不是每1%）
-                greeks = InverseOptionPricer.calculate_greeks(S, K, T, r, sigma, option_type)
-                # greeks.vega是每1%的变化，转换为每单位波动率需要除以0.01（乘以100）
-                vega = greeks.vega / InverseOptionPricer.VEGA_SCALING
-
-                if abs(vega) < 1e-14:
-                    # Vega太小，使用二分法
-                    break
-
-                # 牛顿迭代，带阻尼
-                step = diff / vega
-                # 限制步长防止震荡
-                step = max(-0.5, min(0.5, step))
-                sigma_new = sigma - step
-
-                # 限制范围
-                sigma_new = max(0.001, min(5.0, sigma_new))
-
-                if abs(sigma_new - sigma) < 1e-6:
-                    return _stabilize_iv(sigma_new)
-
-                sigma = sigma_new
-
-            except (ValueError, FloatingPointError, RuntimeError):
-                # Numerical errors in iteration: fall back to bisection method
+        for _ in range(max_iter):
+            sigma_new, converged, use_bisection = InverseOptionPricer._newton_iv_update(
+                price=price,
+                S=S,
+                K=K,
+                T=T,
+                r=r,
+                option_type=option_type,
+                sigma=sigma,
+                rel_tol=rel_tol,
+                price_scale=price_scale,
+            )
+            if converged and sigma_new is not None:
+                return InverseOptionPricer._stabilize_iv_estimate(
+                    sigma_new,
+                    T,
+                    stabilize_short_maturity=stabilize_short_maturity,
+                    short_maturity_threshold=short_maturity_threshold,
+                    anchor_sigma=anchor_sigma,
+                    max_anchor_deviation=max_anchor_deviation,
+                )
+            if use_bisection:
                 break
+            if sigma_new is None:
+                break
+            sigma = sigma_new
 
         # 如果牛顿法失败，使用二分法作为fallback
         raw_sigma = InverseOptionPricer._iv_bisection(price, S, K, T, r, option_type, tol, max_iter)
-        return _stabilize_iv(raw_sigma)
+        return InverseOptionPricer._stabilize_iv_estimate(
+            raw_sigma,
+            T,
+            stabilize_short_maturity=stabilize_short_maturity,
+            short_maturity_threshold=short_maturity_threshold,
+            anchor_sigma=anchor_sigma,
+            max_anchor_deviation=max_anchor_deviation,
+        )
 
     @staticmethod
     def _iv_bisection(
