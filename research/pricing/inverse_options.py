@@ -217,42 +217,26 @@ class InverseOptionPricer:
         sigma: float,
         option_type: Literal["call", "put"]
     ) -> Tuple[float, InverseGreeks]:
-        """
-        同时计算价格和希腊字母（避免重复计算）。
-
-        Args:
-            S, K, T, r, sigma, option_type: 标准参数
-
-        Returns:
-            (价格, 希腊字母) 元组
-        """
+        """Calculate inverse-option price and Greeks in one pass."""
         InverseOptionPricer._validate_option_type(option_type)
         InverseOptionPricer._validate_inputs(S, K, T, r, sigma)
-
-        # 到期边界条件
         if T < InverseOptionPricer.EPSILON:
             if option_type == "call":
                 price = max(0.0, 1.0/K - 1.0/S) if S > K else 0.0
             else:
                 price = max(0.0, 1.0/S - 1.0/K) if K > S else 0.0
             return price, InverseGreeks(delta=0.0, gamma=0.0, theta=0.0, vega=0.0, rho=0.0)
-
-        # 统一计算 d1, d2
         d1, d2 = InverseOptionPricer._calculate_d1_d2(S, K, T, r, sigma)
         inv_S = 1.0 / S
         inv_K = 1.0 / K
         discount = np.exp(-r * T)
         sqrt_T = np.sqrt(T)
         n_d1 = norm.pdf(d1)
-
-        # 计算价格
         if option_type == "call":
             price = discount * inv_K * norm.cdf(-d2) - inv_S * norm.cdf(-d1)
         else:
             price = inv_S * norm.cdf(d1) - discount * inv_K * norm.cdf(d2)
         price = max(0.0, price)
-
-        # 计算希腊字母
         context = _GreeksComputationContext(
             inv_S=inv_S,
             inv_K=inv_K,
@@ -263,7 +247,6 @@ class InverseOptionPricer:
         greeks = InverseOptionPricer._calculate_greeks_from_d(
             d1, d2, S, K, T, r, sigma, option_type, context
         )
-
         return price, greeks
 
     @staticmethod
@@ -636,11 +619,10 @@ class InverseOptionPricer:
             S=S,
             K=K,
             T=T,
-            r=r,
-            option_type=option_type,
-        ):
+                r=r,
+                option_type=option_type,
+            ):
             return 0.0
-
         raw_sigma = InverseOptionPricer._solve_iv_newton(
             price=price,
             S=S,
@@ -652,16 +634,7 @@ class InverseOptionPricer:
             max_iter=max_iter,
         )
         if raw_sigma is None:
-            raw_sigma = InverseOptionPricer._iv_bisection(
-                price,
-                S,
-                K,
-                T,
-                r,
-                option_type,
-                tol,
-                max_iter,
-            )
+            raw_sigma = InverseOptionPricer._iv_bisection(price, S, K, T, r, option_type, tol, max_iter)
         return InverseOptionPricer._stabilize_iv_estimate(
             raw_sigma,
             T,

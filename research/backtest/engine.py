@@ -526,30 +526,22 @@ class BacktestEngine:
         pnl_series = _history_to_series(self._pnl_history)
         inventory_series = _history_to_series(self._inventory_history)
         crypto_balance_series = _history_to_series(self._crypto_balance_history)
-
         total_pnl_crypto = float(pnl_series.iloc[-1]) if len(pnl_series) > 0 else 0.0
         safe_price = float(current_price) if current_price is not None else 0.0
         total_pnl_usd = total_pnl_crypto * safe_price
         realized_pnl, unrealized_pnl = self._calculate_crypto_pnl_components(current_price)
         inventory_pnl = unrealized_pnl
-
         sharpe = self._calculate_sharpe_ratio(pnl_series)
         max_dd = _calculate_max_drawdown(pnl_series)
-
         buys, sells = _trade_side_counts(self.trades)
         avg_size = np.mean([t.size for t in self.trades]) if self.trades else 0
-        returns_for_ci = (
-            pnl_series.diff().dropna() / max(self.initial_crypto_balance, 1e-12)
-            if len(pnl_series) > 1
-            else pd.Series(dtype=float)
-        )
+        returns_for_ci = pnl_series.diff().dropna() / max(self.initial_crypto_balance, 1e-12) if len(pnl_series) > 1 else pd.Series(dtype=float)
         sharpe_ci, drawdown_ci = self._bootstrap_risk_ci(returns_for_ci)
         deflated_trials = max(2, int(getattr(self.strategy, "multiple_testing_trials", 2)))
         deflated_sharpe = self._deflated_sharpe_ratio(
             float(sharpe), n_obs=len(returns_for_ci), n_trials=deflated_trials
         )
         execution_cost, adverse_selection_cost = self._execution_costs()
-
         return BacktestResult(
             strategy_name=self.strategy.name,
             total_pnl_crypto=total_pnl_crypto,

@@ -269,47 +269,26 @@ class VaRCalculator:
     def historical_var(
         self, positions: pd.DataFrame, returns: pd.DataFrame, holding_period: int = 1
     ) -> VaRResult:
-        """
-        Calculate historical VaR using empirical distribution.
-
-        Args:
-            positions: DataFrame with position values
-            returns: DataFrame of historical returns
-            holding_period: Days to hold positions
-
-        Returns:
-            VaRResult
-        """
+        """Calculate historical VaR/CVaR from empirical portfolio-return quantiles."""
         if holding_period <= 0:
             raise ValueError("holding_period must be positive")
-
         total_value, weights_arr, aligned_returns = self._prepare_portfolio_inputs(
             positions, returns
         )
-
-        # Calculate historical portfolio returns
         portfolio_returns = pd.Series(
             aligned_returns.to_numpy() @ weights_arr, index=aligned_returns.index
         )
-
-        # Scale by holding period using non-overlapping windows to maintain independence
         if holding_period > 1:
             n_periods = len(portfolio_returns) // holding_period
             if n_periods > 0:
-                # Reshape into non-overlapping periods
                 reshaped = portfolio_returns.iloc[: n_periods * holding_period].values.reshape(
                     n_periods, holding_period
                 )
                 portfolio_returns = pd.Series(reshaped.sum(axis=1))
             else:
-                # Not enough data, use simple scaling
                 portfolio_returns = portfolio_returns * np.sqrt(holding_period)
-
-        # VaR from empirical quantiles
         var_95 = -np.percentile(portfolio_returns, 5) * total_value
         var_99 = -np.percentile(portfolio_returns, 1) * total_value
-
-        # CVaR (average of returns beyond VaR threshold)
         cvar_95 = (
             -portfolio_returns[portfolio_returns <= np.percentile(portfolio_returns, 5)].mean()
             * total_value
@@ -318,7 +297,6 @@ class VaRCalculator:
             -portfolio_returns[portfolio_returns <= np.percentile(portfolio_returns, 1)].mean()
             * total_value
         )
-
         return VaRResult(
             var_95=var_95, var_99=var_99, cvar_95=cvar_95, cvar_99=cvar_99, method="historical"
         )

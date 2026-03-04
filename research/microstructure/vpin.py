@@ -249,7 +249,6 @@ class VPINCalculator:
         """Create volume-synchronized buckets via cumsum/searchsorted."""
         if df.empty:
             return _empty_bucket_arrays()
-
         prices = df['price'].to_numpy(dtype=float)
         sizes = df['size'].to_numpy(dtype=float)
         sides = df['side'].to_numpy()
@@ -257,12 +256,10 @@ class VPINCalculator:
         volumes = np.maximum(sizes * prices, 0.0)
         if len(volumes) == 0:
             return _empty_bucket_arrays()
-
         cum_total = np.cumsum(volumes)
         total_volume = float(cum_total[-1]) if len(cum_total) else 0.0
         if total_volume <= 0:
             return _empty_bucket_arrays()
-
         bucket_size = float(self.volume_bucket_size)
         n_full = int(total_volume // bucket_size)
         residual = total_volume - n_full * bucket_size
@@ -270,7 +267,6 @@ class VPINCalculator:
         n_buckets = n_full + (1 if include_partial else 0)
         if n_buckets == 0:
             return _empty_bucket_arrays()
-
         is_buy = sides == 'buy'
         buy_trade_vol = np.where(is_buy, volumes, 0.0)
         sell_trade_vol = np.where(is_buy, 0.0, volumes)
