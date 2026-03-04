@@ -221,96 +221,31 @@ class InversePowerOptionPricer:
         base: _InversePowerFDBase,
         bumps: _InversePowerFDBumps,
     ) -> tuple[float, float, float, float, float, float, float, float]:
-        call = InversePowerOptionPricer._price_with_normals
+        base_kwargs = {
+            "normals": base.normals,
+            "S": base.S,
+            "K": base.K,
+            "T": base.T,
+            "r": base.r,
+            "sigma": base.sigma,
+            "option_type": base.option_type,
+            "power": base.power,
+            "n_paths": base.n_paths,
+        }
 
-        p_up_s = call(
-            normals=base.normals,
-            S=base.S + bumps.ds,
-            K=base.K,
-            T=base.T,
-            r=base.r,
-            sigma=base.sigma,
-            option_type=base.option_type,
-            power=base.power,
-            n_paths=base.n_paths,
-        )
-        p_dn_s = call(
-            normals=base.normals,
-            S=max(base.S - bumps.ds, InversePowerOptionPricer.EPS),
-            K=base.K,
-            T=base.T,
-            r=base.r,
-            sigma=base.sigma,
-            option_type=base.option_type,
-            power=base.power,
-            n_paths=base.n_paths,
-        )
-        p_up_v = call(
-            normals=base.normals,
-            S=base.S,
-            K=base.K,
-            T=base.T,
-            r=base.r,
-            sigma=base.sigma + bumps.dv,
-            option_type=base.option_type,
-            power=base.power,
-            n_paths=base.n_paths,
-        )
-        p_dn_v = call(
-            normals=base.normals,
-            S=base.S,
-            K=base.K,
-            T=base.T,
-            r=base.r,
-            sigma=max(base.sigma - bumps.dv, 0.0),
-            option_type=base.option_type,
-            power=base.power,
-            n_paths=base.n_paths,
-        )
-        p_up_r = call(
-            normals=base.normals,
-            S=base.S,
-            K=base.K,
-            T=base.T,
-            r=base.r + bumps.dr,
-            sigma=base.sigma,
-            option_type=base.option_type,
-            power=base.power,
-            n_paths=base.n_paths,
-        )
-        p_dn_r = call(
-            normals=base.normals,
-            S=base.S,
-            K=base.K,
-            T=base.T,
-            r=base.r - bumps.dr,
-            sigma=base.sigma,
-            option_type=base.option_type,
-            power=base.power,
-            n_paths=base.n_paths,
-        )
-        p_up_t = call(
-            normals=base.normals,
-            S=base.S,
-            K=base.K,
-            T=base.T + bumps.dt,
-            r=base.r,
-            sigma=base.sigma,
-            option_type=base.option_type,
-            power=base.power,
-            n_paths=base.n_paths,
-        )
-        p_dn_t = call(
-            normals=base.normals,
-            S=base.S,
-            K=base.K,
-            T=max(base.T - bumps.dt, 0.0),
-            r=base.r,
-            sigma=base.sigma,
-            option_type=base.option_type,
-            power=base.power,
-            n_paths=base.n_paths,
-        )
+        def eval_price(**overrides: float) -> float:
+            return InversePowerOptionPricer._price_with_normals(
+                **{**base_kwargs, **overrides}
+            )
+
+        p_up_s = eval_price(S=base.S + bumps.ds)
+        p_dn_s = eval_price(S=max(base.S - bumps.ds, InversePowerOptionPricer.EPS))
+        p_up_v = eval_price(sigma=base.sigma + bumps.dv)
+        p_dn_v = eval_price(sigma=max(base.sigma - bumps.dv, 0.0))
+        p_up_r = eval_price(r=base.r + bumps.dr)
+        p_dn_r = eval_price(r=base.r - bumps.dr)
+        p_up_t = eval_price(T=base.T + bumps.dt)
+        p_dn_t = eval_price(T=max(base.T - bumps.dt, 0.0))
         return p_up_s, p_dn_s, p_up_v, p_dn_v, p_up_r, p_dn_r, p_up_t, p_dn_t
 
     @staticmethod
