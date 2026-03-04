@@ -706,6 +706,32 @@ class VaRCalculator:
         cvar_99 = -float(pnl[pnl <= p1].mean())
         return var_95, var_99, cvar_95, cvar_99
 
+    def _prepare_monte_carlo_path_inputs(
+        self,
+        *,
+        positions: pd.DataFrame,
+        returns: pd.DataFrame,
+        n_simulations: int,
+        holding_period: int,
+        leverage_correlation: float,
+        random_seed: int | None,
+    ) -> tuple[float, np.ndarray, pd.DataFrame, pd.DataFrame, np.ndarray, Any]:
+        total_value, weights, aligned_returns = self._prepare_portfolio_inputs(positions, returns)
+        aligned_positions = positions.loc[aligned_returns.columns]
+        mean = aligned_returns.mean().values
+        cov = self._regularize_covariance(aligned_returns.cov().to_numpy(copy=True))
+        rng = np.random.default_rng(random_seed)
+        simulated_returns = self._simulate_correlated_returns(
+            mean=mean,
+            cov=cov,
+            weights=weights,
+            n_simulations=n_simulations,
+            holding_period=holding_period,
+            leverage_correlation=leverage_correlation,
+            rng=rng,
+        )
+        return total_value, weights, aligned_returns, aligned_positions, simulated_returns, rng
+
     def monte_carlo_var(
         self,
         positions: pd.DataFrame,
@@ -737,21 +763,15 @@ class VaRCalculator:
         if holding_period <= 0:
             raise ValueError("holding_period must be positive")
 
-        total_value, weights, aligned_returns = self._prepare_portfolio_inputs(positions, returns)
-        aligned_positions = positions.loc[aligned_returns.columns]
-
-        mean = aligned_returns.mean().values
-        cov = self._regularize_covariance(aligned_returns.cov().to_numpy(copy=True))
-
-        rng = np.random.default_rng(random_seed)
-        simulated_returns = self._simulate_correlated_returns(
-            mean=mean,
-            cov=cov,
-            weights=weights,
-            n_simulations=n_simulations,
-            holding_period=holding_period,
-            leverage_correlation=leverage_correlation,
-            rng=rng,
+        total_value, weights, aligned_returns, aligned_positions, simulated_returns, rng = (
+            self._prepare_monte_carlo_path_inputs(
+                positions=positions,
+                returns=returns,
+                n_simulations=n_simulations,
+                holding_period=holding_period,
+                leverage_correlation=leverage_correlation,
+                random_seed=random_seed,
+            )
         )
         pnl = _compute_monte_carlo_pnl(
             calculator=self,

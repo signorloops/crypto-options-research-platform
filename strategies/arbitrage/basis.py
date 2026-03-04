@@ -32,6 +32,61 @@ def _time_to_expiry_years(expiry: datetime) -> float:
     return max(0.0, (expiry - now).total_seconds() / (365.0 * 24 * 3600))
 
 
+def _basis_strategy_profit(
+    *,
+    basis: float,
+    net_return: float,
+    min_annualized_return: float,
+    spot: float,
+    transaction_cost: float,
+) -> Optional[tuple[Literal["long_basis", "short_basis"], float]]:
+    if basis > 0 and net_return >= min_annualized_return:
+        return "short_basis", float(basis - 2 * spot * transaction_cost)
+    if basis < 0 and -net_return >= min_annualized_return:
+        return "long_basis", float(-basis - 2 * spot * transaction_cost)
+    return None
+
+
+def _build_basis_opportunity(
+    *,
+    instrument: str,
+    spot: float,
+    futures: float,
+    expiry: datetime,
+    basis: float,
+    basis_pct: float,
+    annualized_return: float,
+    strategy: Literal["long_basis", "short_basis"],
+    required_capital: float,
+    expected_profit: float,
+) -> "BasisOpportunity":
+    return BasisOpportunity(
+        instrument=instrument,
+        spot_price=spot,
+        futures_price=futures,
+        expiry=expiry,
+        basis=basis,
+        basis_pct=basis_pct * 100,
+        annualized_return=annualized_return * 100,
+        strategy=strategy,
+        required_capital=required_capital,
+        expected_profit=expected_profit,
+    )
+
+
+def _annualized_basis_returns(
+    *,
+    basis_pct: float,
+    time_to_expiry: float,
+    annualized_funding: float,
+    transaction_cost: float,
+) -> tuple[float, float]:
+    annualized_return = basis_pct / time_to_expiry
+    funding_drag = abs(annualized_funding)
+    net_return = annualized_return - 2 * transaction_cost / time_to_expiry - funding_drag
+    return float(annualized_return), float(net_return)
+
+
 @dataclass
 class BasisOpportunity:
     """期现套利机会。"""
@@ -197,16 +252,7 @@ class BasisArbitrage:
         instrument: str,
         funding_rate: Optional[float] = None
     ) -> Optional[BasisOpportunity]:
-        """
-        检查是否存在套利机会。
-
-        Args:
-            instrument: 交易对
-            funding_rate: 当前资金费率
-
-        Returns:
-            BasisOpportunity 或 None
-        """
+        """检查是否存在套利机会。"""
         raw_funding = (
             funding_rate
             if funding_rate is not None
@@ -226,40 +272,37 @@ class BasisArbitrage:
         if T <= 0:
             return None
 
-        # 计算年化收益率
-        annualized_return = basis_pct / T
+        annualized_return, net_return = _annualized_basis_returns(
+            basis_pct=basis_pct,
+            time_to_expiry=T,
+            annualized_funding=annualized_funding,
+            transaction_cost=self.transaction_cost,
+        )
 
-        # 扣除交易成本
-        funding_drag = abs(annualized_funding)
-        net_return = annualized_return - 2 * self.transaction_cost / T - funding_drag
-
-        # 判断策略方向
-        strategy: Literal["long_basis", "short_basis"]
-        if basis > 0 and net_return >= self.min_annualized_return:
-            # 正基差: 卖期货买现货
-            strategy = "short_basis"
-            expected_profit = basis - 2 * spot * self.transaction_cost
-        elif basis < 0 and -net_return >= self.min_annualized_return:
-            # 负基差: 买期货卖现货
-            strategy = "long_basis"
-            expected_profit = -basis - 2 * spot * self.transaction_cost
-        else:
+        strategy_profit = _basis_strategy_profit(
+            basis=basis,
+            net_return=net_return,
+            min_annualized_return=self.min_annualized_return,
+            spot=spot,
+            transaction_cost=self.transaction_cost,
+        )
+        if strategy_profit is None:
             return None
+        strategy, expected_profit = strategy_profit
 
-        # 计算所需资金（动态保证金 + 安全缓冲）
         required_capital = spot * (1 + self.margin_requirement_ratio + self.liquidation_buffer_pct)
 
-        return BasisOpportunity(
+        return _build_basis_opportunity(
             instrument=instrument,
-            spot_price=spot,
-            futures_price=futures,
+            spot=spot,
+            futures=futures,
             expiry=self.futures_expiry[instrument],
             basis=basis,
-            basis_pct=basis_pct * 100,
-            annualized_return=annualized_return * 100,
+            basis_pct=basis_pct,
+            annualized_return=annualized_return,
             strategy=strategy,
             required_capital=required_capital,
-            expected_profit=expected_profit
+            expected_profit=expected_profit,
         )
 
     def get_hedge_ratio(

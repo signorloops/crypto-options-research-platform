@@ -201,6 +201,68 @@ def _compute_drawdown_series(pnl_series: pd.Series, initial_capital: float) -> p
     return (pnl_series - running_max) / (running_max + initial_capital)
 
 
+def _annualized_return_from_total(
+    *, total_return_pct: float, periods_per_year: float, periods_observed: int
+) -> float:
+    if total_return_pct <= -1:
+        return -1.0
+    return float((1 + total_return_pct) ** (periods_per_year / periods_observed) - 1)
+
+
+def _daily_pnl_stats(daily_returns: pd.Series) -> tuple[float, float, float]:
+    if len(daily_returns) == 0:
+        return 0.0, 0.0, 0.0
+    return (
+        float(daily_returns.std()),
+        float(daily_returns.min()),
+        float(daily_returns.max()),
+    )
+
+
+def _calmar_ratio(
+    *, annualized_return: float, max_drawdown: float, min_drawdown_threshold: float = 0.001
+) -> float:
+    if abs(max_drawdown) <= min_drawdown_threshold:
+        return 0.0
+    return float(annualized_return / abs(max_drawdown))
+
+
+def _build_scorecard_from_result(
+    *,
+    result: BacktestResult,
+    pnl_series: pd.Series,
+    drawdown_series: pd.Series,
+    metrics: dict[str, float],
+) -> StrategyScorecard:
+    return StrategyScorecard(
+        strategy_name=result.strategy_name,
+        total_pnl=metrics["total_pnl"],
+        total_return_pct=metrics["total_return_pct"],
+        annualized_return=metrics["annualized_return"],
+        sharpe_ratio=metrics["sharpe"],
+        deflated_sharpe_ratio=metrics["deflated_sharpe"],
+        sortino_ratio=metrics["sortino"],
+        max_drawdown=result.max_drawdown,
+        calmar_ratio=metrics["calmar"],
+        total_trades=result.trade_count,
+        win_rate=metrics["win_rate"],
+        avg_trade_pnl=result.avg_trade_pnl_crypto,
+        avg_win=metrics["avg_win"],
+        avg_loss=metrics["avg_loss"],
+        profit_factor=metrics["profit_factor"],
+        spread_capture=result.total_spread_captured or 0,
+        adverse_selection_cost=result.adverse_selection_cost or 0,
+        inventory_cost=result.inventory_cost or 0,
+        fill_rate=0.3,
+        daily_pnl_std=metrics["daily_pnl_std"],
+        worst_day=metrics["worst_day"],
+        best_day=metrics["best_day"],
+        pnl_series=pnl_series,
+        drawdown_series=drawdown_series,
+        inventory_series=result.inventory_series,
+    )
+
+
 class StrategyArena:
     """Fair comparison framework for market making strategies."""
 
@@ -296,59 +358,47 @@ class StrategyArena:
 
         periods_per_year = self._periods_per_year(pnl_series)
         periods_observed = max(len(pnl_series) - 1, 1)
-        if total_return_pct > -1:
-            annualized_return = (1 + total_return_pct) ** (periods_per_year / periods_observed) - 1
-        else:
-            annualized_return = -1.0
+        annualized_return = _annualized_return_from_total(
+            total_return_pct=total_return_pct,
+            periods_per_year=periods_per_year,
+            periods_observed=periods_observed,
+        )
 
         daily_returns = pnl_series.diff().dropna()
         sharpe = result.sharpe_ratio
         deflated_sharpe = getattr(result, "deflated_sharpe_ratio", 0.0)
 
         sortino = _compute_sortino_ratio(daily_returns, self._periods_per_year(daily_returns))
-
-        min_drawdown_threshold = 0.001
-        if abs(result.max_drawdown) > min_drawdown_threshold:
-            calmar = annualized_return / abs(result.max_drawdown)
-        else:
-            calmar = 0.0
+        calmar = _calmar_ratio(annualized_return=annualized_return, max_drawdown=result.max_drawdown)
 
         win_rate, avg_win, avg_loss, profit_factor = _compute_trade_stats(
             result.trade_count, daily_returns
         )
 
-        daily_pnl_std = daily_returns.std()
-        worst_day = daily_returns.min() if len(daily_returns) > 0 else 0
-        best_day = daily_returns.max() if len(daily_returns) > 0 else 0
+        daily_pnl_std, worst_day, best_day = _daily_pnl_stats(daily_returns)
 
         drawdown_series = _compute_drawdown_series(pnl_series, self.initial_capital)
 
-        return StrategyScorecard(
-            strategy_name=result.strategy_name,
-            total_pnl=total_pnl,
-            total_return_pct=total_return_pct,
-            annualized_return=annualized_return,
-            sharpe_ratio=sharpe,
-            deflated_sharpe_ratio=deflated_sharpe,
-            sortino_ratio=sortino,
-            max_drawdown=result.max_drawdown,
-            calmar_ratio=calmar,
-            total_trades=result.trade_count,
-            win_rate=win_rate,
-            avg_trade_pnl=result.avg_trade_pnl_crypto,
-            avg_win=avg_win,
-            avg_loss=avg_loss,
-            profit_factor=profit_factor,
-            spread_capture=result.total_spread_captured or 0,
-            adverse_selection_cost=result.adverse_selection_cost or 0,
-            inventory_cost=result.inventory_cost or 0,
-            fill_rate=0.3,
-            daily_pnl_std=daily_pnl_std,
-            worst_day=worst_day,
-            best_day=best_day,
+        return _build_scorecard_from_result(
+            result=result,
             pnl_series=pnl_series,
             drawdown_series=drawdown_series,
-            inventory_series=result.inventory_series,
+            metrics={
+                "total_pnl": total_pnl,
+                "total_return_pct": total_return_pct,
+                "annualized_return": annualized_return,
+                "sharpe": sharpe,
+                "deflated_sharpe": deflated_sharpe,
+                "sortino": sortino,
+                "calmar": calmar,
+                "win_rate": win_rate,
+                "avg_win": avg_win,
+                "avg_loss": avg_loss,
+                "profit_factor": profit_factor,
+                "daily_pnl_std": daily_pnl_std,
+                "worst_day": worst_day,
+                "best_day": best_day,
+            },
         )
 
     def _create_comparison_df(self) -> pd.DataFrame:

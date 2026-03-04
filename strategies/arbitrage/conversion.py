@@ -190,17 +190,12 @@ class ConversionArbitrage:
             call_price, put_price, spot_price, strike, expiry
         )
 
-        if spot_price <= 0:
-            return None
-
         deviation = parity['deviation']
         T = parity['time_to_expiry']
-        if T <= 0:
+        if spot_price <= 0 or T <= 0:
             return None
 
-        # 扣除交易成本 (3 条腿: 看涨+看跌+标的)
         total_cost = 3 * self.transaction_cost * spot_price
-
         strategy_profit = _strategy_and_profit_from_deviation(
             deviation=deviation,
             total_cost=total_cost,
@@ -209,11 +204,9 @@ class ConversionArbitrage:
             return None
         strategy, profit = strategy_profit
 
-        # 检查最小利润阈值
         if profit / spot_price < self.min_profit:
             return None
 
-        # 年化收益率
         annualized_return = (profit / spot_price) / T
 
         return _build_conversion_opportunity(

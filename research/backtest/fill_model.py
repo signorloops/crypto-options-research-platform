@@ -87,6 +87,58 @@ def _apply_adverse_selection_slippage(
     return fill_price, float(cost)
 
 
+def _apply_slippage_to_fill(
+    *,
+    base_price: float,
+    trade_size: float,
+    order_book: OrderBook,
+    side: OrderSide,
+    apply_order_book_slippage_fn,
+    cost_against_side_fn,
+) -> tuple[float, float]:
+    fill_price = apply_order_book_slippage_fn(
+        quote_price=base_price,
+        trade_size=trade_size,
+        order_book=order_book,
+        side=side,
+    )
+    slippage_cost = cost_against_side_fn(
+        reference_price=base_price,
+        executed_price=fill_price,
+        side=side,
+        size=trade_size,
+    )
+    return fill_price, float(slippage_cost)
+
+
+def _apply_post_slippage_costs(
+    *,
+    fill_price: float,
+    side: OrderSide,
+    size: float,
+    transaction_cost_bps: float,
+    adverse_selection_factor: float,
+    is_adverse: bool,
+    cost_against_side_fn,
+) -> tuple[float, float, float]:
+    fill_price, transaction_cost = _apply_transaction_cost_to_fill(
+        fill_price=fill_price,
+        side=side,
+        size=size,
+        transaction_cost_bps=transaction_cost_bps,
+        cost_against_side_fn=cost_against_side_fn,
+    )
+    fill_price, adverse_selection_cost = _apply_adverse_selection_slippage(
+        fill_price=fill_price,
+        side=side,
+        size=size,
+        adverse_selection_factor=adverse_selection_factor,
+        is_adverse=is_adverse,
+        cost_against_side_fn=cost_against_side_fn,
+    )
+    return fill_price, float(transaction_cost), float(adverse_selection_cost)
+
+
 class RealisticFillSimulator:
     """Simulate realistic order fills based on market microstructure."""
 
@@ -194,36 +246,26 @@ class RealisticFillSimulator:
         fill_size = min(trade.size, our_size)
 
         base_price = quote.bid_price if our_side == OrderSide.BUY else quote.ask_price
-        fill_price = self._apply_order_book_slippage(
-            quote_price=base_price,
+        fill_price, slippage_cost = _apply_slippage_to_fill(
+            base_price=base_price,
             trade_size=fill_size,
             order_book=market_state.order_book,
             side=our_side,
+            apply_order_book_slippage_fn=self._apply_order_book_slippage,
+            cost_against_side_fn=self._cost_against_side,
         )
-        self.slippage_cost += self._cost_against_side(
-            reference_price=base_price,
-            executed_price=fill_price,
-            side=our_side,
-            size=fill_size,
-        )
+        self.slippage_cost += slippage_cost
 
-        fill_price, transaction_cost = _apply_transaction_cost_to_fill(
+        fill_price, transaction_cost, adverse_selection_cost = _apply_post_slippage_costs(
             fill_price=fill_price,
             side=our_side,
             size=fill_size,
             transaction_cost_bps=transaction_cost_bps,
-            cost_against_side_fn=self._cost_against_side,
-        )
-        self.transaction_cost_paid += transaction_cost
-
-        fill_price, adverse_selection_cost = _apply_adverse_selection_slippage(
-            fill_price=fill_price,
-            side=our_side,
-            size=fill_size,
             adverse_selection_factor=self.config.adverse_selection_factor,
             is_adverse=self._check_adverse_selection(trade, market_state),
             cost_against_side_fn=self._cost_against_side,
         )
+        self.transaction_cost_paid += transaction_cost
         self.adverse_selection_cost += adverse_selection_cost
 
         return Fill(

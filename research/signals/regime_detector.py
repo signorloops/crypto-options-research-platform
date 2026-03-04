@@ -186,6 +186,39 @@ class VolatilityRegimeDetector:
 
         return np.array(features_list)
 
+    def _fit_hmm_model(self, X_norm: np.ndarray) -> None:
+        """Fit HMM while suppressing convergence noise."""
+        self._init_model()
+        with warnings.catch_warnings():
+            try:
+                from sklearn.exceptions import ConvergenceWarning
+
+                warnings.filterwarnings("ignore", category=ConvergenceWarning)
+            except ImportError:
+                warnings.filterwarnings("ignore", message=".*converge.*")
+            self.model.fit(X_norm)
+
+    def _normalize_transition_matrix(self) -> None:
+        """Ensure transition matrix rows are valid probabilities."""
+        if not hasattr(self.model, "transmat_"):
+            return
+        transmat = self.model.transmat_
+        uniform = np.ones(self.config.n_regimes) / self.config.n_regimes
+        for i in range(len(transmat)):
+            row_sum = transmat[i].sum()
+            transmat[i] = uniform if row_sum == 0 else transmat[i] / row_sum
+        self.model.transmat_ = transmat
+
+    def _mark_training_success(self, feature_mean: np.ndarray, feature_scale: np.ndarray) -> None:
+        """Persist fitted training state and reset failure counters."""
+        self._state_map = self._build_state_map_from_model()
+        self._is_fitted = True
+        self._last_training_sample = self._sample_count
+        self._feature_mean = feature_mean
+        self._feature_scale = feature_scale
+        self._training_failures = 0
+        self._last_training_error = ""
+
     def _train_model(self) -> bool:
         """Train HMM model on buffered data."""
         X = self._prepare_training_data()
@@ -206,38 +239,9 @@ class VolatilityRegimeDetector:
             feature_scale = np.where(feature_scale < 1e-8, 1.0, feature_scale)
             X_norm = (X - feature_mean) / feature_scale
 
-            # Re-initialize model to avoid state issues
-            self._init_model()
-            with warnings.catch_warnings():
-                try:
-                    from sklearn.exceptions import ConvergenceWarning
-
-                    warnings.filterwarnings("ignore", category=ConvergenceWarning)
-                except ImportError:
-                    warnings.filterwarnings("ignore", message=".*converge.*")
-                self.model.fit(X_norm)
-
-            # Check if model converged properly
-            if hasattr(self.model, "transmat_"):
-                # Fix any rows that sum to 0 (no transitions observed)
-                transmat = self.model.transmat_
-                for i in range(len(transmat)):
-                    if transmat[i].sum() == 0:
-                        # Set uniform probabilities for this row
-                        transmat[i] = np.ones(self.config.n_regimes) / self.config.n_regimes
-                    # Normalize to ensure rows sum to 1
-                    transmat[i] = transmat[i] / transmat[i].sum()
-                self.model.transmat_ = transmat
-
-            # Map states by conditional variance/risk, not mean returns.
-            self._state_map = self._build_state_map_from_model()
-
-            self._is_fitted = True
-            self._last_training_sample = self._sample_count
-            self._feature_mean = feature_mean
-            self._feature_scale = feature_scale
-            self._training_failures = 0
-            self._last_training_error = ""
+            self._fit_hmm_model(X_norm)
+            self._normalize_transition_matrix()
+            self._mark_training_success(feature_mean=feature_mean, feature_scale=feature_scale)
             return True
         except REGIME_TRAINING_EXCEPTIONS as e:
             # Model fitting failed, will retry later

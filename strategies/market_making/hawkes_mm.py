@@ -454,6 +454,28 @@ class HawkesMarketMaker(MarketMakingStrategy):
 
         return bid_size, ask_size
 
+    def _compute_quote_context(
+        self,
+        *,
+        state: MarketState,
+        mid: float,
+        inventory: float,
+        current_time: float,
+    ) -> Tuple[float, float, float, bool, float, float, float]:
+        self._ingest_recent_trades(state)
+        intensity = self.monitor.get_intensity(current_time)
+        buy_int, sell_int = self.monitor.get_buy_sell_intensity(current_time)
+        price_change = _price_change_ratio(mid, self.last_price)
+        adverse_selection = self.monitor.detect_adverse_selection(current_time, price_change)
+        spread_bps = _select_spread_bps(
+            adverse_selection=adverse_selection,
+            max_spread_bps=self.config.max_spread_bps,
+            dynamic_spread_bps=self._compute_dynamic_spread(intensity, inventory),
+        )
+        skew = self._compute_inventory_skew(inventory, buy_int, sell_int)
+        flow_imbalance = _flow_imbalance(buy_int, sell_int)
+        return intensity, buy_int, sell_int, adverse_selection, spread_bps, skew, flow_imbalance
+
     def quote(self, state: MarketState, position: Position) -> QuoteAction:
         """Generate quotes based on Hawkes intensity and market state."""
         mid = state.order_book.mid_price
@@ -461,28 +483,14 @@ class HawkesMarketMaker(MarketMakingStrategy):
             raise ValueError("Cannot quote without valid order book")
 
         current_time = _timestamp_seconds(state.timestamp)
-
-        # Update monitor with recent trades from market data if available
-        self._ingest_recent_trades(state)
-
-        # Compute current intensity
-        intensity = self.monitor.get_intensity(current_time)
-        buy_int, sell_int = self.monitor.get_buy_sell_intensity(current_time)
-
-        # Check for adverse selection
-        price_change = _price_change_ratio(mid, self.last_price)
-        adverse_selection = self.monitor.detect_adverse_selection(current_time, price_change)
-
-        # Adjust spread based on conditions
-        spread_bps = _select_spread_bps(
-            adverse_selection=adverse_selection,
-            max_spread_bps=self.config.max_spread_bps,
-            dynamic_spread_bps=self._compute_dynamic_spread(intensity, position.size),
+        intensity, buy_int, sell_int, adverse_selection, spread_bps, skew, flow_imbalance = (
+            self._compute_quote_context(
+                state=state,
+                mid=mid,
+                inventory=position.size,
+                current_time=current_time,
+            )
         )
-
-        # Compute inventory skew
-        skew = self._compute_inventory_skew(position.size, buy_int, sell_int)
-        flow_imbalance = _flow_imbalance(buy_int, sell_int)
 
         bid_price, ask_price, imbalance, _ = self._compute_quote_prices(
             mid=mid,

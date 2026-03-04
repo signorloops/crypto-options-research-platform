@@ -32,6 +32,37 @@ def _time_to_expiry_years(expiry: datetime) -> float:
     return max(0.0, (expiry - now).total_seconds() / (365.0 * 24 * 3600))
 
 
+def _select_box_trade_side(
+    *, net_premium: float, payoff: float, fees: float
+) -> Optional[tuple[str, float, float, float]]:
+    long_cost = net_premium + fees
+    long_profit = payoff - long_cost
+    short_profit = (net_premium - fees) - payoff
+    if long_profit <= 0 and short_profit <= 0:
+        return None
+    if short_profit > long_profit:
+        return (
+            "short_box",
+            float(short_profit),
+            float(-net_premium + fees),
+            float(max(payoff, 1e-12)),
+        )
+    return (
+        "long_box",
+        float(long_profit),
+        float(long_cost),
+        float(max(long_cost, 1e-12)),
+    )
+
+
+def _annualized_box_return(
+    *, profit: float, net_cost: float, capital_base: float, time_to_expiry: float
+) -> float:
+    if net_cost <= 0:
+        return float("inf")
+    return float(profit / capital_base / time_to_expiry)
+
+
 @dataclass
 class BoxSpread:
     """盒式套利组合。"""
@@ -171,49 +202,19 @@ class OptionBoxArbitrage:
         underlying: str = "",
         liquidity_score: float = 1.0
     ) -> Optional[BoxOpportunity]:
-        """
-        检查盒式组合是否存在套利机会。
-
-        Args:
-            box: BoxSpread 对象
-            underlying: 标的资产名称
-
-        Returns:
-            BoxOpportunity 或 None
-        """
+        """检查盒式组合是否存在套利机会。"""
         fees = 4 * self.transaction_cost
         payoff = box.box_value_at_expiry
-
-        # Long box: pay net_premium, receive payoff
-        long_cost = box.net_premium + fees
-        long_profit = payoff - long_cost
-
-        # Short box: receive net_premium, pay payoff at expiry
-        short_profit = (box.net_premium - fees) - payoff
-
-        if long_profit <= 0 and short_profit <= 0:
+        selected = _select_box_trade_side(net_premium=box.net_premium, payoff=payoff, fees=fees)
+        if selected is None:
             return None
-
-        if short_profit > long_profit:
-            box_type = "short_box"
-            profit = short_profit
-            net_cost = -box.net_premium + fees  # margin-like capital usage approximation
-            capital_base = max(payoff, 1e-12)
-        else:
-            box_type = "long_box"
-            profit = long_profit
-            net_cost = long_cost
-            capital_base = max(long_cost, 1e-12)
-
-        # 计算年化收益率
+        box_type, profit, net_cost, capital_base = selected
         T = _time_to_expiry_years(box.expiry)
         if T <= 0:
             return None
-
-        if net_cost <= 0:
-            annualized_return = float("inf")
-        else:
-            annualized_return = profit / capital_base / T
+        annualized_return = _annualized_box_return(
+            profit=profit, net_cost=net_cost, capital_base=capital_base, time_to_expiry=T
+        )
 
         if annualized_return < self.min_annualized_return:
             return None

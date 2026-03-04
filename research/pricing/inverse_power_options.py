@@ -65,6 +65,20 @@ class _InversePowerFDBumps:
     dt: float
 
 
+@dataclass(frozen=True)
+class _InversePowerFDPrices:
+    """Finite-difference prices for each bumped dimension."""
+
+    p_up_s: float
+    p_dn_s: float
+    p_up_v: float
+    p_dn_v: float
+    p_up_r: float
+    p_dn_r: float
+    p_up_t: float
+    p_dn_t: float
+
+
 class InversePowerOptionPricer:
     """Monte Carlo baseline pricer for inverse-power options."""
 
@@ -220,7 +234,7 @@ class InversePowerOptionPricer:
         *,
         base: _InversePowerFDBase,
         bumps: _InversePowerFDBumps,
-    ) -> tuple[float, float, float, float, float, float, float, float]:
+    ) -> _InversePowerFDPrices:
         base_kwargs = {
             "normals": base.normals,
             "S": base.S,
@@ -238,15 +252,106 @@ class InversePowerOptionPricer:
                 **{**base_kwargs, **overrides}
             )
 
-        p_up_s = eval_price(S=base.S + bumps.ds)
-        p_dn_s = eval_price(S=max(base.S - bumps.ds, InversePowerOptionPricer.EPS))
-        p_up_v = eval_price(sigma=base.sigma + bumps.dv)
-        p_dn_v = eval_price(sigma=max(base.sigma - bumps.dv, 0.0))
-        p_up_r = eval_price(r=base.r + bumps.dr)
-        p_dn_r = eval_price(r=base.r - bumps.dr)
-        p_up_t = eval_price(T=base.T + bumps.dt)
-        p_dn_t = eval_price(T=max(base.T - bumps.dt, 0.0))
-        return p_up_s, p_dn_s, p_up_v, p_dn_v, p_up_r, p_dn_r, p_up_t, p_dn_t
+        return _InversePowerFDPrices(
+            p_up_s=eval_price(S=base.S + bumps.ds),
+            p_dn_s=eval_price(S=max(base.S - bumps.ds, InversePowerOptionPricer.EPS)),
+            p_up_v=eval_price(sigma=base.sigma + bumps.dv),
+            p_dn_v=eval_price(sigma=max(base.sigma - bumps.dv, 0.0)),
+            p_up_r=eval_price(r=base.r + bumps.dr),
+            p_dn_r=eval_price(r=base.r - bumps.dr),
+            p_up_t=eval_price(T=base.T + bumps.dt),
+            p_dn_t=eval_price(T=max(base.T - bumps.dt, 0.0)),
+        )
+
+    @staticmethod
+    def _build_fd_base(
+        *,
+        normals: np.ndarray,
+        S: float,
+        K: float,
+        T: float,
+        r: float,
+        sigma: float,
+        option_type: Literal["call", "put"],
+        power: float,
+        n_paths: int,
+    ) -> _InversePowerFDBase:
+        return _InversePowerFDBase(
+            normals=normals,
+            S=S,
+            K=K,
+            T=T,
+            r=r,
+            sigma=sigma,
+            option_type=option_type,
+            power=power,
+            n_paths=n_paths,
+        )
+
+    @staticmethod
+    def _fd_price_context(
+        *,
+        normals: np.ndarray,
+        S: float,
+        K: float,
+        T: float,
+        r: float,
+        sigma: float,
+        option_type: Literal["call", "put"],
+        power: float,
+        n_paths: int,
+        bump_rel: float,
+    ) -> tuple[float, _InversePowerFDBase, _InversePowerFDBumps]:
+        price = InversePowerOptionPricer._price_with_normals(
+            normals=normals,
+            S=S,
+            K=K,
+            T=T,
+            r=r,
+            sigma=sigma,
+            option_type=option_type,
+            power=power,
+            n_paths=n_paths,
+        )
+        bumps = InversePowerOptionPricer._finite_difference_bumps(
+            S=S,
+            T=T,
+            r=r,
+            sigma=sigma,
+            bump_rel=bump_rel,
+        )
+        fd_base = InversePowerOptionPricer._build_fd_base(
+            normals=normals,
+            S=S,
+            K=K,
+            T=T,
+            r=r,
+            sigma=sigma,
+            option_type=option_type,
+            power=power,
+            n_paths=n_paths,
+        )
+        return price, fd_base, bumps
+
+    @staticmethod
+    def _finite_difference_greeks(
+        *,
+        price: float,
+        bumps: _InversePowerFDBumps,
+        fd_prices: _InversePowerFDPrices,
+    ) -> InversePowerGreeks:
+        delta = (fd_prices.p_up_s - fd_prices.p_dn_s) / (2.0 * bumps.ds)
+        gamma = (fd_prices.p_up_s - 2.0 * price + fd_prices.p_dn_s) / (bumps.ds**2)
+        vega = (fd_prices.p_up_v - fd_prices.p_dn_v) / (2.0 * bumps.dv)
+        rho = (fd_prices.p_up_r - fd_prices.p_dn_r) / (2.0 * bumps.dr)
+        theta = -(fd_prices.p_up_t - fd_prices.p_dn_t) / (2.0 * bumps.dt)
+        return InversePowerGreeks(
+            delta=float(delta),
+            gamma=float(gamma),
+            theta=float(theta),
+            vega=float(vega),
+            rho=float(rho),
+        )
 
     @staticmethod
     def calculate_price_and_greeks(
@@ -263,10 +368,8 @@ class InversePowerOptionPricer:
     ) -> tuple[float, InversePowerGreeks]:
         """Return price and finite-difference Greeks using common random numbers."""
         InversePowerOptionPricer._validate_inputs(S, K, T, r, sigma, power, n_paths)
-
         normals = InversePowerOptionPricer._generate_normals(n_paths=n_paths, seed=seed)
-
-        price = InversePowerOptionPricer._price_with_normals(
+        price, fd_base, bumps = InversePowerOptionPricer._fd_price_context(
             normals=normals,
             S=S,
             K=K,
@@ -276,44 +379,12 @@ class InversePowerOptionPricer:
             option_type=option_type,
             power=power,
             n_paths=n_paths,
-        )
-
-        bumps = InversePowerOptionPricer._finite_difference_bumps(
-            S=S,
-            T=T,
-            r=r,
-            sigma=sigma,
             bump_rel=bump_rel,
         )
-        fd_base = _InversePowerFDBase(
-            normals=normals,
-            S=S,
-            K=K,
-            T=T,
-            r=r,
-            sigma=sigma,
-            option_type=option_type,
-            power=power,
-            n_paths=n_paths,
-        )
-        p_up_s, p_dn_s, p_up_v, p_dn_v, p_up_r, p_dn_r, p_up_t, p_dn_t = (
-            InversePowerOptionPricer._finite_difference_prices(
-                base=fd_base,
-                bumps=bumps,
-            )
-        )
-
-        delta = (p_up_s - p_dn_s) / (2.0 * bumps.ds)
-        gamma = (p_up_s - 2.0 * price + p_dn_s) / (bumps.ds**2)
-        vega = (p_up_v - p_dn_v) / (2.0 * bumps.dv)
-        rho = (p_up_r - p_dn_r) / (2.0 * bumps.dr)
-        theta = -(p_up_t - p_dn_t) / (2.0 * bumps.dt)
-
-        greeks = InversePowerGreeks(
-            delta=float(delta),
-            gamma=float(gamma),
-            theta=float(theta),
-            vega=float(vega),
-            rho=float(rho),
+        fd_prices = InversePowerOptionPricer._finite_difference_prices(base=fd_base, bumps=bumps)
+        greeks = InversePowerOptionPricer._finite_difference_greeks(
+            price=price,
+            bumps=bumps,
+            fd_prices=fd_prices,
         )
         return float(price), greeks

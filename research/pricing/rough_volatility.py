@@ -184,12 +184,7 @@ class RoughVolatilityPricer:
         n_paths: Optional[int] = None,
         rng: Optional[np.random.Generator] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Simulate spot and variance paths.
-
-        Returns:
-            (spots, variances) with shapes [(n_paths, n_steps+1), (n_paths, n_steps+1)]
-        """
+        """Simulate spot and variance paths."""
         t0 = time.perf_counter()
         cfg = self.config
         dt = cfg.maturity / cfg.n_steps
@@ -198,15 +193,8 @@ class RoughVolatilityPricer:
         n_steps = cfg.n_steps
 
         gen = rng or self._rng
-        dW1, dW2 = self._draw_correlated_brownians(
-            n_paths=n_paths, n_steps=n_steps, sqrt_dt=sqrt_dt, rng=gen
-        )
-        jump_returns, jump_var_mult, jump_stats = self._simulate_jump_components(
-            n_paths=n_paths,
-            n_steps=n_steps,
-            dt=dt,
-            rng=gen,
-        )
+        dW1, dW2 = self._draw_correlated_brownians(n_paths=n_paths, n_steps=n_steps, sqrt_dt=sqrt_dt, rng=gen)
+        jump_returns, jump_var_mult, jump_stats = self._simulate_jump_components(n_paths=n_paths, n_steps=n_steps, dt=dt, rng=gen)
 
         weights = self._kernel_weights()
         volterra = np.zeros((n_paths, n_steps), dtype=float)
@@ -219,7 +207,6 @@ class RoughVolatilityPricer:
         var_t = cfg.initial_variance * np.exp(
             cfg.vol_of_vol * volterra - 0.5 * (cfg.vol_of_vol ** 2) * (times ** (2.0 * cfg.hurst))
         )
-        # Co-jumps: variance shocks tied to jump sizes.
         var_t = var_t * jump_var_mult
         var_t = np.maximum(var_t, 1e-10)
 
@@ -241,7 +228,7 @@ class RoughVolatilityPricer:
             "total_jump_events": float(jump_stats["total_jump_events"]),
             "avg_jump_intensity": float(jump_stats["avg_jump_intensity"]),
             "jump_intensity_std": float(jump_stats["jump_intensity_std"]),
-            "simulation_time_sec": float(max(time.perf_counter() - t0, 0.0)),
+            "simulation_time_sec": float(max(time.perf_counter() - t0, 0.0))
         }
         return spots, vars_path
 
@@ -297,7 +284,6 @@ class RoughVolatilityPricer:
         std = float(np.std(discounted, ddof=1) if n > 1 else 0.0)
         std_error = std / np.sqrt(max(n, 1))
 
-        # Normal approximation CI.
         z = float(norm.ppf(0.5 + confidence / 2.0))
         ci_low = price - z * std_error
         ci_high = price + z * std_error
