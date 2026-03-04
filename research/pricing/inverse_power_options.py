@@ -155,6 +155,151 @@ class InversePowerOptionPricer:
         )
 
     @staticmethod
+    def _price_with_normals(
+        *,
+        normals: np.ndarray,
+        S: float,
+        K: float,
+        T: float,
+        r: float,
+        sigma: float,
+        option_type: Literal["call", "put"],
+        power: float,
+        n_paths: int,
+    ) -> float:
+        return InversePowerOptionPricer.calculate_price(
+            S=S,
+            K=K,
+            T=T,
+            r=r,
+            sigma=sigma,
+            option_type=option_type,
+            power=power,
+            n_paths=n_paths,
+            seed=None,
+            normals=normals,
+        )
+
+    @staticmethod
+    def _finite_difference_bumps(
+        *, S: float, T: float, r: float, sigma: float, bump_rel: float
+    ) -> tuple[float, float, float, float]:
+        ds = max(S * bump_rel, 1e-6)
+        dv = max(sigma * bump_rel, 1e-6)
+        dr = max(abs(r) * bump_rel, 1e-6)
+        dt = max(T * bump_rel, 1e-6)
+        return ds, dv, dr, dt
+
+    @staticmethod
+    def _finite_difference_prices(
+        *,
+        normals: np.ndarray,
+        S: float,
+        K: float,
+        T: float,
+        r: float,
+        sigma: float,
+        option_type: Literal["call", "put"],
+        power: float,
+        n_paths: int,
+        ds: float,
+        dv: float,
+        dr: float,
+        dt: float,
+    ) -> tuple[float, float, float, float, float, float, float, float]:
+        call = InversePowerOptionPricer._price_with_normals
+
+        p_up_s = call(
+            normals=normals,
+            S=S + ds,
+            K=K,
+            T=T,
+            r=r,
+            sigma=sigma,
+            option_type=option_type,
+            power=power,
+            n_paths=n_paths,
+        )
+        p_dn_s = call(
+            normals=normals,
+            S=max(S - ds, InversePowerOptionPricer.EPS),
+            K=K,
+            T=T,
+            r=r,
+            sigma=sigma,
+            option_type=option_type,
+            power=power,
+            n_paths=n_paths,
+        )
+        p_up_v = call(
+            normals=normals,
+            S=S,
+            K=K,
+            T=T,
+            r=r,
+            sigma=sigma + dv,
+            option_type=option_type,
+            power=power,
+            n_paths=n_paths,
+        )
+        p_dn_v = call(
+            normals=normals,
+            S=S,
+            K=K,
+            T=T,
+            r=r,
+            sigma=max(sigma - dv, 0.0),
+            option_type=option_type,
+            power=power,
+            n_paths=n_paths,
+        )
+        p_up_r = call(
+            normals=normals,
+            S=S,
+            K=K,
+            T=T,
+            r=r + dr,
+            sigma=sigma,
+            option_type=option_type,
+            power=power,
+            n_paths=n_paths,
+        )
+        p_dn_r = call(
+            normals=normals,
+            S=S,
+            K=K,
+            T=T,
+            r=r - dr,
+            sigma=sigma,
+            option_type=option_type,
+            power=power,
+            n_paths=n_paths,
+        )
+        p_up_t = call(
+            normals=normals,
+            S=S,
+            K=K,
+            T=T + dt,
+            r=r,
+            sigma=sigma,
+            option_type=option_type,
+            power=power,
+            n_paths=n_paths,
+        )
+        p_dn_t = call(
+            normals=normals,
+            S=S,
+            K=K,
+            T=max(T - dt, 0.0),
+            r=r,
+            sigma=sigma,
+            option_type=option_type,
+            power=power,
+            n_paths=n_paths,
+        )
+        return p_up_s, p_dn_s, p_up_v, p_dn_v, p_up_r, p_dn_r, p_up_t, p_dn_t
+
+    @staticmethod
     def calculate_price_and_greeks(
         S: float,
         K: float,
@@ -172,7 +317,8 @@ class InversePowerOptionPricer:
 
         normals = InversePowerOptionPricer._generate_normals(n_paths=n_paths, seed=seed)
 
-        price = InversePowerOptionPricer.calculate_price(
+        price = InversePowerOptionPricer._price_with_normals(
+            normals=normals,
             S=S,
             K=K,
             T=T,
@@ -181,113 +327,31 @@ class InversePowerOptionPricer:
             option_type=option_type,
             power=power,
             n_paths=n_paths,
-            seed=None,
-            normals=normals,
         )
 
-        ds = max(S * bump_rel, 1e-6)
-        dv = max(sigma * bump_rel, 1e-6)
-        dr = max(abs(r) * bump_rel, 1e-6)
-        dt = max(T * bump_rel, 1e-6)
-
-        p_up_s = InversePowerOptionPricer.calculate_price(
-            S=S + ds,
-            K=K,
+        ds, dv, dr, dt = InversePowerOptionPricer._finite_difference_bumps(
+            S=S,
             T=T,
             r=r,
             sigma=sigma,
-            option_type=option_type,
-            power=power,
-            n_paths=n_paths,
-            seed=None,
-            normals=normals,
+            bump_rel=bump_rel,
         )
-        p_dn_s = InversePowerOptionPricer.calculate_price(
-            S=max(S - ds, InversePowerOptionPricer.EPS),
-            K=K,
-            T=T,
-            r=r,
-            sigma=sigma,
-            option_type=option_type,
-            power=power,
-            n_paths=n_paths,
-            seed=None,
-            normals=normals,
-        )
-
-        p_up_v = InversePowerOptionPricer.calculate_price(
-            S=S,
-            K=K,
-            T=T,
-            r=r,
-            sigma=sigma + dv,
-            option_type=option_type,
-            power=power,
-            n_paths=n_paths,
-            seed=None,
-            normals=normals,
-        )
-        p_dn_v = InversePowerOptionPricer.calculate_price(
-            S=S,
-            K=K,
-            T=T,
-            r=r,
-            sigma=max(sigma - dv, 0.0),
-            option_type=option_type,
-            power=power,
-            n_paths=n_paths,
-            seed=None,
-            normals=normals,
-        )
-
-        p_up_r = InversePowerOptionPricer.calculate_price(
-            S=S,
-            K=K,
-            T=T,
-            r=r + dr,
-            sigma=sigma,
-            option_type=option_type,
-            power=power,
-            n_paths=n_paths,
-            seed=None,
-            normals=normals,
-        )
-        p_dn_r = InversePowerOptionPricer.calculate_price(
-            S=S,
-            K=K,
-            T=T,
-            r=r - dr,
-            sigma=sigma,
-            option_type=option_type,
-            power=power,
-            n_paths=n_paths,
-            seed=None,
-            normals=normals,
-        )
-
-        p_up_t = InversePowerOptionPricer.calculate_price(
-            S=S,
-            K=K,
-            T=T + dt,
-            r=r,
-            sigma=sigma,
-            option_type=option_type,
-            power=power,
-            n_paths=n_paths,
-            seed=None,
-            normals=normals,
-        )
-        p_dn_t = InversePowerOptionPricer.calculate_price(
-            S=S,
-            K=K,
-            T=max(T - dt, 0.0),
-            r=r,
-            sigma=sigma,
-            option_type=option_type,
-            power=power,
-            n_paths=n_paths,
-            seed=None,
-            normals=normals,
+        p_up_s, p_dn_s, p_up_v, p_dn_v, p_up_r, p_dn_r, p_up_t, p_dn_t = (
+            InversePowerOptionPricer._finite_difference_prices(
+                normals=normals,
+                S=S,
+                K=K,
+                T=T,
+                r=r,
+                sigma=sigma,
+                option_type=option_type,
+                power=power,
+                n_paths=n_paths,
+                ds=ds,
+                dv=dv,
+                dr=dr,
+                dt=dt,
+            )
         )
 
         delta = (p_up_s - p_dn_s) / (2.0 * ds)
