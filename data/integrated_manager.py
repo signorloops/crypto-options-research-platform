@@ -34,7 +34,115 @@ logger = get_logger(__name__)
 REDIS_CONNECT_EXCEPTIONS = (RedisError, OSError, ValueError, TypeError, RuntimeError)
 
 
-class IntegratedDataManager:
+class _IntegratedRealtimeCacheMixin:
+    """Shared real-time Redis cache convenience wrappers."""
+
+    async def cache_greeks(
+        self, instrument: str, greeks: Dict[str, float], ttl_seconds: int = GREEKS_TTL_SECONDS
+    ) -> None:
+        """Cache Greeks data."""
+        redis = self.redis
+        if redis:
+            await redis.set_greeks(instrument, greeks, ttl_seconds)
+
+    async def get_iv(self, instrument: str) -> Optional[float]:
+        """Get cached implied volatility."""
+        redis = self.redis
+        if not redis:
+            return None
+        return await redis.get_iv(instrument)
+
+    async def cache_iv(self, instrument: str, iv: float, ttl_seconds: int = IV_TTL_SECONDS) -> None:
+        """Cache implied volatility."""
+        redis = self.redis
+        if redis:
+            await redis.set_iv(instrument, iv, ttl_seconds)
+
+    async def get_iv_term_structure(self, underlying: str) -> Optional[Dict[str, Any]]:
+        """Get cached IV term structure."""
+        redis = self.redis
+        if not redis:
+            return None
+        return await redis.get_iv_term_structure(underlying)
+
+    async def cache_iv_term_structure(
+        self,
+        underlying: str,
+        term_structure: List[Dict[str, Any]],
+        ttl_seconds: int = IV_TERM_TTL_SECONDS,
+    ) -> None:
+        """Cache IV term structure."""
+        redis = self.redis
+        if redis:
+            await redis.set_iv_term_structure(underlying, term_structure, ttl_seconds)
+
+    async def get_orderbook(self, instrument: str) -> Optional[Dict[str, Any]]:
+        """Get cached orderbook snapshot."""
+        redis = self.redis
+        if not redis:
+            return None
+        return await redis.get_orderbook(instrument)
+
+    async def cache_orderbook(
+        self, instrument: str, orderbook: Dict[str, Any], ttl_seconds: int = ORDERBOOK_TTL_SECONDS
+    ) -> None:
+        """Cache orderbook snapshot."""
+        redis = self.redis
+        if redis:
+            await redis.set_orderbook(instrument, orderbook, ttl_seconds)
+
+    async def get_ticker(self, instrument: str) -> Optional[Dict[str, Any]]:
+        """Get cached ticker data."""
+        redis = self.redis
+        if not redis:
+            return None
+        return await redis.get_ticker(instrument)
+
+    async def cache_ticker(
+        self, instrument: str, ticker: Dict[str, Any], ttl_seconds: int = TICKER_TTL_SECONDS
+    ) -> None:
+        """Cache ticker data."""
+        redis = self.redis
+        if redis:
+            await redis.set_ticker(instrument, ticker, ttl_seconds)
+
+    async def publish(self, channel: str, message: Any) -> None:
+        """Publish message to Redis channel."""
+        redis = self.redis
+        if redis:
+            await redis.publish(channel, message)
+
+    async def subscribe(self, *channels: str):
+        """Subscribe to Redis channels."""
+        redis = self.redis
+        if not redis:
+            raise RuntimeError("Redis not initialized")
+        return await redis.subscribe(*channels)
+
+    async def is_rate_limited(self, key: str, max_requests: int, window_seconds: int) -> bool:
+        """Check if rate limited."""
+        redis = self.redis
+        if not redis:
+            return False  # No Redis = no rate limiting
+        return await redis.is_rate_limited(key, max_requests, window_seconds)
+
+    async def invalidate_realtime_cache(
+        self,
+        instrument: Optional[str] = None,
+        underlying: Optional[str] = None,
+    ) -> int:
+        """Invalidate Redis real-time cache by policy patterns."""
+        redis = self.redis
+        if not redis:
+            return 0
+
+        deleted = 0
+        for pattern in invalidation_patterns(instrument=instrument, underlying=underlying):
+            deleted += await redis.clear_pattern(pattern)
+        return deleted
+
+
+class IntegratedDataManager(_IntegratedRealtimeCacheMixin):
     """
     High-level data manager integrating all cache layers.
 
@@ -307,110 +415,6 @@ class IntegratedDataManager:
         if redis is None:
             return None
         return await redis.get_greeks(instrument)
-
-    async def cache_greeks(
-        self, instrument: str, greeks: Dict[str, float], ttl_seconds: int = GREEKS_TTL_SECONDS
-    ) -> None:
-        """Cache Greeks data."""
-        redis = self.redis
-        if redis:
-            await redis.set_greeks(instrument, greeks, ttl_seconds)
-
-    async def get_iv(self, instrument: str) -> Optional[float]:
-        """Get cached implied volatility."""
-        redis = self.redis
-        if not redis:
-            return None
-        return await redis.get_iv(instrument)
-
-    async def cache_iv(self, instrument: str, iv: float, ttl_seconds: int = IV_TTL_SECONDS) -> None:
-        """Cache implied volatility."""
-        redis = self.redis
-        if redis:
-            await redis.set_iv(instrument, iv, ttl_seconds)
-
-    async def get_iv_term_structure(self, underlying: str) -> Optional[Dict[str, Any]]:
-        """Get cached IV term structure."""
-        redis = self.redis
-        if not redis:
-            return None
-        return await redis.get_iv_term_structure(underlying)
-
-    async def cache_iv_term_structure(
-        self,
-        underlying: str,
-        term_structure: List[Dict[str, Any]],
-        ttl_seconds: int = IV_TERM_TTL_SECONDS,
-    ) -> None:
-        """Cache IV term structure."""
-        redis = self.redis
-        if redis:
-            await redis.set_iv_term_structure(underlying, term_structure, ttl_seconds)
-
-    async def get_orderbook(self, instrument: str) -> Optional[Dict[str, Any]]:
-        """Get cached orderbook snapshot."""
-        redis = self.redis
-        if not redis:
-            return None
-        return await redis.get_orderbook(instrument)
-
-    async def cache_orderbook(
-        self, instrument: str, orderbook: Dict[str, Any], ttl_seconds: int = ORDERBOOK_TTL_SECONDS
-    ) -> None:
-        """Cache orderbook snapshot."""
-        redis = self.redis
-        if redis:
-            await redis.set_orderbook(instrument, orderbook, ttl_seconds)
-
-    async def get_ticker(self, instrument: str) -> Optional[Dict[str, Any]]:
-        """Get cached ticker data."""
-        redis = self.redis
-        if not redis:
-            return None
-        return await redis.get_ticker(instrument)
-
-    async def cache_ticker(
-        self, instrument: str, ticker: Dict[str, Any], ttl_seconds: int = TICKER_TTL_SECONDS
-    ) -> None:
-        """Cache ticker data."""
-        redis = self.redis
-        if redis:
-            await redis.set_ticker(instrument, ticker, ttl_seconds)
-
-    async def publish(self, channel: str, message: Any) -> None:
-        """Publish message to Redis channel."""
-        redis = self.redis
-        if redis:
-            await redis.publish(channel, message)
-
-    async def subscribe(self, *channels: str):
-        """Subscribe to Redis channels."""
-        redis = self.redis
-        if not redis:
-            raise RuntimeError("Redis not initialized")
-        return await redis.subscribe(*channels)
-
-    async def is_rate_limited(self, key: str, max_requests: int, window_seconds: int) -> bool:
-        """Check if rate limited."""
-        redis = self.redis
-        if not redis:
-            return False  # No Redis = no rate limiting
-        return await redis.is_rate_limited(key, max_requests, window_seconds)
-
-    async def invalidate_realtime_cache(
-        self,
-        instrument: Optional[str] = None,
-        underlying: Optional[str] = None,
-    ) -> int:
-        """Invalidate Redis real-time cache by policy patterns."""
-        redis = self.redis
-        if not redis:
-            return 0
-
-        deleted = 0
-        for pattern in invalidation_patterns(instrument=instrument, underlying=underlying):
-            deleted += await redis.clear_pattern(pattern)
-        return deleted
 
     # ==================== Utility Methods ====================
 
