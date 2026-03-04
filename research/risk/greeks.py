@@ -144,6 +144,95 @@ class GreeksRiskAnalyzer:
         self.risk_free_rate = risk_free_rate
         self.calculator = BlackScholesGreeks()
 
+    @staticmethod
+    def _group_positions_by_currency(
+        positions: List[Tuple[Position, OptionContract, float, float]]
+    ) -> Dict[str, List[Tuple[Position, OptionContract, float, float]]]:
+        from collections import defaultdict
+
+        by_currency: Dict[str, List[Tuple[Position, OptionContract, float, float]]] = defaultdict(list)
+        for position, contract, spot, iv in positions:
+            currency = contract.underlying.split("-")[0]
+            by_currency[currency].append((position, contract, spot, iv))
+        return by_currency
+
+    def _convert_position_greeks_to_portfolio(
+        self,
+        *,
+        position_greeks: Greeks,
+        contract: OptionContract,
+        spot: float,
+        iv: float,
+        as_of: datetime,
+        fx_rate: float,
+    ) -> PortfolioGreeks:
+        """Convert a single-position Greeks vector into portfolio USD terms."""
+        if contract.inverse:
+            spot_safe = max(spot, 1e-6)
+            iv_safe = float(iv)
+            if not np.isfinite(iv_safe) or iv_safe <= 0:
+                iv_safe = 1e-6
+
+            from research.pricing.inverse_options import InverseOptionPricer
+
+            T = contract.time_to_expiry(as_of)
+            option_type = "call" if contract.option_type.value == "C" else "put"
+            price_btc = InverseOptionPricer.calculate_price(
+                spot_safe, contract.strike, T, self.risk_free_rate, iv_safe, option_type
+            )
+
+            delta_usd_btc = price_btc + spot_safe * position_greeks.delta
+            delta_usd = delta_usd_btc * spot_safe
+            gamma_usd = position_greeks.gamma * (spot_safe ** 3)
+
+            return PortfolioGreeks(
+                delta=delta_usd,
+                gamma=gamma_usd,
+                theta=position_greeks.theta * fx_rate,
+                vega=position_greeks.vega * fx_rate,
+                rho=(position_greeks.rho or 0) * fx_rate,
+                vanna=(position_greeks.vanna or 0) * fx_rate,
+                charm=(position_greeks.charm or 0) * fx_rate,
+                veta=0,
+            )
+
+        spot_fx = spot * fx_rate
+        return PortfolioGreeks(
+            delta=position_greeks.delta * spot_fx,
+            gamma=position_greeks.gamma * spot_fx * spot,
+            theta=position_greeks.theta * fx_rate,
+            vega=position_greeks.vega * fx_rate,
+            rho=(position_greeks.rho or 0) * fx_rate,
+            vanna=(position_greeks.vanna or 0) * fx_rate,
+            charm=(position_greeks.charm or 0) * fx_rate,
+            veta=0,
+        )
+
+    def _aggregate_currency_greeks(
+        self,
+        *,
+        currency: str,
+        currency_positions: List[Tuple[Position, OptionContract, float, float]],
+        as_of: datetime,
+        fx_rates: Optional[Dict[str, float]],
+    ) -> PortfolioGreeks:
+        total = PortfolioGreeks(
+            delta=0, gamma=0, theta=0, vega=0, rho=0, vanna=0, charm=0, veta=0
+        )
+        fx_rate = fx_rates.get(currency, 1.0) if fx_rates else 1.0
+
+        for position, contract, spot, iv in currency_positions:
+            _, position_greeks = self.analyze_position(position, contract, spot, iv, as_of)
+            total = total + self._convert_position_greeks_to_portfolio(
+                position_greeks=position_greeks,
+                contract=contract,
+                spot=spot,
+                iv=iv,
+                as_of=as_of,
+                fx_rate=fx_rate,
+            )
+        return total
+
     def analyze_position(
         self,
         position: Position,
@@ -232,96 +321,17 @@ class GreeksRiskAnalyzer:
             Dict mapping currency (e.g., "BTC", "ETH") to PortfolioGreeks.
             Special key "total_usd" contains aggregated USD exposure if fx_rates provided.
         """
-        from collections import defaultdict
-
-        # Group positions by currency
-        by_currency: Dict[str, List[Tuple]] = defaultdict(list)
-        for position, contract, spot, iv in positions:
-            currency = contract.underlying.split('-')[0]
-            by_currency[currency].append((position, contract, spot, iv))
+        by_currency = self._group_positions_by_currency(positions)
 
         # Calculate Greeks per currency
         result: Dict[str, PortfolioGreeks] = {}
         for currency, currency_positions in by_currency.items():
-            total = PortfolioGreeks(
-                delta=0, gamma=0, theta=0, vega=0, rho=0,
-                vanna=0, charm=0, veta=0
+            result[currency] = self._aggregate_currency_greeks(
+                currency=currency,
+                currency_positions=currency_positions,
+                as_of=as_of,
+                fx_rates=fx_rates,
             )
-
-            for position, contract, spot, iv in currency_positions:
-                _, position_greeks = self.analyze_position(
-                    position, contract, spot, iv, as_of
-                )
-
-                # Get FX rate for USD conversion
-                fx_rate = 1.0
-                if fx_rates:
-                    fx_rate = fx_rates.get(currency, 1.0)
-
-                # Convert Greeks to USD terms with proper dimensionality
-                # For coin-margined (inverse) options:
-                #   Price is in BTC, Spot is in USD/BTC
-                #   Delta = dV/dS = BTC / (USD/BTC) = BTC^2/USD
-                #   To get USD notional Delta: Delta_USD = Delta_BTC * (USD/BTC)^2 = Delta_BTC * spot^2
-                #   Gamma = d^2V/dS^2 = BTC^3/USD^2
-                #   To get USD Gamma: Gamma_USD = Gamma_BTC * (USD/BTC)^3 = Gamma_BTC * spot^3
-                # For standard (USD-margined) options:
-                #   Delta is dimensionless (USD/USD)
-                #   To get USD notional: Delta_USD = Delta * spot * fx_rate
-                #   Gamma is 1/USD, Gamma_USD = Gamma * spot^2 * fx_rate
-                # Vega/Theta/Rho: already in USD terms -> multiply by fx_rate only
-                if contract.inverse:
-                    # Coin-margined (inverse) conversion
-                    # Correct USD Delta: d(V_BTC * S)/dS = V_BTC + S * Delta_BTC
-                    # Where V_BTC is the option price in BTC, Delta_BTC is dV/dS in BTC^2/USD
-                    # Gamma_USD conversion: Gamma_BTC * S^3 (verified by dimensional analysis)
-                    spot_safe = max(spot, 1e-6)
-                    iv_safe = float(iv)
-                    if not np.isfinite(iv_safe) or iv_safe <= 0:
-                        iv_safe = 1e-6
-
-                    # Calculate option price for correct Delta conversion
-                    from research.pricing.inverse_options import InverseOptionPricer
-                    T = contract.time_to_expiry(as_of)
-                    option_type = 'call' if contract.option_type.value == 'C' else 'put'
-                    price_btc = InverseOptionPricer.calculate_price(
-                        spot_safe, contract.strike, T, self.risk_free_rate, iv_safe, option_type
-                    )
-
-                    # Correct USD Delta: V_BTC + S * Delta_BTC (in BTC, then convert to USD)
-                    # For inverse options, BTC -> USD conversion is just * spot (not * spot * fx_rate,
-                    # since fx_rate IS spot for the base currency)
-                    delta_usd_btc = price_btc + spot_safe * position_greeks.delta  # in BTC
-                    delta_usd = delta_usd_btc * spot_safe  # BTC -> USD
-
-                    # Gamma conversion: Gamma_BTC * S^3 (dimension: BTC^3/USD^2 * USD^3/BTC^3 = USD)
-                    gamma_usd = position_greeks.gamma * (spot_safe ** 3)
-
-                    total = total + PortfolioGreeks(
-                        delta=delta_usd,
-                        gamma=gamma_usd,
-                        theta=position_greeks.theta * fx_rate,
-                        vega=position_greeks.vega * fx_rate,
-                        rho=(position_greeks.rho or 0) * fx_rate,
-                        vanna=(position_greeks.vanna or 0) * fx_rate,
-                        charm=(position_greeks.charm or 0) * fx_rate,
-                        veta=0
-                    )
-                else:
-                    # Standard (USD-margined) conversion
-                    spot_fx = spot * fx_rate
-                    total = total + PortfolioGreeks(
-                        delta=position_greeks.delta * spot_fx,
-                        gamma=position_greeks.gamma * spot_fx * spot,
-                        theta=position_greeks.theta * fx_rate,
-                        vega=position_greeks.vega * fx_rate,
-                        rho=(position_greeks.rho or 0) * fx_rate,
-                        vanna=(position_greeks.vanna or 0) * fx_rate,
-                        charm=(position_greeks.charm or 0) * fx_rate,
-                        veta=0
-                    )
-
-            result[currency] = total
 
         return result
 
