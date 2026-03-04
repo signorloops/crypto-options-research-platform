@@ -94,6 +94,65 @@ class OrderBookFeatureExtractor:
         self._max_history = 300  # 5 minutes of 1-second data
         self._history: deque = deque(maxlen=self._max_history)
 
+    @staticmethod
+    def _vwap(levels: List, depth: int) -> float:
+        selected = levels[:depth]
+        total = sum(lvl.size for lvl in selected)
+        if total == 0:
+            return 0.0
+        return float(sum(lvl.price * lvl.size for lvl in selected) / total)
+
+    @staticmethod
+    def _calc_slope(levels: List, max_depth: int = 5) -> float:
+        if len(levels) < 2:
+            return 0.0
+        depths = np.arange(1, min(len(levels), max_depth) + 1)
+        prices = [lvl.price for lvl in levels[:max_depth]]
+        if len(depths) != len(prices):
+            return 0.0
+        slope, _, _, _, _ = stats.linregress(depths, prices)
+        return float(slope)
+
+    def _compute_realized_volatility(self) -> tuple[Optional[float], Optional[float]]:
+        realized_vol_1min = None
+        realized_vol_5min = None
+
+        if len(self._history) >= 60:
+            recent = list(self._history)[-60:]
+            prices = [h["mid_price"] for h in recent if h["mid_price"] > 0]
+            if len(prices) > 1:
+                returns = np.diff(np.log(prices))
+                realized_vol_1min = float(np.std(returns) * np.sqrt(365 * 24 * 60))
+
+        if len(self._history) >= 300:
+            recent = list(self._history)[-300:]
+            prices = [h["mid_price"] for h in recent if h["mid_price"] > 0]
+            if len(prices) > 1:
+                returns = np.diff(np.log(prices))
+                realized_vol_5min = float(np.std(returns) * np.sqrt(365 * 24 * 12))
+
+        return realized_vol_1min, realized_vol_5min
+
+    @staticmethod
+    def _compute_trade_flow_features(
+        recent_trades: Optional[List["Trade"]],
+        depth_imbalance: float,
+    ) -> tuple[Optional[float], Optional[float]]:
+        trade_flow_imbalance = None
+        volume_order_imbalance = None
+        if not recent_trades:
+            return trade_flow_imbalance, volume_order_imbalance
+
+        buy_volume = sum(t.size for t in recent_trades if t.side.value == "buy")
+        sell_volume = sum(t.size for t in recent_trades if t.side.value == "sell")
+        total = buy_volume + sell_volume
+        if total > 0:
+            trade_flow_imbalance = (buy_volume - sell_volume) / total
+        if len(recent_trades) > 0:
+            volume_order_imbalance = trade_flow_imbalance * depth_imbalance
+
+        return trade_flow_imbalance, volume_order_imbalance
+
     def extract(
         self,
         order_book: 'OrderBook',
@@ -120,15 +179,8 @@ class OrderBookFeatureExtractor:
         depth_imbalance = (bid_depth_5 - ask_depth_5) / total_depth if total_depth > 0 else 0
 
         # VWAP calculations
-        def vwap(levels: List, depth: int) -> float:
-            selected = levels[:depth]
-            total = sum(lvl.size for lvl in selected)
-            if total == 0:
-                return 0
-            return sum(lvl.price * lvl.size for lvl in selected) / total
-
-        vwap_bid = vwap(order_book.bids, 5)
-        vwap_ask = vwap(order_book.asks, 5)
+        vwap_bid = self._vwap(order_book.bids, 5)
+        vwap_ask = self._vwap(order_book.asks, 5)
         vwap_mid = (vwap_bid + vwap_ask) / 2
 
         # Microprice (volume-weighted mid)
@@ -144,18 +196,8 @@ class OrderBookFeatureExtractor:
             microprice_bias = 0
 
         # Slope features (rate of price change with depth)
-        def calc_slope(levels: List, max_depth: int = 5) -> float:
-            if len(levels) < 2:
-                return 0
-            depths = np.arange(1, min(len(levels), max_depth) + 1)
-            prices = [lvl.price for lvl in levels[:max_depth]]
-            if len(depths) != len(prices):
-                return 0
-            slope, _, _, _, _ = stats.linregress(depths, prices)
-            return slope
-
-        bid_slope = calc_slope(order_book.bids)
-        ask_slope = calc_slope(order_book.asks)
+        bid_slope = self._calc_slope(order_book.bids)
+        ask_slope = self._calc_slope(order_book.asks)
 
         # Queue position features (ratio of level 1 to total depth)
         bid_queue_ratio = order_book.bids[0].size / bid_depth_5 if bid_depth_5 > 0 else 0
@@ -169,39 +211,10 @@ class OrderBookFeatureExtractor:
         })
 
         # Calculate realized volatility from history
-        realized_vol_1min = None
-        realized_vol_5min = None
-
-        if len(self._history) >= 60:
-            recent = list(self._history)[-60:]
-            prices = [h['mid_price'] for h in recent if h['mid_price'] > 0]
-            if len(prices) > 1:
-                returns = np.diff(np.log(prices))
-                realized_vol_1min = np.std(returns) * np.sqrt(365 * 24 * 60)
-
-        if len(self._history) >= 300:
-            recent = list(self._history)[-300:]
-            prices = [h['mid_price'] for h in recent if h['mid_price'] > 0]
-            if len(prices) > 1:
-                returns = np.diff(np.log(prices))
-                realized_vol_5min = np.std(returns) * np.sqrt(365 * 24 * 12)
-
-        # Trade flow features
-        trade_flow_imbalance = None
-        volume_order_imbalance = None
-
-        if recent_trades:
-            buy_volume = sum(t.size for t in recent_trades if t.side.value == 'buy')
-            sell_volume = sum(t.size for t in recent_trades if t.side.value == 'sell')
-            total = buy_volume + sell_volume
-
-            if total > 0:
-                trade_flow_imbalance = (buy_volume - sell_volume) / total
-
-            # Volume-Order Imbalance (VOI)
-            # Correlation between trade direction and order book imbalance
-            if len(recent_trades) > 0:
-                volume_order_imbalance = trade_flow_imbalance * depth_imbalance
+        realized_vol_1min, realized_vol_5min = self._compute_realized_volatility()
+        trade_flow_imbalance, volume_order_imbalance = self._compute_trade_flow_features(
+            recent_trades, depth_imbalance
+        )
 
         return OrderBookFeatures(
             timestamp=timestamp,
