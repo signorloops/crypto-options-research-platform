@@ -170,6 +170,74 @@ class IntegratedMarketMakingStrategy(MarketMakingStrategy):
             "calibrated_inventory_skew_factor": self._effective_inventory_skew_factor,
         }
 
+    def _update_regime_state(self, mid: float, prev_price: Optional[float]) -> RegimeState:
+        """Update returns/regime from latest mid price."""
+        ret = self._calculate_return(mid, prev_price)
+        if ret is not None:
+            detector_input = np.expm1(ret) if self.regime_detector.config.use_log_returns else ret
+            self.regime_detector.update(detector_input)
+            self._returns_history.append(ret)
+        return self.regime_detector.current_regime
+
+    def _evaluate_trading_gate(
+        self, state: MarketState, position: Position
+    ) -> Tuple[object, bool, str]:
+        """Run circuit-breaker risk checks and trading gate evaluation."""
+        portfolio = self._update_portfolio_state(state, position)
+        circuit_state = self.circuit_breaker.check_risk_limits(portfolio)
+        can_trade, reason = self.circuit_breaker.can_trade(TradeAction.MARKET_MAKING)
+        return circuit_state, can_trade, reason
+
+    def _evaluate_hedge_decision(
+        self, state: MarketState, mid: float, position: Position
+    ) -> Optional[HedgeDecision]:
+        """Evaluate and execute adaptive hedge when enabled and required."""
+        if not self.config.enable_adaptive_hedging or self._current_greeks is None:
+            return None
+        hedge_decision = self.hedger.should_hedge(
+            state.timestamp,
+            mid,
+            self._current_greeks,
+            position.size,
+        )
+        if hedge_decision.should_hedge:
+            self.hedger.execute_hedge(state.timestamp, hedge_decision.hedge_size, mid)
+        return hedge_decision
+
+    def _build_quote_metadata(
+        self,
+        *,
+        circuit_state: object,
+        current_regime: RegimeState,
+        spread_bps: float,
+        spread_multiplier: float,
+        reservation_price: float,
+        half_spread: float,
+        position: Position,
+        effective_inventory_limit: float,
+        position_limit_mult: float,
+        hedge_decision: Optional[HedgeDecision],
+        calibration_meta: Dict[str, float],
+    ) -> Dict[str, object]:
+        """Build standardized quote metadata for observability."""
+        return {
+            "strategy": self.name,
+            "circuit_state": circuit_state.value,
+            "regime": current_regime.name,
+            "spread_bps": spread_bps,
+            "spread_multiplier": spread_multiplier,
+            "reservation_price": reservation_price,
+            "half_spread": half_spread,
+            "inventory": position.size,
+            "inventory_limit": effective_inventory_limit,
+            "position_limit_multiplier": position_limit_mult,
+            "hedge_decision": hedge_decision.reason if hedge_decision else None,
+            "hedge_urgency": hedge_decision.urgency if hedge_decision else None,
+            "regime_switch_prob": self.regime_detector.predict_regime_switch_probability(),
+            "circuit_breaker_triggers": len(self.circuit_breaker.violation_history),
+            **calibration_meta,
+        }
+
     def quote(self, state: MarketState, position: Position) -> QuoteAction:
         """
         Generate quotes using integrated strategy.
@@ -190,22 +258,13 @@ class IntegratedMarketMakingStrategy(MarketMakingStrategy):
         self._current_greeks = state.greeks
 
         # 1. Update returns/regime on every tick (even when trading is halted).
-        ret = self._calculate_return(mid, prev_price)
-        if ret is not None:
-            detector_input = np.expm1(ret) if self.regime_detector.config.use_log_returns else ret
-            self.regime_detector.update(detector_input)
-            self._returns_history.append(ret)
-        current_regime = self.regime_detector.current_regime
+        current_regime = self._update_regime_state(mid, prev_price)
 
         # 2. Update online calibration before risk gate so metadata stays observable.
         calibration_meta = self._update_online_calibration(state, position.size)
 
-        # 3. Calculate current PnL and update portfolio state.
-        portfolio = self._update_portfolio_state(state, position)
-
         # 4. Check circuit breaker
-        circuit_state = self.circuit_breaker.check_risk_limits(portfolio)
-        can_trade, reason = self.circuit_breaker.can_trade(TradeAction.MARKET_MAKING)
+        circuit_state, can_trade, reason = self._evaluate_trading_gate(state, position)
 
         if not can_trade:
             # Return zero quotes - don't trade
@@ -225,21 +284,7 @@ class IntegratedMarketMakingStrategy(MarketMakingStrategy):
             )
 
         # 5. Check if hedging is needed
-        hedge_decision = None
-        if self.config.enable_adaptive_hedging and self._current_greeks:
-            hedge_decision = self.hedger.should_hedge(
-                state.timestamp,
-                mid,
-                self._current_greeks,
-                position.size
-            )
-
-            if hedge_decision.should_hedge:
-                self.hedger.execute_hedge(
-                    state.timestamp,
-                    hedge_decision.hedge_size,
-                    mid
-                )
+        hedge_decision = self._evaluate_hedge_decision(state, mid, position)
 
         # 5. Calculate spread based on regime and circuit state
         spread_multiplier = self._get_spread_multiplier()
@@ -260,23 +305,19 @@ class IntegratedMarketMakingStrategy(MarketMakingStrategy):
         )
 
         # 9. Build metadata
-        metadata = {
-            "strategy": self.name,
-            "circuit_state": circuit_state.value,
-            "regime": current_regime.name,
-            "spread_bps": spread_bps,
-            "spread_multiplier": spread_multiplier,
-            "reservation_price": reservation_price,
-            "half_spread": half_spread,
-            "inventory": position.size,
-            "inventory_limit": effective_inventory_limit,
-            "position_limit_multiplier": position_limit_mult,
-            "hedge_decision": hedge_decision.reason if hedge_decision else None,
-            "hedge_urgency": hedge_decision.urgency if hedge_decision else None,
-            "regime_switch_prob": self.regime_detector.predict_regime_switch_probability(),
-            "circuit_breaker_triggers": len(self.circuit_breaker.violation_history),
-            **calibration_meta,
-        }
+        metadata = self._build_quote_metadata(
+            circuit_state=circuit_state,
+            current_regime=current_regime,
+            spread_bps=spread_bps,
+            spread_multiplier=spread_multiplier,
+            reservation_price=reservation_price,
+            half_spread=half_spread,
+            position=position,
+            effective_inventory_limit=effective_inventory_limit,
+            position_limit_mult=position_limit_mult,
+            hedge_decision=hedge_decision,
+            calibration_meta=calibration_meta,
+        )
 
         # Record metrics
         self._record_metrics(state.timestamp, current_regime, circuit_state.value,
