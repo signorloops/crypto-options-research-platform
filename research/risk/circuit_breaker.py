@@ -54,6 +54,22 @@ class TradeAction(Enum):
     NEW_POSITION = "new_position"
 
 
+def _state_severity(state: CircuitState) -> int:
+    """Return numeric severity for safe state comparison."""
+    severity = {
+        CircuitState.NORMAL: 0,
+        CircuitState.WARNING: 1,
+        CircuitState.RESTRICTED: 2,
+        CircuitState.HALTED: 3,
+    }
+    return severity[state]
+
+
+def _alert_severity(state: CircuitState) -> str:
+    """Map circuit state to alert severity label."""
+    return "critical" if state in [CircuitState.RESTRICTED, CircuitState.HALTED] else "warning"
+
+
 @dataclass
 class Violation:
     """Record of a risk limit violation."""
@@ -284,17 +300,6 @@ class CircuitBreaker:
         self._redis_client: Optional[Any] = None
         self._redis_key_prefix = "circuit_breaker"
         self._instrument_states: Dict[str, CircuitState] = {}
-
-    @staticmethod
-    def _state_severity(state: CircuitState) -> int:
-        """Return numeric severity for safe state comparison."""
-        severity = {
-            CircuitState.NORMAL: 0,
-            CircuitState.WARNING: 1,
-            CircuitState.RESTRICTED: 2,
-            CircuitState.HALTED: 3,
-        }
-        return severity[state]
 
     def set_redis_client(self, redis_client: Any, key_prefix: str = "circuit_breaker") -> None:
         """
@@ -662,12 +667,12 @@ class CircuitBreaker:
         self._cooldown_until = now + timedelta(seconds=self.config.cooldown_period_seconds)
 
         # Reset warning counts on state improvement
-        if self._state_severity(new_state) < self._state_severity(old_state):
+        if _state_severity(new_state) < _state_severity(old_state):
             self._consecutive_warnings = 0
             self._warning_count = {}
 
         # Send alert on state degradation
-        if self._state_severity(new_state) > self._state_severity(old_state):
+        if _state_severity(new_state) > _state_severity(old_state):
             self._send_alert(new_state, violations)
 
         # Redis persistence should be triggered by explicit async maintenance loops.
@@ -735,15 +740,10 @@ class CircuitBreaker:
             lambda: self._send_slack_alert(webhook_url, state, violations)
         )
 
-    @staticmethod
-    def _alert_severity(state: CircuitState) -> str:
-        """Map circuit state to alert severity label."""
-        return "critical" if state in [CircuitState.RESTRICTED, CircuitState.HALTED] else "warning"
-
     def _build_alert_payload(self, state: CircuitState, violations: List[Violation]) -> Dict[str, Any]:
         """Build structured payload for generic webhook integrations."""
         return {
-            "severity": self._alert_severity(state),
+            "severity": _alert_severity(state),
             "state": state.value,
             "violation_count": len(violations),
             "violations": [
@@ -764,7 +764,7 @@ class CircuitBreaker:
         top_msgs = [f"- {v.message}" for v in violations[:5]]
         lines = [
             f"*Circuit Breaker Alert*: `{state.value.upper()}`",
-            f"*Severity*: `{self._alert_severity(state).upper()}`",
+            f"*Severity*: `{_alert_severity(state).upper()}`",
             f"*Violation Count*: {len(violations)}",
             "*Top Violations:*",
         ]
