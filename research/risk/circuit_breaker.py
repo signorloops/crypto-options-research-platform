@@ -70,6 +70,30 @@ def _alert_severity(state: CircuitState) -> str:
     return "critical" if state in [CircuitState.RESTRICTED, CircuitState.HALTED] else "warning"
 
 
+def _schedule_webhook_alert_method(
+    self: Any,
+    webhook_url: str,
+    state: CircuitState,
+    violations: List["Violation"],
+) -> None:
+    """Schedule generic webhook alert."""
+    self._schedule_async_alert(
+        lambda: self._send_webhook_alert(webhook_url, state, violations)
+    )
+
+
+def _schedule_slack_alert_method(
+    self: Any,
+    webhook_url: str,
+    state: CircuitState,
+    violations: List["Violation"],
+) -> None:
+    """Schedule Slack-compatible webhook alert."""
+    self._schedule_async_alert(
+        lambda: self._send_slack_alert(webhook_url, state, violations)
+    )
+
+
 @dataclass
 class Violation:
     """Record of a risk limit violation."""
@@ -718,28 +742,6 @@ class CircuitBreaker:
 
         Thread(target=_runner, daemon=True).start()
 
-    def _schedule_webhook_alert(
-        self,
-        webhook_url: str,
-        state: CircuitState,
-        violations: List[Violation],
-    ) -> None:
-        """Schedule generic webhook alert."""
-        self._schedule_async_alert(
-            lambda: self._send_webhook_alert(webhook_url, state, violations)
-        )
-
-    def _schedule_slack_alert(
-        self,
-        webhook_url: str,
-        state: CircuitState,
-        violations: List[Violation],
-    ) -> None:
-        """Schedule Slack-compatible webhook alert."""
-        self._schedule_async_alert(
-            lambda: self._send_slack_alert(webhook_url, state, violations)
-        )
-
     def _build_alert_payload(self, state: CircuitState, violations: List[Violation]) -> Dict[str, Any]:
         """Build structured payload for generic webhook integrations."""
         return {
@@ -983,6 +985,10 @@ class CircuitBreaker:
             )
 
         return None
+
+
+CircuitBreaker._schedule_webhook_alert = _schedule_webhook_alert_method
+CircuitBreaker._schedule_slack_alert = _schedule_slack_alert_method
 
 
 class CircuitBreakerEnhancedBacktest:
