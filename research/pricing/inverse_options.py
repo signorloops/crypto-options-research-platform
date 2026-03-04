@@ -50,6 +50,17 @@ class InverseGreeks:
     veta: float = 0.0     # Veta (dVega/dTime)
 
 
+@dataclass(frozen=True)
+class _GreeksComputationContext:
+    """Pre-computed scalar terms reused across inverse Greeks formulas."""
+
+    inv_S: float
+    inv_K: float
+    discount: float
+    sqrt_T: float
+    n_d1: float
+
+
 class InverseOptionPricer:
     """
     币本位期权定价模型。
@@ -242,8 +253,15 @@ class InverseOptionPricer:
         price = max(0.0, price)
 
         # 计算希腊字母
+        context = _GreeksComputationContext(
+            inv_S=inv_S,
+            inv_K=inv_K,
+            discount=discount,
+            sqrt_T=sqrt_T,
+            n_d1=n_d1,
+        )
         greeks = InverseOptionPricer._calculate_greeks_from_d(
-            d1, d2, S, K, T, r, sigma, option_type, inv_S, inv_K, discount, sqrt_T, n_d1
+            d1, d2, S, K, T, r, sigma, option_type, context
         )
 
         return price, greeks
@@ -258,13 +276,14 @@ class InverseOptionPricer:
         r: float,
         sigma: float,
         option_type: Literal["call", "put"],
-        inv_S: float,
-        inv_K: float,
-        discount: float,
-        sqrt_T: float,
-        n_d1: float
+        context: _GreeksComputationContext,
     ) -> InverseGreeks:
         """从已计算的 d1, d2 计算希腊字母（内部辅助函数）。"""
+        inv_S = context.inv_S
+        inv_K = context.inv_K
+        discount = context.discount
+        sqrt_T = context.sqrt_T
+        n_d1 = context.n_d1
 
         # Delta (对S的偏导)
         # 币本位期权需要完整的Delta推导，包含n(d1)项
@@ -382,8 +401,15 @@ class InverseOptionPricer:
         n_d1 = norm.pdf(d1)
 
         # 使用辅助函数计算希腊字母
+        context = _GreeksComputationContext(
+            inv_S=inv_S,
+            inv_K=inv_K,
+            discount=discount,
+            sqrt_T=sqrt_T,
+            n_d1=n_d1,
+        )
         return InverseOptionPricer._calculate_greeks_from_d(
-            d1, d2, S, K, T, r, sigma, option_type, inv_S, inv_K, discount, sqrt_T, n_d1
+            d1, d2, S, K, T, r, sigma, option_type, context
         )
 
     @staticmethod

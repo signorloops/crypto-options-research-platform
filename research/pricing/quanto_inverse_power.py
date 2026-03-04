@@ -7,7 +7,7 @@ adjustment for settlement-currency mismatch risk.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Tuple
+from typing import Any, Dict, Literal, Optional, Tuple
 
 import numpy as np
 
@@ -109,12 +109,36 @@ class QuantoInversePowerOptionPricer:
         sigma_fx: float,
         rho: float,
         power: float = 1.0,
-        n_paths: int = 100_000,
-        seed: int | None = 42,
-        bump_rel: float = 1e-3,
+        pricer_kwargs: Optional[Dict[str, Any]] = None,
+        **legacy_pricer_kwargs: Any,
     ) -> Tuple[float, QuantoInversePowerGreeks]:
-        """Calculate quanto-inverse-power price and Greeks."""
+        """Calculate quanto-inverse-power price and Greeks.
+
+        `pricer_kwargs` forwards optional settings to the underlying inverse-power
+        pricer (supported keys: `n_paths`, `seed`, `bump_rel`).
+        Legacy direct kwargs remain supported for backward compatibility.
+        """
         QuantoInversePowerOptionPricer._validate_quanto_inputs(fx_rate, sigma_fx, rho)
+
+        merged_pricer_kwargs: Dict[str, Any] = {
+            "n_paths": 100_000,
+            "seed": 42,
+            "bump_rel": 1e-3,
+        }
+        if pricer_kwargs:
+            merged_pricer_kwargs.update(pricer_kwargs)
+
+        for key in ("n_paths", "seed", "bump_rel"):
+            if key in legacy_pricer_kwargs:
+                merged_pricer_kwargs[key] = legacy_pricer_kwargs.pop(key)
+        if legacy_pricer_kwargs:
+            unknown_keys = ", ".join(sorted(legacy_pricer_kwargs.keys()))
+            raise TypeError(f"Unexpected keyword arguments: {unknown_keys}")
+
+        n_paths_value = int(merged_pricer_kwargs["n_paths"])
+        seed_raw = merged_pricer_kwargs["seed"]
+        seed_value = None if seed_raw is None else int(seed_raw)
+        bump_rel_value = float(merged_pricer_kwargs["bump_rel"])
 
         base_price, base_greeks = InversePowerOptionPricer.calculate_price_and_greeks(
             S=S,
@@ -124,9 +148,9 @@ class QuantoInversePowerOptionPricer:
             sigma=sigma,
             option_type=option_type,
             power=power,
-            n_paths=n_paths,
-            seed=seed,
-            bump_rel=bump_rel,
+            n_paths=n_paths_value,
+            seed=seed_value,
+            bump_rel=bump_rel_value,
         )
 
         t_eff = max(float(T), 0.0)

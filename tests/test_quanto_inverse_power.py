@@ -69,6 +69,57 @@ def test_quanto_inverse_power_greeks_include_fx_and_corr_sensitivity():
     assert greeks.quanto_adjustment > 0.0
 
 
+def test_quanto_inverse_power_greeks_accept_pricer_kwargs():
+    legacy_price, legacy_greeks = QuantoInversePowerOptionPricer.calculate_price_and_greeks(
+        S=53000.0,
+        K=50000.0,
+        T=0.25,
+        r=0.02,
+        sigma=0.45,
+        option_type="put",
+        fx_rate=1.15,
+        sigma_fx=0.65,
+        rho=0.2,
+        power=1.1,
+        n_paths=25000,
+        seed=5,
+        bump_rel=2e-3,
+    )
+    kwargs_price, kwargs_greeks = QuantoInversePowerOptionPricer.calculate_price_and_greeks(
+        S=53000.0,
+        K=50000.0,
+        T=0.25,
+        r=0.02,
+        sigma=0.45,
+        option_type="put",
+        fx_rate=1.15,
+        sigma_fx=0.65,
+        rho=0.2,
+        power=1.1,
+        pricer_kwargs={"n_paths": 25000, "seed": 5, "bump_rel": 2e-3},
+    )
+
+    assert math.isclose(kwargs_price, legacy_price, rel_tol=1e-9, abs_tol=1e-12)
+    assert math.isclose(kwargs_greeks.delta, legacy_greeks.delta, rel_tol=1e-9, abs_tol=1e-12)
+
+
+def test_quanto_inverse_power_greeks_reject_unknown_kwargs():
+    with pytest.raises(TypeError):
+        QuantoInversePowerOptionPricer.calculate_price_and_greeks(
+            S=53000.0,
+            K=50000.0,
+            T=0.25,
+            r=0.02,
+            sigma=0.45,
+            option_type="put",
+            fx_rate=1.15,
+            sigma_fx=0.65,
+            rho=0.2,
+            power=1.1,
+            unknown_kw=1,
+        )
+
+
 def test_quanto_inverse_power_input_validation():
     with pytest.raises(ValueError):
         QuantoInversePowerOptionPricer.calculate_price(
