@@ -388,7 +388,6 @@ class VaRCalculator:
         """Peaks-over-threshold EVT VaR using a GPD fit on tail losses."""
         if holding_period <= 0:
             raise ValueError("holding_period must be positive")
-
         total_value, weights_arr, aligned_returns = self._prepare_portfolio_inputs(
             positions, returns
         )
@@ -396,12 +395,10 @@ class VaRCalculator:
         losses = -portfolio_returns
         if len(losses) < 50:
             return self.historical_var(positions, returns, holding_period)
-
         threshold = float(np.quantile(losses, threshold_quantile))
         tail_losses = losses[losses > threshold]
         if len(tail_losses) < 20:
             return self.historical_var(positions, returns, holding_period)
-
         excess = tail_losses - threshold
         shape, loc, scale = stats.genpareto.fit(excess, floc=0.0)
         pu = len(tail_losses) / len(losses)
@@ -414,7 +411,6 @@ class VaRCalculator:
             else:
                 q = threshold + scale / shape * (tail_prob ** (-shape) - 1.0)
             return float(max(q, 0.0))
-
         q95 = evt_quantile(0.95)
         q99 = evt_quantile(0.99)
         var_95 = q95 * total_value
@@ -425,10 +421,8 @@ class VaRCalculator:
                 return float(q_alpha * total_value)
             es_loss = q_alpha + (scale - shape * threshold) / (1 - shape)
             return float(max(es_loss, q_alpha) * total_value)
-
         cvar_95 = evt_es(q95, 0.95)
         cvar_99 = evt_es(q99, 0.99)
-
         return VaRResult(
             var_95=float(var_95),
             var_99=float(var_99),

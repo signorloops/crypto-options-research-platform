@@ -106,18 +106,7 @@ class AdaptiveDeltaHedger:
         portfolio_greeks: Greeks,
         position_size: float = 0.0
     ) -> HedgeDecision:
-        """
-        Determine if hedging is needed and calculate hedge size.
-
-        Args:
-            current_time: Current timestamp
-            current_price: Current underlying price
-            portfolio_greeks: Portfolio Greeks
-            position_size: Current position size
-
-        Returns:
-            HedgeDecision with details
-        """
+        """Determine whether to hedge now and compute hedge size/metadata."""
         self.update_price(current_time, current_price)
         time_since_last = self._get_time_since_last_hedge(current_time)
         price_change_pct = self._calculate_price_change_pct(current_price)

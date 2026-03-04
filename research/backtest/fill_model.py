@@ -172,8 +172,6 @@ class RealisticFillSimulator:
             return None
         if quote_timestamp is None:
             quote_timestamp = market_state.timestamp
-
-        # Simulate latency: our quote arrives after some delay
         if self.config.latency_std_ms <= 0:
             latency_ms = max(0.0, self.config.base_latency_ms)
         else:
@@ -181,17 +179,11 @@ class RealisticFillSimulator:
                 0.0,
                 self.rng.normal(self.config.base_latency_ms, self.config.latency_std_ms),
             )
-
-        # Check each trade against our quote
         for trade in next_trades:
-            # Check if trade timestamp is after our quote + latency
             trade_delay_ms = self._time_diff_ms(trade.timestamp, quote_timestamp)
             if trade_delay_ms < latency_ms:
-                continue  # Trade happened before our quote arrived
-
-            # Check if trade hits our quote
+                continue
             if trade.side == OrderSide.SELL:
-                # Seller hits bids - check if our bid is competitive
                 if trade.price <= quote.bid_price and quote.bid_size > 0:
                     return self._create_fill(
                         trade,
@@ -203,7 +195,6 @@ class RealisticFillSimulator:
                         inventory_pressure=inventory_pressure,
                     )
             else:
-                # Buyer lifts asks - check if our ask is competitive
                 if trade.price >= quote.ask_price and quote.ask_size > 0:
                     return self._create_fill(
                         trade,
@@ -214,7 +205,6 @@ class RealisticFillSimulator:
                         latency_ms=latency_ms,
                         inventory_pressure=inventory_pressure,
                     )
-
         return None
 
     def _create_fill(
