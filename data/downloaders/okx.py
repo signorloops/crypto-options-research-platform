@@ -403,59 +403,32 @@ class OKXClient(ExchangeInterface):
         underlying: str = "BTC-USD",
         period_days: int = 30
     ) -> pd.DataFrame:
-        """
-        Get option implied volatility history from OKX.
-
-        OKX provides IV index data via /api/v5/market/index-candles
-        for the underlying's option-implied volatility.
-
-        Args:
-            underlying: 'BTC-USD' or 'ETH-USD'
-            period_days: Number of days of history
-
-        Returns:
-            DataFrame with columns: timestamp, open, high, low, close (IV values)
-        """
+        """Get daily IV index candle history from OKX for a supported underlying."""
         if underlying not in self.VALID_UNDERLYINGS:
             raise ValueError(
                 f"Only coin-margined options supported {self.VALID_UNDERLYINGS}, got: {underlying}"
             )
-
-        # OKX IV index symbol format: BTC-USD-IV (not BTC-USD-IV-INDEX)
         iv_index = f"{underlying}-IV"
-
         end = datetime.now(timezone.utc)
         start = end - timedelta(days=period_days)
-
         params = {
             "instId": iv_index,
             "bar": "1D",
             "limit": min(period_days, 100),
-            # OKX API: before = end time (get data before this timestamp)
-            #           after = start time (get data after this timestamp)
             "before": str(int(end.timestamp() * 1000)),
             "after": str(int(start.timestamp() * 1000))
         }
-
         try:
             result = await self._request("/api/v5/market/index-candles", params)
             data = result.get("data", [])
-
             if not data:
                 logger.warning(f"No IV data available for {underlying}")
                 return pd.DataFrame()
-
-            # Format: [timestamp, open, high, low, close]
-            df = pd.DataFrame(data, columns=[
-                "timestamp", "open", "high", "low", "close"
-            ])
-
+            df = pd.DataFrame(data, columns=["timestamp", "open", "high", "low", "close"])
             df["timestamp"] = pd.to_datetime(df["timestamp"].astype(float), unit="ms")
             for col in ["open", "high", "low", "close"]:
                 df[col] = df[col].astype(float)
-
             return df.sort_values("timestamp").reset_index(drop=True)
-
         except OKXAPIError as e:
             logger.error(f"Failed to get IV history: {e}")
             return pd.DataFrame()

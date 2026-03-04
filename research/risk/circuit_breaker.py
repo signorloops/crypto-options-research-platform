@@ -933,18 +933,8 @@ class CircuitBreaker:
         returns: pd.DataFrame,
         portfolio_value: float
     ) -> Optional[Violation]:
-        """
-        Check VaR against limit.
-
-        Args:
-            positions: DataFrame with position values
-            returns: DataFrame of historical returns
-            portfolio_value: Total portfolio value
-
-        Returns:
-            Violation if limit exceeded, None otherwise
-        """
-        if len(returns) < 30:  # Need sufficient data
+        """Check configured VaR thresholds and return a violation when breached."""
+        if len(returns) < 30:
             return None
 
         method = self.config.var_method.lower()
@@ -957,7 +947,6 @@ class CircuitBreaker:
         elif method == "fhs":
             var_result = self._var_calculator.filtered_historical_var(positions, returns)
         else:
-            # Hybrid: take most conservative 95% VaR across robust estimators.
             candidates = [
                 self._var_calculator.parametric_var(positions, returns),
                 self._var_calculator.cornish_fisher_var(positions, returns),

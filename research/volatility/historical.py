@@ -246,23 +246,8 @@ def yang_zhang_volatility(open: np.ndarray, high: np.ndarray,
 
 def calculate_volatility_from_ohlc(df: pd.DataFrame, method: str = "yang_zhang",
                                    annualize: bool = True, periods: int = 365) -> float:
-    """
-    从 OHLC DataFrame 计算波动率。
-
-    Args:
-        df: DataFrame with columns ['open', 'high', 'low', 'close']
-        method: 计算方法 ("realized", "parkinson", "garman_klass", "rogers_satchell", "yang_zhang")
-        annualize: 是否年化
-        periods: 年化周期数
-
-    Returns:
-        波动率估计值
-
-    Example:
-        >>> vol = calculate_volatility_from_ohlc(df, method="yang_zhang")
-    """
+    """Compute volatility from OHLC data using the selected estimator."""
     method = method.lower()
-
     if method == "realized":
         if 'close' not in df.columns:
             raise ValueError("realized method requires 'close' column")

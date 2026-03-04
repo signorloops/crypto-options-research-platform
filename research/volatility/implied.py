@@ -249,14 +249,7 @@ def plot_volatility_surface(
     strike_range: Tuple[float, float] = (0.8, 1.2),
     expiry_range: Tuple[float, float] = (0.1, 1.0),
 ):
-    """
-    绘制波动率曲面 (需要 matplotlib)。
-
-    Args:
-        surface: VolatilitySurface 对象
-        strike_range: 价内外范围 (相对 ATM)
-        expiry_range: 到期时间范围 (年化)
-    """
+    """Plot a 3D volatility surface and maturity skews (requires matplotlib)."""
     try:
         import matplotlib.pyplot as plt
     except ImportError:
@@ -266,13 +259,9 @@ def plot_volatility_surface(
     if not surface.points:
         logger.warning("Empty surface, nothing to plot")
         return
-
     S = surface.points[0].underlying_price
-
-    # 创建网格
     strikes = np.linspace(strike_range[0] * S, strike_range[1] * S, 50)
     expiries = np.linspace(expiry_range[0], expiry_range[1], 50)
-
     K_grid, T_grid = np.meshgrid(strikes, expiries)
     V_grid = np.zeros_like(K_grid)
 
@@ -281,16 +270,12 @@ def plot_volatility_surface(
             V_grid[j, i] = surface.get_volatility(strikes[i], expiries[j])
 
     fig = plt.figure(figsize=(12, 5))
-
-    # 3D 曲面
     ax1 = fig.add_subplot(121, projection="3d")
     ax1.plot_surface(K_grid / S, T_grid, V_grid, cmap="viridis")
     ax1.set_xlabel("Moneyness (K/S)")
     ax1.set_ylabel("Time to Expiry")
     ax1.set_zlabel("Implied Volatility")
     ax1.set_title("Volatility Surface")
-
-    # 波动率微笑
     ax2 = fig.add_subplot(122)
     for T in np.linspace(0.1, 1.0, 5):
         skew = surface.get_skew(T)
