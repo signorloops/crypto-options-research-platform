@@ -223,20 +223,11 @@ class GreeksRiskAnalyzer:
         implied_vol: float,
         as_of: datetime
     ) -> Tuple[Greeks, Greeks]:
-        """
-        Calculate Greeks for a position.
-
-        Automatically detects coin-margined (inverse) options and uses
-        the appropriate pricing model.
-
-        Returns:
-            (per_contract_greeks, position_greeks)
-        """
+        """Calculate per-contract and position-scaled Greeks for a single option position."""
         T = contract.time_to_expiry(as_of)
         option_type = 'call' if contract.option_type.value == 'C' else 'put'
 
         if contract.is_coin_margined:
-            # Use inverse option pricer for coin-margined options
             from research.pricing.inverse_options import InverseOptionPricer
             inv_greeks = InverseOptionPricer.calculate_greeks(
                 S=spot,
@@ -246,7 +237,6 @@ class GreeksRiskAnalyzer:
                 sigma=implied_vol,
                 option_type=option_type
             )
-            # Convert InverseGreeks to Greeks
             greeks = Greeks(
                 delta=inv_greeks.delta,
                 gamma=inv_greeks.gamma,
@@ -257,7 +247,6 @@ class GreeksRiskAnalyzer:
                 charm=inv_greeks.charm
             )
         else:
-            # Use standard Black-Scholes for U-margined options
             greeks = self.calculator.calculate(
                 S=spot,
                 K=contract.strike,
@@ -267,7 +256,6 @@ class GreeksRiskAnalyzer:
                 option_type=option_type
             )
 
-        # Scale by position size
         position_greeks = Greeks(
             delta=greeks.delta * position.size,
             gamma=greeks.gamma * position.size,

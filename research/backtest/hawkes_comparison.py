@@ -257,7 +257,6 @@ class ScenarioGenerator:
         start_ts = self._to_utc_timestamp(start)
         end_ts = self._to_utc_timestamp(end)
         data_path = Path(data_dir)
-
         frames: List[pd.DataFrame] = []
         if data_path.exists() and data_path.is_dir():
             for path in sorted(data_path.rglob("*")):
@@ -288,25 +287,17 @@ class ScenarioGenerator:
                 normalized = self._normalize_historical_frame(raw, start_ts, end_ts)
                 if normalized is not None and not normalized.empty:
                     frames.append(normalized)
-
         if frames:
             merged = pd.concat(frames, axis=0).sort_index()
             merged = merged.groupby(level=0).agg({"price": "mean", "volume": "sum"})
             merged["intensity"] = merged["volume"].ewm(span=20, adjust=False, min_periods=1).mean()
             merged["scenario_source"] = "historical"
             return merged
-
         logger.warning(
             "No usable historical files found in period range; falling back to synthetic proxy"
         )
         days = (end - start).days
-        config = HawkesScenarioConfig(
-            name="real_proxy",
-            mu=0.1,
-            alpha=0.4,
-            beta=0.8,
-            T=max(days, 1) * 86400.0
-        )
+        config = HawkesScenarioConfig(name="real_proxy", mu=0.1, alpha=0.4, beta=0.8, T=max(days, 1) * 86400.0)
         synthetic = self._generate_single_hawkes_scenario(config, seed_offset=start.month)
         synthetic["scenario_source"] = "synthetic_proxy"
         return synthetic

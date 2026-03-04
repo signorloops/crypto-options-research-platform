@@ -125,59 +125,35 @@ class RoughVolatilityPricer:
         cfg = self.config
         jump_returns = np.zeros((n_paths, n_steps), dtype=float)
         var_multipliers = np.ones((n_paths, n_steps), dtype=float)
-
         if cfg.jump_mode == "none" or cfg.jump_intensity <= 0.0 or cfg.jump_std <= 0.0:
-            return jump_returns, var_multipliers, {
-                "avg_jump_events_per_path": 0.0,
-                "total_jump_events": 0.0,
-                "avg_jump_intensity": float(max(cfg.jump_intensity, 0.0)),
-                "jump_intensity_std": 0.0,
-            }
-
+            return jump_returns, var_multipliers, {"avg_jump_events_per_path": 0.0, "total_jump_events": 0.0, "avg_jump_intensity": float(max(cfg.jump_intensity, 0.0)), "jump_intensity_std": 0.0}
         if cfg.jump_mode == "cojump":
             lam_dt = cfg.jump_intensity * dt
             counts = rng.poisson(lam_dt, size=(n_paths, n_steps))
             jump_sizes = rng.normal(cfg.jump_mean, cfg.jump_std, size=(n_paths, n_steps))
             jump_returns = counts * jump_sizes
             var_multipliers = np.exp(cfg.variance_jump_scale * np.abs(jump_returns))
-
             total_events = float(np.sum(counts))
             avg_events = float(np.mean(np.sum(counts, axis=1)))
-            return jump_returns, var_multipliers, {
-                "avg_jump_events_per_path": avg_events,
-                "total_jump_events": total_events,
-                "avg_jump_intensity": float(cfg.jump_intensity),
-                "jump_intensity_std": 0.0,
-            }
-
-        # clustered mode: pathwise self-exciting intensity proxy
+            return jump_returns, var_multipliers, {"avg_jump_events_per_path": avg_events, "total_jump_events": total_events, "avg_jump_intensity": float(cfg.jump_intensity), "jump_intensity_std": 0.0}
         intensity = np.full(n_paths, cfg.jump_intensity, dtype=float)
         intensity_history = np.zeros((n_paths, n_steps), dtype=float)
         counts = np.zeros((n_paths, n_steps), dtype=float)
         decay = np.exp(-cfg.jump_decay * dt)
         base = float(cfg.jump_intensity)
-
         for i in range(n_steps):
             intensity = np.clip(intensity, 0.0, cfg.max_jump_intensity)
             intensity_history[:, i] = intensity
             lam_dt = np.clip(intensity * dt, 0.0, 50.0)
             step_counts = rng.poisson(lam_dt)
             counts[:, i] = step_counts
-
             jump_sizes = rng.normal(cfg.jump_mean, cfg.jump_std, size=n_paths)
             jump_returns[:, i] = step_counts * jump_sizes
             var_multipliers[:, i] = np.exp(cfg.variance_jump_scale * np.abs(jump_returns[:, i]))
-
             intensity = base + decay * (intensity - base) + cfg.jump_excitation * step_counts
-
         total_events = float(np.sum(counts))
         avg_events = float(np.mean(np.sum(counts, axis=1)))
-        return jump_returns, var_multipliers, {
-            "avg_jump_events_per_path": avg_events,
-            "total_jump_events": total_events,
-            "avg_jump_intensity": float(np.mean(intensity_history)),
-            "jump_intensity_std": float(np.std(intensity_history)),
-        }
+        return jump_returns, var_multipliers, {"avg_jump_events_per_path": avg_events, "total_jump_events": total_events, "avg_jump_intensity": float(np.mean(intensity_history)), "jump_intensity_std": float(np.std(intensity_history))}
 
     def simulate_paths(
         self,

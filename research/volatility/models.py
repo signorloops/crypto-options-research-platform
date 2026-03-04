@@ -242,49 +242,28 @@ def garch_volatility(returns: np.ndarray, omega: float = 0.000001,
 
 
 def estimate_garch_params(returns: np.ndarray) -> Tuple[float, float, float]:
-    """
-    使用最大似然估计 GARCH(1,1) 参数。
-
-    使用 scipy.optimize 进行约束优化，确保参数满足平稳性条件。
-
-    Args:
-        returns: 收益率序列
-
-    Returns:
-        (omega, alpha, beta) 参数元组
-    """
+    """Estimate GARCH(1,1) parameters with constrained maximum likelihood."""
     values = np.asarray(returns, dtype=np.float64)
     if len(values) < 30:
-        # 样本量不足，返回默认参数
         return (float(np.var(values) * 0.01), 0.1, 0.85)
-
-    # 如果 scipy 不可用，回退到固定参数
     if not HAS_SCIPY:
         return (float(np.var(values) * 0.01), 0.1, 0.85)
-
-    # 初始参数估计
     var_returns = float(np.var(values))
     omega_init = var_returns * 0.01
     alpha_init = 0.1
     beta_init = 0.85
 
     def neg_log_likelihood(params):
-        """负对数似然函数（用于最小化）。"""
+        """Negative log-likelihood for minimization."""
         omega, alpha, beta = params
-        # 参数约束检查
         if omega <= 0 or alpha < 0 or beta < 0 or alpha + beta >= 1:
             return 1e10
-
         ll = _garch_log_likelihood_fast(values, omega, alpha, beta, var_returns)
         if not np.isfinite(ll):
             return 1e10
         return float(-ll)
-
-    # 约束优化
-    # 约束条件: omega > 0, alpha >= 0, beta >= 0, alpha + beta < 1
     bounds = [(1e-8, None), (0, 0.5), (0, 0.99)]
     constraints = {'type': 'ineq', 'fun': lambda x: 0.999 - x[1] - x[2]}
-
     result = minimize(
         neg_log_likelihood,
         [omega_init, alpha_init, beta_init],
@@ -296,15 +275,12 @@ def estimate_garch_params(returns: np.ndarray) -> Tuple[float, float, float]:
 
     if result.success:
         omega, alpha, beta = result.x
-        # 确保数值稳定性
         alpha = max(0.0, min(alpha, 0.5))
         beta = max(0.0, min(beta, 0.99))
         if alpha + beta >= 1.0:
             beta = 0.99 - alpha
         return (float(omega), float(alpha), float(beta))
-    else:
-        # 优化失败，返回初始值
-        return (omega_init, alpha_init, beta_init)
+    return (omega_init, alpha_init, beta_init)
 
 
 def _garch_log_likelihood(returns: np.ndarray, omega: float,

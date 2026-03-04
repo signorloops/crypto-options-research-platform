@@ -93,13 +93,11 @@ def _normalize_okx_option_summary(
 ) -> pd.DataFrame:
     if not rows:
         raise ValueError("OKX option summary returned no rows")
-
     now = pd.Timestamp.now(tz="UTC")
     normalized_rows: list[dict[str, Any]] = []
     for row in rows:
         if not isinstance(row, dict):
             continue
-
         price_raw = (
             row.get("markPx")
             or row.get("markPrice")
@@ -111,10 +109,8 @@ def _normalize_okx_option_summary(
         price = pd.to_numeric(price_raw, errors="coerce")
         if pd.isna(price):
             continue
-
         symbol = str(row.get("instId") or row.get("instFamily") or underlying)
         option_type = _normalize_option_type(row.get("optType"), symbol)
-
         timestamp_raw = row.get("ts") or row.get("uTime") or row.get("cTime")
         if timestamp_raw is not None:
             timestamp_numeric = pd.to_numeric(timestamp_raw, errors="coerce")
@@ -123,7 +119,6 @@ def _normalize_okx_option_summary(
             timestamp = pd.NaT
         if pd.isna(timestamp):
             timestamp = now
-
         expiry_years = 0.0
         expiry_raw = row.get("expTime")
         if expiry_raw is not None:
@@ -131,11 +126,9 @@ def _normalize_okx_option_summary(
             expiry_ts = pd.to_datetime(expiry_numeric, unit="ms", utc=True, errors="coerce")
             if not pd.isna(expiry_ts):
                 expiry_years = max((expiry_ts - now).total_seconds(), 0.0) / (365.0 * 24.0 * 3600.0)
-
         delta = pd.to_numeric(row.get("delta"), errors="coerce")
         if pd.isna(delta):
             delta = 0.5
-
         normalized_rows.append(
             {
                 "timestamp": timestamp,
@@ -147,7 +140,6 @@ def _normalize_okx_option_summary(
                 "venue": "okx",
             }
         )
-
     if not normalized_rows:
         raise ValueError("No valid rows in OKX option summary payload")
     return _normalize_quotes(pd.DataFrame(normalized_rows), fallback_venue="okx")
