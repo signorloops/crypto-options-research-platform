@@ -255,6 +255,87 @@ class FastIntegratedMarketMakingStrategy(MarketMakingStrategy):
 
         return bid_size, ask_size
 
+    def _evaluate_trading_gate(
+        self,
+        state: MarketState,
+        mid: float,
+        position: Position,
+    ) -> Tuple[object, bool, str]:
+        """Evaluate circuit-breaker gate and throttled risk checks."""
+        circuit_state = self.circuit_breaker.state
+        can_trade = True
+        reason = "ok"
+        if not self.config.enable_circuit_breaker:
+            return circuit_state, can_trade, reason
+
+        if self._should_refresh_risk_check(state.timestamp, mid, position.size):
+            portfolio = self._update_portfolio_state(state, position)
+            circuit_state = self.circuit_breaker.check_risk_limits(portfolio)
+            can_trade, reason = self.circuit_breaker.can_trade(TradeAction.MARKET_MAKING)
+            self._last_can_trade = can_trade
+            self._last_halt_reason = reason
+            self._last_risk_check_at = state.timestamp
+            self._last_risk_check_mid = mid
+            self._last_risk_check_inventory = position.size
+        else:
+            can_trade = self._last_can_trade
+            reason = self._last_halt_reason
+
+        return circuit_state, can_trade, reason
+
+    def _update_regime_state(self, mid: float) -> None:
+        """Update fast regime detector with latest return sample."""
+        if not self.config.enable_regime_detection:
+            return
+        ret = self._calculate_return(mid)
+        if ret is None:
+            return
+        use_log_returns = bool(getattr(self.regime_detector.config, "use_log_returns", False))
+        detector_input = np.expm1(ret) if use_log_returns else ret
+        self.regime_detector.update(detector_input)
+        self._returns_history.append(ret)
+
+    def _refresh_greeks_context(self, state: MarketState, mid: float) -> None:
+        """Refresh current Greeks from state or LRU cache."""
+        price_bucket = int(mid / 100) * 100 if mid > 0 else 0
+        cache_key = f"{state.instrument}_{price_bucket}"
+        if state.greeks is not None:
+            self._set_cached_greeks(cache_key, state.greeks)
+            self._current_greeks = state.greeks
+            return
+        self._current_greeks = self._get_cached_greeks(cache_key)
+
+    def _build_quote_metadata(
+        self,
+        *,
+        circuit_state: object,
+        current_regime: RegimeState,
+        spread_bps: float,
+        spread_multiplier: float,
+        reservation_price: float,
+        half_spread: float,
+        position: Position,
+        latency_ms: float,
+        hedge_decision: object,
+    ) -> Dict[str, object]:
+        """Build quote metadata payload for monitoring/analysis."""
+        return {
+            "strategy": self.name,
+            "circuit_state": (
+                circuit_state.value if self.config.enable_circuit_breaker else "disabled"
+            ),
+            "regime": current_regime.name,
+            "spread_bps": spread_bps,
+            "spread_multiplier": spread_multiplier,
+            "reservation_price": reservation_price,
+            "half_spread": half_spread,
+            "inventory": position.size,
+            "latency_ms": latency_ms,
+            "hedge_decision": hedge_decision.reason if hedge_decision else None,
+            "cache_hits": self._cache_hits,
+            "cache_misses": self._cache_misses,
+        }
+
     def quote(self, state: MarketState, position: Position) -> QuoteAction:
         """
         生成报价 (高性能版本).
@@ -270,59 +351,26 @@ class FastIntegratedMarketMakingStrategy(MarketMakingStrategy):
             raise ValueError("Cannot quote without valid order book")
         self._current_price = mid
 
-        circuit_state = self.circuit_breaker.state
-        # 1. 检查熔断 (如果启用)
-        if self.config.enable_circuit_breaker:
-            if self._should_refresh_risk_check(state.timestamp, mid, position.size):
-                portfolio = self._update_portfolio_state(state, position)
-                circuit_state = self.circuit_breaker.check_risk_limits(portfolio)
-                can_trade, reason = self.circuit_breaker.can_trade(TradeAction.MARKET_MAKING)
-                self._last_can_trade = can_trade
-                self._last_halt_reason = reason
-                self._last_risk_check_at = state.timestamp
-                self._last_risk_check_mid = mid
-                self._last_risk_check_inventory = position.size
-            else:
-                can_trade = self._last_can_trade
-                reason = self._last_halt_reason
+        circuit_state, can_trade, reason = self._evaluate_trading_gate(state, mid, position)
+        if not can_trade:
+            return QuoteAction(
+                bid_price=mid,
+                bid_size=0.0,
+                ask_price=mid,
+                ask_size=0.0,
+                metadata={
+                    "strategy": self.name,
+                    "circuit_state": circuit_state.value,
+                    "trading_halted": True,
+                    "halt_reason": reason,
+                },
+            )
 
-            if not can_trade:
-                return QuoteAction(
-                    bid_price=mid,
-                    bid_size=0.0,
-                    ask_price=mid,
-                    ask_size=0.0,
-                    metadata={
-                        "strategy": self.name,
-                        "circuit_state": circuit_state.value,
-                        "trading_halted": True,
-                        "halt_reason": reason,
-                    },
-                )
-
-        # 2. 更新状态检测 (Fast版本, <5ms)
-        if self.config.enable_regime_detection:
-            ret = self._calculate_return(mid)
-            if ret is not None:
-                use_log_returns = bool(getattr(self.regime_detector.config, "use_log_returns", False))
-                detector_input = np.expm1(ret) if use_log_returns else ret
-                self.regime_detector.update(detector_input)
-                self._returns_history.append(ret)
-
+        self._update_regime_state(mid)
         current_regime = self.regime_detector.current_regime
 
         # 3. 尝试从缓存获取Greeks (如果可用)
-        # 使用价格区间作为缓存键，减少缓存抖动
-        price_bucket = int(mid / 100) * 100 if mid > 0 else 0
-        cache_key = f"{state.instrument}_{price_bucket}"
-        # Prefer real-time greeks from current state, then cache fallback.
-        if state.greeks is not None:
-            self._set_cached_greeks(cache_key, state.greeks)
-            self._current_greeks = state.greeks
-        else:
-            cached_greeks = self._get_cached_greeks(cache_key)
-            # Ensure stale greeks are not reused when cache misses.
-            self._current_greeks = cached_greeks
+        self._refresh_greeks_context(state, mid)
 
         # 4. 检查对冲
         hedge_decision = None
@@ -350,22 +398,17 @@ class FastIntegratedMarketMakingStrategy(MarketMakingStrategy):
         # 8. 构建元数据
         latency_ms = (time.perf_counter() - start_time) * 1000
 
-        metadata = {
-            "strategy": self.name,
-            "circuit_state": (
-                circuit_state.value if self.config.enable_circuit_breaker else "disabled"
-            ),
-            "regime": current_regime.name,
-            "spread_bps": spread_bps,
-            "spread_multiplier": spread_multiplier,
-            "reservation_price": reservation_price,
-            "half_spread": half_spread,
-            "inventory": position.size,
-            "latency_ms": latency_ms,
-            "hedge_decision": hedge_decision.reason if hedge_decision else None,
-            "cache_hits": self._cache_hits,
-            "cache_misses": self._cache_misses,
-        }
+        metadata = self._build_quote_metadata(
+            circuit_state=circuit_state,
+            current_regime=current_regime,
+            spread_bps=spread_bps,
+            spread_multiplier=spread_multiplier,
+            reservation_price=reservation_price,
+            half_spread=half_spread,
+            position=position,
+            latency_ms=latency_ms,
+            hedge_decision=hedge_decision,
+        )
 
         # 更新统计
         self._quote_count += 1
