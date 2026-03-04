@@ -169,14 +169,7 @@ class AvellanedaStoikov(MarketMakingStrategy):
         return bid_size, ask_size
 
     def quote(self, state: MarketState, position: Position) -> QuoteAction:
-        """
-        Generate quotes using AS model.
-
-        The strategy adjusts quotes based on:
-        1. Inventory level (skew quotes to reduce inventory)
-        2. Time remaining (become more aggressive near end)
-        3. Volatility (wider spreads in high vol)
-        """
+        """Generate quotes using the Avellaneda-Stoikov model."""
         mid = state.order_book.mid_price
         if mid is None:
             raise ValueError("Cannot quote without valid order book")
@@ -187,20 +180,9 @@ class AvellanedaStoikov(MarketMakingStrategy):
         sigma = self.config.sigma
         k = self.config.k
 
-        # Calculate actual time remaining (T-t) using market state timestamp
-        # (not wall-clock time, so backtesting works correctly)
         time_remaining = self._compute_time_remaining(state)
-
-        # Reservation price (inventory-adjusted mid)
-        # When long (q>0), reservation price is lower -> more willing to sell
-        # When short (q<0), reservation price is higher -> more willing to buy
         inventory_ratio, effective_q = self._compute_effective_inventory(q)
-
         reservation_price = mid - effective_q * gamma * sigma**2 * time_remaining
-
-        # Optimal half-spread
-        # gamma * sigma^2 * T: inventory risk component
-        # 2/gamma * ln(1+gamma/k): execution risk component
         spread_component, execution_component, inventory_premium, half_spread = (
             self._compute_spread_components(
                 gamma=gamma,
@@ -211,15 +193,9 @@ class AvellanedaStoikov(MarketMakingStrategy):
             )
         )
 
-        # Calculate quotes
         bid_price = reservation_price - half_spread
         ask_price = reservation_price + half_spread
-
-        # Inventory limits
         bid_size, ask_size = self._compute_quote_sizes(q, inventory_ratio)
-
-        # Note: Reservation price already incorporates inventory adjustment
-        # per Avellaneda-Stoikov model. No additional skew needed.
 
         return QuoteAction(
             bid_price=bid_price,

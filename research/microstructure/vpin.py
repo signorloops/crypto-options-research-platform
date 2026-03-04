@@ -309,6 +309,53 @@ class VPINCalculator:
         )
 
 
+def _nearest_vpin_value(
+    *,
+    minute: pd.Timestamp,
+    vpin_ts_i8: np.ndarray,
+    vpin_vals: np.ndarray,
+) -> float:
+    minute_i8 = np.datetime64(minute, "ns").astype(np.int64)
+    insert_pos = int(np.searchsorted(vpin_ts_i8, minute_i8))
+    if insert_pos == 0:
+        return float(vpin_vals[0])
+    if insert_pos >= len(vpin_ts_i8):
+        return float(vpin_vals[-1])
+    left = insert_pos - 1
+    right = insert_pos
+    idx = left if abs(vpin_ts_i8[left] - minute_i8) <= abs(vpin_ts_i8[right] - minute_i8) else right
+    return float(vpin_vals[idx])
+
+
+def _minute_toxicity_row(
+    *,
+    minute: pd.Timestamp,
+    group: pd.DataFrame,
+    large_threshold: float,
+    vpin_ts_i8: np.ndarray,
+    vpin_vals: np.ndarray,
+) -> dict:
+    size_series = group["size"]
+    total_volume = float(size_series.sum())
+    buy_volume = float(size_series[group["side"] == "buy"].sum())
+    sell_volume = float(size_series[group["side"] == "sell"].sum())
+    large_trades = int((size_series > large_threshold).sum())
+    trade_count = len(group)
+    return {
+        "timestamp": minute,
+        "vpin": _nearest_vpin_value(minute=minute, vpin_ts_i8=vpin_ts_i8, vpin_vals=vpin_vals),
+        "trade_count": trade_count,
+        "total_volume": total_volume,
+        "buy_volume": buy_volume,
+        "sell_volume": sell_volume,
+        "volume_imbalance": (buy_volume - sell_volume) / (total_volume + 1e-8),
+        "large_trade_count": large_trades,
+        "large_trade_ratio": large_trades / trade_count if trade_count > 0 else 0,
+        "avg_trade_size": float(size_series.mean()),
+        "price_volatility": float(group["price"].std()) if trade_count > 1 else 0,
+    }
+
+
 class OrderFlowToxicityAnalyzer:
     """
     Comprehensive order flow toxicity analysis.
@@ -318,77 +365,30 @@ class OrderFlowToxicityAnalyzer:
         self.vpin_calc = VPINCalculator()
 
     def analyze(self, trades_df: pd.DataFrame, price_df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
-        """
-        Perform full toxicity analysis.
-
-        Returns DataFrame with:
-        - vpin: VPIN metric
-        - trade_intensity: Trades per minute
-        - volume_imbalance: Buy/Sell ratio
-        - large_trade_ratio: Proportion of large trades
-        - price_impact: Correlation between trade direction and subsequent returns
-        """
+        """Perform full toxicity analysis."""
         df = trades_df.copy()
         df['timestamp'] = pd.to_datetime(df['timestamp'])
-
-        # Calculate VPIN
         vpin_result = self.vpin_calc.calculate(df)
-
-        # Resample to 1-minute windows for analysis
         df['minute'] = df['timestamp'].dt.floor('1min')
         grouped = df.groupby('minute')
-
-        # Precompute threshold once to avoid repeated O(n) quantile calls.
         large_threshold = float(df['size'].quantile(0.95))
-
-        # Convert timestamps to int64 nanoseconds for fast nearest lookup.
         vpin_ts = np.array(vpin_result.timestamps, dtype='datetime64[ns]')
         vpin_vals = np.array(vpin_result.vpin_values, dtype=float)
         if len(vpin_ts) == 0:
             return pd.DataFrame()
         vpin_ts_i8 = vpin_ts.astype(np.int64)
-
-        results = []
-        for minute, group in grouped:
-            size_series = group['size']
-            total_volume = float(size_series.sum())
-            buy_volume = float(size_series[group['side'] == 'buy'].sum())
-            sell_volume = float(size_series[group['side'] == 'sell'].sum())
-
-            minute_i8 = np.datetime64(minute, 'ns').astype(np.int64)
-            insert_pos = int(np.searchsorted(vpin_ts_i8, minute_i8))
-            if insert_pos == 0:
-                vpin_idx = 0
-            elif insert_pos >= len(vpin_ts_i8):
-                vpin_idx = len(vpin_ts_i8) - 1
-            else:
-                left = insert_pos - 1
-                right = insert_pos
-                vpin_idx = left if abs(vpin_ts_i8[left] - minute_i8) <= abs(vpin_ts_i8[right] - minute_i8) else right
-            vpin_val = float(vpin_vals[vpin_idx])
-
-            # Large trades (>95th percentile)
-            large_trades = int((size_series > large_threshold).sum())
-            trade_count = len(group)
-            volume_imbalance = (buy_volume - sell_volume) / (total_volume + 1e-8)
-
-            result = {
-                'timestamp': minute,
-                'vpin': vpin_val,
-                'trade_count': trade_count,
-                'total_volume': total_volume,
-                'buy_volume': buy_volume,
-                'sell_volume': sell_volume,
-                'volume_imbalance': volume_imbalance,
-                'large_trade_count': large_trades,
-                'large_trade_ratio': large_trades / trade_count if trade_count > 0 else 0,
-                'avg_trade_size': float(size_series.mean()),
-                'price_volatility': float(group['price'].std()) if trade_count > 1 else 0
-            }
-
-            results.append(result)
-
-        return pd.DataFrame(results)
+        return pd.DataFrame(
+            [
+                _minute_toxicity_row(
+                    minute=minute,
+                    group=group,
+                    large_threshold=large_threshold,
+                    vpin_ts_i8=vpin_ts_i8,
+                    vpin_vals=vpin_vals,
+                )
+                for minute, group in grouped
+            ]
+        )
 
     def detect_anomalies(self, analysis_df: pd.DataFrame, zscore_threshold: float = 2.0) -> pd.DataFrame:
         """Detect anomalous periods in the analysis."""

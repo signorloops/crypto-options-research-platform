@@ -537,28 +537,12 @@ class GreeksCacheManager:
         instrument: str,
         fetch_func: Callable[[str], Any]
     ) -> Dict[str, float]:
-        """
-        Get Greeks with automatic fetch on cache miss or stale data.
-
-        Uses singleflight pattern to prevent cache stampede - if multiple
-        concurrent requests ask for the same missing key, only one fetch
-        operation will be executed and the result shared.
-
-        Args:
-            instrument: Option instrument
-            fetch_func: Async function to fetch fresh Greeks
-
-        Returns:
-            Greeks data
-        """
-        # Try cache first
+        """Get Greeks with background refresh and singleflight cache-miss fetch."""
         greeks = await self.redis.get_greeks(instrument)
 
         if greeks is not None:
-            # Cache hit - check if needs refresh
             ttl = await self.redis.get_ttl(f"greeks:{instrument}")
             if ttl < self.refresh_threshold:
-                # Refresh in background
                 logger.debug(
                     "Greeks stale, refreshing",
                     extra=log_extra(instrument=instrument, ttl=ttl)
@@ -568,33 +552,26 @@ class GreeksCacheManager:
                 task.add_done_callback(lambda t: self._refresh_tasks.discard(t))
             return greeks
 
-        # Cache miss - use singleflight to prevent stampede
         lock = await self._get_fetch_lock(instrument)
 
         async with lock:
-            # Double-check after acquiring lock
             greeks = await self.redis.get_greeks(instrument)
             if greeks is not None:
                 return greeks
 
-            # Check if another coroutine already fetched it
             if instrument in self._fetch_cache:
                 return self._fetch_cache[instrument]
 
-            # Fetch and cache
             logger.debug("Greeks cache miss", extra=log_extra(instrument=instrument))
             try:
                 greeks = await fetch_func(instrument)
                 if greeks:
                     await self.redis.set_greeks(instrument, greeks)
-                    # Store in fetch cache temporarily
                     self._fetch_cache[instrument] = greeks
-                    # Clean up fetch cache after a short delay
                     asyncio.get_event_loop().call_later(
                         5.0, self._fetch_cache.pop, instrument, None
                     )
             except Exception as e:
-                # fetch_func is caller-supplied; keep cache manager resilient to callback failures.
                 logger.error(
                     "Failed to fetch Greeks",
                     extra=log_extra(instrument=instrument, error=str(e))

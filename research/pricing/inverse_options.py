@@ -635,22 +635,7 @@ class InverseOptionPricer:
         anchor_sigma: Optional[float] = None,
         max_anchor_deviation: float = 0.50,
     ) -> float:
-        """
-        通过牛顿-拉夫逊法计算隐含波动率。
-
-        注意：这里的vega是每1%波动率变化的价格变化，所以在牛顿迭代中
-        需要乘以0.01来得到每单位波动率的价格变化。
-
-        Args:
-            price: 观测到的期权价格（加密货币单位）
-            S, K, T, r: 标准参数
-            option_type: "call" 或 "put"
-            tol: 收敛容差（默认更严格）
-            max_iter: 最大迭代次数
-
-        Returns:
-            隐含波动率
-        """
+        """通过牛顿迭代（失败回退二分法）计算隐含波动率。"""
         InverseOptionPricer._validate_option_type(option_type)
         if price <= 0:
             return 0.0
@@ -674,7 +659,6 @@ class InverseOptionPricer:
             max_iter=max_iter,
         )
         if raw_sigma is None:
-            # 如果牛顿法失败，使用二分法作为fallback
             raw_sigma = InverseOptionPricer._iv_bisection(
                 price,
                 S,

@@ -68,18 +68,7 @@ class BlackScholesGreeks:
         sigma: float,
         option_type: str
     ) -> Greeks:
-        """
-        Calculate all Greeks for an option.
-
-        Args:
-            S: Spot price
-            K: Strike price
-            T: Time to expiry (years)
-            r: Risk-free rate
-            sigma: Volatility
-            option_type: 'call' or 'put'
-        """
-        # Input validation
+        """Calculate all Greeks for an option."""
         if S <= 0:
             raise ValueError(f"Spot price S must be positive, got {S}")
         if K <= 0:
@@ -87,7 +76,6 @@ class BlackScholesGreeks:
         if sigma <= 0:
             raise ValueError(f"Volatility sigma must be positive, got {sigma}")
         if T <= 0:
-            # At expiry, Greeks are degenerate
             return Greeks(delta=0, gamma=0, theta=0, vega=0, rho=0)
 
         d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
@@ -104,10 +92,7 @@ class BlackScholesGreeks:
             delta = nd1 - 1
             rho = -K * T * np.exp(-r * T) * norm.cdf(-d2) / 100
 
-        # Gamma (same for calls and puts)
         gamma = n_prime_d1 / (S * sigma * np.sqrt(T))
-
-        # Theta (daily)
         if option_type == 'call':
             theta = (-S * n_prime_d1 * sigma / (2 * np.sqrt(T))
                      - r * K * np.exp(-r * T) * nd2) / 365
@@ -115,10 +100,7 @@ class BlackScholesGreeks:
             theta = (-S * n_prime_d1 * sigma / (2 * np.sqrt(T))
                      + r * K * np.exp(-r * T) * norm.cdf(-d2)) / 365
 
-        # Vega (per 1% change in vol)
         vega = S * n_prime_d1 * np.sqrt(T) / 100
-
-        # Higher-order Greeks
         vanna = -n_prime_d1 * d2 / sigma
         charm = -n_prime_d1 * (2 * r * T - d2 * sigma * np.sqrt(T)) / (2 * T * sigma * np.sqrt(T))
 
