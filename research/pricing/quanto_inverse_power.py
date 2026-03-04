@@ -187,20 +187,12 @@ class QuantoInversePowerOptionPricer:
         pricer_kwargs: Optional[Dict[str, Any]] = None,
         **legacy_pricer_kwargs: Any,
     ) -> Tuple[float, QuantoInversePowerGreeks]:
-        """Calculate quanto-inverse-power price and Greeks.
-
-        `pricer_kwargs` forwards optional settings to the underlying inverse-power
-        pricer (supported keys: `n_paths`, `seed`, `bump_rel`).
-        Legacy direct kwargs remain supported for backward compatibility.
-        """
+        """Calculate quanto-inverse-power price and Greeks with optional pricer kwargs."""
         QuantoInversePowerOptionPricer._validate_quanto_inputs(fx_rate, sigma_fx, rho)
-        n_paths_value, seed_value, bump_rel_value = (
-            QuantoInversePowerOptionPricer._resolve_pricer_kwargs(
-                pricer_kwargs,
-                legacy_pricer_kwargs,
-            )
+        n_paths_value, seed_value, bump_rel_value = QuantoInversePowerOptionPricer._resolve_pricer_kwargs(
+            pricer_kwargs,
+            legacy_pricer_kwargs,
         )
-
         base_price, base_greeks = InversePowerOptionPricer.calculate_price_and_greeks(
             S=S,
             K=K,
@@ -213,14 +205,12 @@ class QuantoInversePowerOptionPricer:
             seed=seed_value,
             bump_rel=bump_rel_value,
         )
-        t_eff, quanto_adjustment, factor = (
-            QuantoInversePowerOptionPricer._compute_quanto_scalars(
-                T=T,
-                sigma=sigma,
-                sigma_fx=sigma_fx,
-                rho=rho,
-                fx_rate=fx_rate,
-            )
+        t_eff, quanto_adjustment, factor = QuantoInversePowerOptionPricer._compute_quanto_scalars(
+            T=T,
+            sigma=sigma,
+            sigma_fx=sigma_fx,
+            rho=rho,
+            fx_rate=fx_rate,
         )
         return QuantoInversePowerOptionPricer._compose_quanto_price_and_greeks(
             base_price=base_price,

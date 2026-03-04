@@ -588,12 +588,7 @@ class VaRCalculator:
         leverage_correlation: float,
         rng: Any,
     ) -> np.ndarray:
-        """
-        Compute simulated PnL component for one position under option-aware revaluation path.
-
-        Falls back to Greeks approximation or linear approximation when option metadata
-        is invalid/incomplete.
-        """
+        """Simulate one-position PnL with option revaluation and linear/Greeks fallbacks."""
         position_value = float(row["value"])
         linear_component = simulated_returns[:, default_asset_idx] * position_value
 
@@ -737,22 +732,7 @@ class VaRCalculator:
         leverage_correlation: float = -0.35,
         random_seed: int | None = None,
     ) -> VaRResult:
-        """
-        Calculate VaR using Monte Carlo simulation.
-
-        Can incorporate Greeks for options positions.
-
-        Args:
-            positions: Position values
-            returns: Historical returns for correlation structure
-            greeks: Optional DataFrame with 'delta', 'gamma', 'vega' columns
-            n_simulations: Number of Monte Carlo paths
-            holding_period: Days to hold
-            random_seed: Optional local RNG seed for reproducible simulation
-
-        Returns:
-            VaRResult
-        """
+        """Calculate Monte Carlo VaR with optional Greeks-aware option revaluation."""
         if n_simulations <= 0:
             raise ValueError("n_simulations must be positive")
         if holding_period <= 0:
