@@ -1,15 +1,8 @@
-"""
-Adaptive Delta Hedger for coin-margined options.
-
-Implements adaptive delta hedging that accounts for:
-1. Non-linear PnL characteristics of coin-margined options
-2. Price-dependent hedge frequency (accelerate hedging on price drops)
-3. Gamma effects on hedge sizing
-"""
+"""Adaptive delta hedging for coin-margined options."""
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Deque, List, Optional, Tuple
+from typing import Callable, Deque, List, Optional, Tuple
 
 import numpy as np
 
@@ -56,6 +49,32 @@ class HedgeDecision:
     urgency: str  # "low", "normal", "high", "critical"
 
 
+def _delta_metrics(portfolio_greeks: Greeks, position_size: float) -> tuple[float, float, float]:
+    """Return target delta, current delta, and absolute deviation."""
+    target_delta = 0.0
+    current_delta = portfolio_greeks.delta * position_size
+    delta_deviation = abs(current_delta - target_delta)
+    return target_delta, current_delta, delta_deviation
+
+
+def _resolve_hedge_execution(
+    *,
+    should_hedge: bool,
+    current_delta: float,
+    target_delta: float,
+    current_price: float,
+    gamma: float,
+    calculate_hedge_size: Callable[[float, float, float, float], float],
+) -> tuple[bool, float]:
+    """Resolve final hedge execution flag/size with near-zero suppression."""
+    if not should_hedge:
+        return False, 0.0
+    hedge_size = calculate_hedge_size(current_delta, target_delta, current_price, gamma)
+    if abs(hedge_size) <= 1e-12:
+        return False, 0.0
+    return True, hedge_size
+
+
 class AdaptiveDeltaHedger:
     """
     Adaptive Delta Hedger for coin-margined options.
@@ -99,57 +118,33 @@ class AdaptiveDeltaHedger:
         Returns:
             HedgeDecision with details
         """
-        # Update price history
         self.update_price(current_time, current_price)
-
-        # Calculate time since last hedge
         time_since_last = self._get_time_since_last_hedge(current_time)
-
-        # Calculate price change metrics
         price_change_pct = self._calculate_price_change_pct(current_price)
         price_drop_pct = self._calculate_price_drop_pct(current_price)
         price_rise_pct = self._calculate_price_rise_pct(current_price)
-
-        # Determine base hedge interval
         base_interval = timedelta(minutes=self.config.base_hedge_interval_minutes)
-
-        # Calculate adjusted interval based on price movement
         adjusted_interval = self._calculate_adjusted_interval(
             base_interval, price_drop_pct, price_rise_pct, portfolio_greeks.gamma
         )
-
-        # Check if we should hedge based on time
         time_trigger = time_since_last >= adjusted_interval
-
-        # Check if we should hedge based on delta deviation
-        target_delta = 0.0  # Target is delta-neutral
-        current_delta = portfolio_greeks.delta * position_size
-        delta_deviation = abs(current_delta - target_delta)
-
-        # Delta threshold increases with time since last hedge
+        target_delta, current_delta, delta_deviation = _delta_metrics(
+            portfolio_greeks, position_size
+        )
         delta_threshold = self._calculate_delta_threshold(time_since_last, base_interval)
         delta_trigger = delta_deviation > delta_threshold
-
-        # Determine urgency
         urgency = self._determine_urgency(
             price_drop_pct, price_rise_pct, portfolio_greeks.gamma, delta_deviation
         )
-
-        # Make preliminary decision
         should_hedge = time_trigger or delta_trigger or urgency in ["high", "critical"]
-
-        # Calculate hedge size
-        if should_hedge:
-            hedge_size = self._calculate_hedge_size(
-                current_delta, target_delta, current_price, portfolio_greeks.gamma
-            )
-            # Avoid zero-size "hedges" that only churn state/history.
-            if abs(hedge_size) <= 1e-12:
-                should_hedge = False
-        else:
-            hedge_size = 0.0
-
-        # Build reason string
+        should_hedge, hedge_size = _resolve_hedge_execution(
+            should_hedge=should_hedge,
+            current_delta=current_delta,
+            target_delta=target_delta,
+            current_price=current_price,
+            gamma=portfolio_greeks.gamma,
+            calculate_hedge_size=self._calculate_hedge_size,
+        )
         reason = self._build_reason(
             time_trigger, delta_trigger, urgency, time_since_last, delta_deviation
         )
@@ -449,4 +444,3 @@ class SimpleDeltaHedger:
     def execute_hedge(self, timestamp: datetime, hedge_size: float, price: float) -> None:
         """Record hedge execution."""
         self.last_hedge_time = timestamp
-

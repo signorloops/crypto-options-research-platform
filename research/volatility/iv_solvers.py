@@ -236,15 +236,7 @@ def _implied_volatility_lbr_fallback(
     tol: float = 1e-8,
     max_iter: int = 20,
 ) -> float:
-    """
-    近似 Let's-Be-Rational 风格 IV 回退求解器。
-
-    实现思路:
-    1) 价格边界检查
-    2) Brenner-Subrahmanyam 初值
-    3) Halley 迭代 (较 Newton 更稳健)
-    4) 失败回退到二分法
-    """
+    """近似 Let's-Be-Rational 风格 IV 回退求解器。"""
     if r is None:
         r = float(os.getenv("RISK_FREE_RATE", "0.05"))
 
@@ -258,7 +250,6 @@ def _implied_volatility_lbr_fallback(
             f"[{lower_bound}, {upper_bound}]"
         )
 
-    # Brenner-Subrahmanyam ATM initial guess (clipped to stable range).
     sigma = np.sqrt(2 * np.pi / max(T, 1e-12)) * (market_price / max(S, 1e-12))
     sigma = float(np.clip(sigma, 0.01, 3.0))
 
@@ -276,7 +267,6 @@ def _implied_volatility_lbr_fallback(
         d2 = d1 - sigma * np.sqrt(T)
         volga = vega * d1 * d2 / max(sigma, 1e-12)
 
-        # Halley update; fallback to Newton if denominator degenerates.
         denom = 2.0 * vega * vega - diff * volga
         if abs(denom) > 1e-14:
             step = (2.0 * diff * vega) / denom
@@ -289,7 +279,6 @@ def _implied_volatility_lbr_fallback(
             return sigma_new
         sigma = sigma_new
 
-    # Robust fallback
     return implied_volatility_bisection(
         market_price=market_price,
         S=S,

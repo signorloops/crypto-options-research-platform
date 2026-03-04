@@ -15,6 +15,7 @@
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+import time
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -69,6 +70,23 @@ class FastIntegratedStrategyConfig:
     # Risk-check throttling (performance guard)
     risk_check_interval_ms: float = 250.0
     risk_check_price_move_bps: float = 20.0
+
+
+def _evaluate_fast_hedge_decision(
+    *,
+    config: FastIntegratedStrategyConfig,
+    current_greeks: Optional[Greeks],
+    hedger: AdaptiveDeltaHedger,
+    state: MarketState,
+    mid: float,
+    position: Position,
+) -> object:
+    """Evaluate adaptive hedge trigger for the fast strategy."""
+    if not (config.enable_adaptive_hedging and current_greeks):
+        return None
+    return hedger.should_hedge(
+        state.timestamp, mid, current_greeks, position.size
+    )
 
 
 class FastIntegratedMarketMakingStrategy(MarketMakingStrategy):
@@ -336,68 +354,44 @@ class FastIntegratedMarketMakingStrategy(MarketMakingStrategy):
             "cache_misses": self._cache_misses,
         }
 
-    def quote(self, state: MarketState, position: Position) -> QuoteAction:
-        """
-        生成报价 (高性能版本).
+    def _build_halted_quote(
+        self, *, mid: float, circuit_state: object, reason: str
+    ) -> QuoteAction:
+        """Build no-trade quote when circuit breaker halts activity."""
+        return QuoteAction(
+            bid_price=mid,
+            bid_size=0.0,
+            ask_price=mid,
+            ask_size=0.0,
+            metadata={
+                "strategy": self.name,
+                "circuit_state": circuit_state.value,
+                "trading_halted": True,
+                "halt_reason": reason,
+            },
+        )
 
-        目标延迟: <35ms (P95)
-        """
-        import time
-
-        start_time = time.perf_counter()
-
-        mid = state.order_book.mid_price
-        if mid is None:
-            raise ValueError("Cannot quote without valid order book")
-        self._current_price = mid
-
-        circuit_state, can_trade, reason = self._evaluate_trading_gate(state, mid, position)
-        if not can_trade:
-            return QuoteAction(
-                bid_price=mid,
-                bid_size=0.0,
-                ask_price=mid,
-                ask_size=0.0,
-                metadata={
-                    "strategy": self.name,
-                    "circuit_state": circuit_state.value,
-                    "trading_halted": True,
-                    "halt_reason": reason,
-                },
-            )
-
-        self._update_regime_state(mid)
-        current_regime = self.regime_detector.current_regime
-
-        # 3. 尝试从缓存获取Greeks (如果可用)
-        self._refresh_greeks_context(state, mid)
-
-        # 4. 检查对冲
-        hedge_decision = None
-        if self.config.enable_adaptive_hedging and self._current_greeks:
-            hedge_decision = self.hedger.should_hedge(
-                state.timestamp, mid, self._current_greeks, position.size
-            )
-
-        # 4. 计算价差
+    def _build_active_quote(
+        self,
+        *,
+        state: MarketState,
+        position: Position,
+        mid: float,
+        circuit_state: object,
+        current_regime: RegimeState,
+        start_time: float,
+        hedge_decision: object,
+    ) -> QuoteAction:
+        """Build active quote path after passing trading gate."""
         spread_multiplier = self._get_spread_multiplier()
         spread_bps = self.config.base_spread_bps * spread_multiplier
-
-        # 5. 计算保留价格
         reservation_price, half_spread = self._calculate_reservation_price(
             mid, position.size, spread_bps
         )
-
-        # 6. 应用仓位限制
         position_limit_mult = self.circuit_breaker.get_position_limit_multiplier()
         effective_inventory_limit = self.config.inventory_limit * position_limit_mult
-
-        # 7. 确定报价数量
         bid_size, ask_size = self._calculate_quote_sizes(position.size, effective_inventory_limit)
-
-        # 8. 构建元数据
         latency_ms = (time.perf_counter() - start_time) * 1000
-
         metadata = self._build_quote_metadata(
             circuit_state=circuit_state,
             current_regime=current_regime,
@@ -409,17 +403,55 @@ class FastIntegratedMarketMakingStrategy(MarketMakingStrategy):
             latency_ms=latency_ms,
             hedge_decision=hedge_decision,
         )
-
-        # 更新统计
         self._quote_count += 1
         self._total_latency_ms += latency_ms
-
         return QuoteAction(
             bid_price=reservation_price - half_spread,
             bid_size=bid_size,
             ask_price=reservation_price + half_spread,
             ask_size=ask_size,
             metadata=metadata,
+        )
+
+    def quote(self, state: MarketState, position: Position) -> QuoteAction:
+        """
+        生成报价 (高性能版本).
+
+        目标延迟: <35ms (P95)
+        """
+        start_time = time.perf_counter()
+
+        mid = state.order_book.mid_price
+        if mid is None:
+            raise ValueError("Cannot quote without valid order book")
+        self._current_price = mid
+
+        circuit_state, can_trade, reason = self._evaluate_trading_gate(state, mid, position)
+        if not can_trade:
+            return self._build_halted_quote(mid=mid, circuit_state=circuit_state, reason=reason)
+
+        self._update_regime_state(mid)
+        current_regime = self.regime_detector.current_regime
+
+        # 3. 尝试从缓存获取Greeks (如果可用)
+        self._refresh_greeks_context(state, mid)
+
+        hedge_decision = _evaluate_fast_hedge_decision(
+            config=self.config,
+            current_greeks=self._current_greeks,
+            hedger=self.hedger,
+            state=state,
+            mid=mid,
+            position=position,
+        )
+        return self._build_active_quote(
+            state=state,
+            position=position,
+            mid=mid,
+            circuit_state=circuit_state,
+            current_regime=current_regime,
+            start_time=start_time,
+            hedge_decision=hedge_decision,
         )
 
     def on_fill(self, fill, position: Position) -> None:

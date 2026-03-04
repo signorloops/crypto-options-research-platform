@@ -1,7 +1,4 @@
-"""
-Real-time WebSocket streaming for market data.
-Supports multiple exchanges with unified interface.
-"""
+"""Real-time WebSocket streaming for market data."""
 import asyncio
 import json
 import os
@@ -37,9 +34,7 @@ class StreamConfig:
 
 
 class WebSocketStream(ABC):
-    """
-    Abstract base class for WebSocket market data streams.
-    """
+    """Abstract base class for WebSocket market data streams."""
 
     def __init__(self, config: Optional[StreamConfig] = None):
         self.config = config or StreamConfig()
@@ -244,10 +239,7 @@ from data.orderbook_reconstructor import (
 
 
 class DeribitStream(WebSocketStream):
-    """
-    Deribit WebSocket stream for real-time market data.
-    Supports order book reconstruction with delta updates.
-    """
+    """Deribit WebSocket stream for real-time market data."""
 
     WS_URL = os.getenv("DERIBIT_WS_URL", "wss://www.deribit.com/ws/api/v2/public")
 
@@ -454,9 +446,7 @@ class DeribitStream(WebSocketStream):
 
 
 class OKXStream(WebSocketStream):
-    """
-    OKX WebSocket stream for real-time market data (coin-margined options only).
-    """
+    """OKX WebSocket stream for real-time market data."""
 
     WS_URL = os.getenv("OKX_WS_URL", "wss://ws.okx.com:8443/ws/v5/public")
 
@@ -508,14 +498,7 @@ class OKXStream(WebSocketStream):
             return None
 
     def _parse_trade(self, data: Dict[str, Any]) -> Trade:
-        """Parse trade data from OKX format.
-
-        Args:
-            data: Raw trade data from OKX WebSocket
-
-        Returns:
-            Parsed Trade object
-        """
+        """Parse trade data from OKX format."""
         from core.types import OrderSide
 
         return Trade(
@@ -528,14 +511,7 @@ class OKXStream(WebSocketStream):
         )
 
     def _parse_tick(self, data: Dict[str, Any]) -> Tick:
-        """Parse tick data from OKX format.
-
-        Args:
-            data: Raw ticker data from OKX WebSocket
-
-        Returns:
-            Parsed Tick object
-        """
+        """Parse tick data from OKX format."""
         return Tick(
             timestamp=datetime.fromtimestamp(int(data.get("ts", 0)) / 1000, tz=timezone.utc),
             instrument=data.get("instId", ""),
@@ -546,14 +522,7 @@ class OKXStream(WebSocketStream):
         )
 
     def _parse_orderbook(self, data: Dict[str, Any]) -> OrderBook:
-        """Parse order book data from OKX format.
-
-        Args:
-            data: Raw order book data from OKX WebSocket
-
-        Returns:
-            Parsed OrderBook object
-        """
+        """Parse order book data from OKX format."""
         bids = [
             OrderBookLevel(price=float(b[0]), size=float(b[1]))
             for b in data.get("bids", [])
@@ -619,9 +588,7 @@ class OKXStream(WebSocketStream):
 
 
 class MultiExchangeStream:
-    """
-    Aggregate streams from multiple exchanges.
-    """
+    """Aggregate streams from multiple exchanges."""
 
     def __init__(self):
         self.streams: Dict[str, WebSocketStream] = {}

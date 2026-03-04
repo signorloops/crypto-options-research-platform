@@ -153,81 +153,106 @@ class OrderBookFeatureExtractor:
 
         return trade_flow_imbalance, volume_order_imbalance
 
-    def extract(
-        self,
-        order_book: 'OrderBook',
-        recent_trades: Optional[List['Trade']] = None
-    ) -> OrderBookFeatures:
-        """Extract features from order book and recent trades."""
-
-        timestamp = order_book.timestamp
+    @staticmethod
+    def _extract_basic_features(order_book: "OrderBook") -> Dict[str, float]:
+        """Extract basic mid/spread and top-of-book features."""
         mid = order_book.mid_price or 0
         spread = order_book.spread or 0
-
-        # Basic features
         best_bid = order_book.best_bid or 0
         best_ask = order_book.best_ask or 0
         spread_bps = (spread / mid * 10000) if mid > 0 else 0
+        return {
+            "mid": float(mid),
+            "spread": float(spread),
+            "best_bid": float(best_bid),
+            "best_ask": float(best_ask),
+            "spread_bps": float(spread_bps),
+        }
 
-        # Depth features
-        bid_depth_5 = sum(lvl.size for lvl in order_book.bids[:5])
-        ask_depth_5 = sum(lvl.size for lvl in order_book.asks[:5])
-        bid_depth_10 = sum(lvl.size for lvl in order_book.bids[:10])
-        ask_depth_10 = sum(lvl.size for lvl in order_book.asks[:10])
-
+    @staticmethod
+    def _extract_depth_features(order_book: "OrderBook") -> Dict[str, float]:
+        """Extract near-book depth aggregates and imbalance."""
+        bid_depth_5 = float(sum(lvl.size for lvl in order_book.bids[:5]))
+        ask_depth_5 = float(sum(lvl.size for lvl in order_book.asks[:5]))
+        bid_depth_10 = float(sum(lvl.size for lvl in order_book.bids[:10]))
+        ask_depth_10 = float(sum(lvl.size for lvl in order_book.asks[:10]))
         total_depth = bid_depth_10 + ask_depth_10
-        depth_imbalance = (bid_depth_5 - ask_depth_5) / total_depth if total_depth > 0 else 0
+        depth_imbalance = (bid_depth_5 - ask_depth_5) / total_depth if total_depth > 0 else 0.0
+        return {
+            "bid_depth_5": bid_depth_5,
+            "ask_depth_5": ask_depth_5,
+            "bid_depth_10": bid_depth_10,
+            "ask_depth_10": ask_depth_10,
+            "depth_imbalance": float(depth_imbalance),
+        }
 
-        # VWAP calculations
-        vwap_bid = self._vwap(order_book.bids, 5)
-        vwap_ask = self._vwap(order_book.asks, 5)
-        vwap_mid = (vwap_bid + vwap_ask) / 2
-
-        # Microprice (volume-weighted mid)
+    @staticmethod
+    def _compute_microprice_features(
+        order_book: "OrderBook",
+        *,
+        best_bid: float,
+        best_ask: float,
+        mid: float,
+    ) -> tuple[float, float]:
+        """Compute microprice and basis-point bias vs mid."""
         bid_vol = order_book.bids[0].size if order_book.bids else 0
         ask_vol = order_book.asks[0].size if order_book.asks else 0
         total_vol = bid_vol + ask_vol
-
         if total_vol > 0:
             microprice = (best_ask * bid_vol + best_bid * ask_vol) / total_vol
             microprice_bias = (microprice - mid) / mid * 10000 if mid > 0 else 0
         else:
             microprice = mid
             microprice_bias = 0
+        return float(microprice), float(microprice_bias)
 
-        # Slope features (rate of price change with depth)
-        bid_slope = self._calc_slope(order_book.bids)
-        ask_slope = self._calc_slope(order_book.asks)
-
-        # Queue position features (ratio of level 1 to total depth)
-        bid_queue_ratio = order_book.bids[0].size / bid_depth_5 if bid_depth_5 > 0 else 0
-        ask_queue_ratio = order_book.asks[0].size / ask_depth_5 if ask_depth_5 > 0 else 0
-
-        # Update history (deque automatically maintains max length)
-        self._history.append({
-            'timestamp': timestamp,
-            'mid_price': mid,
-            'spread': spread
-        })
-
-        # Calculate realized volatility from history
-        realized_vol_1min, realized_vol_5min = self._compute_realized_volatility()
-        trade_flow_imbalance, volume_order_imbalance = self._compute_trade_flow_features(
-            recent_trades, depth_imbalance
+    def _append_history(self, timestamp: pd.Timestamp, mid: float, spread: float) -> None:
+        """Append latest top-of-book snapshot to rolling history."""
+        self._history.append(
+            {"timestamp": timestamp, "mid_price": mid, "spread": spread}
         )
 
+    def extract(
+        self,
+        order_book: 'OrderBook',
+        recent_trades: Optional[List['Trade']] = None
+    ) -> OrderBookFeatures:
+        """Extract features from order book and recent trades."""
+        timestamp = order_book.timestamp
+        basic = self._extract_basic_features(order_book)
+        depth = self._extract_depth_features(order_book)
+        vwap_bid = self._vwap(order_book.bids, 5)
+        vwap_ask = self._vwap(order_book.asks, 5)
+        vwap_mid = (vwap_bid + vwap_ask) / 2
+        microprice, microprice_bias = self._compute_microprice_features(
+            order_book,
+            best_bid=basic["best_bid"],
+            best_ask=basic["best_ask"],
+            mid=basic["mid"],
+        )
+        bid_slope = self._calc_slope(order_book.bids)
+        ask_slope = self._calc_slope(order_book.asks)
+        bid_depth_5 = depth["bid_depth_5"]
+        ask_depth_5 = depth["ask_depth_5"]
+        bid_queue_ratio = order_book.bids[0].size / bid_depth_5 if bid_depth_5 > 0 else 0.0
+        ask_queue_ratio = order_book.asks[0].size / ask_depth_5 if ask_depth_5 > 0 else 0.0
+        self._append_history(timestamp, basic["mid"], basic["spread"])
+        realized_vol_1min, realized_vol_5min = self._compute_realized_volatility()
+        trade_flow_imbalance, volume_order_imbalance = self._compute_trade_flow_features(
+            recent_trades, depth["depth_imbalance"]
+        )
         return OrderBookFeatures(
             timestamp=timestamp,
-            mid_price=mid,
-            spread=spread,
-            spread_bps=spread_bps,
-            best_bid=best_bid,
-            best_ask=best_ask,
+            mid_price=basic["mid"],
+            spread=basic["spread"],
+            spread_bps=basic["spread_bps"],
+            best_bid=basic["best_bid"],
+            best_ask=basic["best_ask"],
             bid_depth_5=bid_depth_5,
             ask_depth_5=ask_depth_5,
-            bid_depth_10=bid_depth_10,
-            ask_depth_10=ask_depth_10,
-            depth_imbalance=depth_imbalance,
+            bid_depth_10=depth["bid_depth_10"],
+            ask_depth_10=depth["ask_depth_10"],
+            depth_imbalance=depth["depth_imbalance"],
             vwap_bid=vwap_bid,
             vwap_ask=vwap_ask,
             vwap_mid=vwap_mid,
@@ -240,7 +265,7 @@ class OrderBookFeatureExtractor:
             realized_vol_1min=realized_vol_1min,
             realized_vol_5min=realized_vol_5min,
             trade_flow_imbalance=trade_flow_imbalance,
-            volume_order_imbalance=volume_order_imbalance
+            volume_order_imbalance=volume_order_imbalance,
         )
 
     def reset(self) -> None:

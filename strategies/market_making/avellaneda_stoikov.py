@@ -4,7 +4,7 @@ Classic optimal market making model from the seminal 2008 paper.
 """
 from dataclasses import dataclass
 from collections import deque
-from typing import Dict
+from typing import Dict, Tuple
 
 import numpy as np
 
@@ -106,6 +106,68 @@ class AvellanedaStoikov(MarketMakingStrategy):
             "calibrated_k": float(self.config.k),
         }
 
+    def _compute_time_remaining(self, state: MarketState) -> float:
+        """Compute remaining horizon in years from market-state timestamps."""
+        if self._start_timestamp is None:
+            self._start_timestamp = state.timestamp
+        delta = state.timestamp - self._start_timestamp
+        if hasattr(delta, "total_seconds"):
+            elapsed_seconds = delta.total_seconds()
+        else:
+            # Support numpy datetime64/timedelta64 used by some backtest loaders.
+            elapsed_seconds = float(delta / np.timedelta64(1, "s"))
+        seconds_per_year = 365.25 * 24 * 3600
+        trading_horizon_seconds = self.config.T * seconds_per_year
+        return max(0.0, trading_horizon_seconds - elapsed_seconds) / seconds_per_year
+
+    def _compute_effective_inventory(self, inventory: float) -> Tuple[float, float]:
+        """Transform inventory for bounded-inventory pricing."""
+        inventory_ratio = inventory / max(self.config.inventory_limit, 1e-12)
+        if self.config.use_bounded_inventory:
+            # Bounded inventory transform prevents reservation price from diverging.
+            bounded_ratio = np.tanh(inventory_ratio / max(self.config.inventory_saturation, 1e-6))
+            effective_inventory = bounded_ratio * self.config.inventory_limit
+        else:
+            effective_inventory = inventory
+        return float(inventory_ratio), float(effective_inventory)
+
+    def _compute_spread_components(
+        self,
+        gamma: float,
+        sigma: float,
+        k: float,
+        time_remaining: float,
+        inventory_ratio: float,
+    ) -> Tuple[float, float, float, float]:
+        """Compute spread decomposition terms."""
+        spread_component = gamma * sigma**2 * time_remaining
+        execution_component = (2 / gamma) * np.log(1 + gamma / k)
+        inventory_premium = 0.0
+        if self.config.use_bounded_inventory:
+            # GLFT-style bounded inventory risk premium widens spread near limits.
+            inventory_premium = spread_component * abs(inventory_ratio) ** 1.5
+        half_spread = (spread_component + execution_component + inventory_premium) / 2
+        return (
+            float(spread_component),
+            float(execution_component),
+            float(inventory_premium),
+            float(half_spread),
+        )
+
+    def _compute_quote_sizes(self, inventory: float, inventory_ratio: float) -> Tuple[float, float]:
+        """Apply hard inventory caps and smooth taper near limits."""
+        bid_size = float(self.config.quote_size)
+        ask_size = float(self.config.quote_size)
+        if inventory >= self.config.inventory_limit:
+            bid_size = 0.0
+        elif inventory <= -self.config.inventory_limit:
+            ask_size = 0.0
+        else:
+            taper = max(0.0, 1.0 - abs(inventory_ratio))
+            bid_size *= taper if inventory > 0 else 1.0
+            ask_size *= taper if inventory < 0 else 1.0
+        return bid_size, ask_size
+
     def quote(self, state: MarketState, position: Position) -> QuoteAction:
         """
         Generate quotes using AS model.
@@ -127,58 +189,34 @@ class AvellanedaStoikov(MarketMakingStrategy):
 
         # Calculate actual time remaining (T-t) using market state timestamp
         # (not wall-clock time, so backtesting works correctly)
-        if self._start_timestamp is None:
-            self._start_timestamp = state.timestamp
-        delta = state.timestamp - self._start_timestamp
-        if hasattr(delta, "total_seconds"):
-            elapsed_seconds = delta.total_seconds()
-        else:
-            # Support numpy datetime64/timedelta64 used by some backtest loaders.
-            elapsed_seconds = float(delta / np.timedelta64(1, "s"))
-        trading_horizon_seconds = self.config.T * 365.25 * 24 * 3600
-        time_remaining = max(0, trading_horizon_seconds - elapsed_seconds) / (365.25 * 24 * 3600)
+        time_remaining = self._compute_time_remaining(state)
 
         # Reservation price (inventory-adjusted mid)
         # When long (q>0), reservation price is lower -> more willing to sell
         # When short (q<0), reservation price is higher -> more willing to buy
-        inventory_ratio = q / max(self.config.inventory_limit, 1e-12)
-        if self.config.use_bounded_inventory:
-            # Bounded inventory transform prevents reservation price from diverging.
-            bounded_ratio = np.tanh(inventory_ratio / max(self.config.inventory_saturation, 1e-6))
-            effective_q = bounded_ratio * self.config.inventory_limit
-        else:
-            effective_q = q
+        inventory_ratio, effective_q = self._compute_effective_inventory(q)
 
         reservation_price = mid - effective_q * gamma * sigma**2 * time_remaining
 
         # Optimal half-spread
         # gamma * sigma^2 * T: inventory risk component
         # 2/gamma * ln(1+gamma/k): execution risk component
-        spread_component = gamma * sigma**2 * time_remaining
-        execution_component = (2 / gamma) * np.log(1 + gamma / k)
-        # GLFT-style bounded inventory risk premium widens spread near limits.
-        inventory_premium = 0.0
-        if self.config.use_bounded_inventory:
-            inventory_premium = spread_component * abs(inventory_ratio) ** 1.5
-        half_spread = (spread_component + execution_component + inventory_premium) / 2
+        spread_component, execution_component, inventory_premium, half_spread = (
+            self._compute_spread_components(
+                gamma=gamma,
+                sigma=sigma,
+                k=k,
+                time_remaining=time_remaining,
+                inventory_ratio=inventory_ratio,
+            )
+        )
 
         # Calculate quotes
         bid_price = reservation_price - half_spread
         ask_price = reservation_price + half_spread
 
         # Inventory limits
-        bid_size = self.config.quote_size
-        ask_size = self.config.quote_size
-
-        if q >= self.config.inventory_limit:
-            bid_size = 0  # Don't increase long position
-        elif q <= -self.config.inventory_limit:
-            ask_size = 0  # Don't increase short position
-        else:
-            # Smoothly taper size as inventory approaches limit.
-            taper = max(0.0, 1.0 - abs(inventory_ratio))
-            bid_size *= taper if q > 0 else 1.0
-            ask_size *= taper if q < 0 else 1.0
+        bid_size, ask_size = self._compute_quote_sizes(q, inventory_ratio)
 
         # Note: Reservation price already incorporates inventory adjustment
         # per Avellaneda-Stoikov model. No additional skew needed.

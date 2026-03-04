@@ -70,6 +70,36 @@ def _alert_severity(state: CircuitState) -> str:
     return "critical" if state in [CircuitState.RESTRICTED, CircuitState.HALTED] else "warning"
 
 
+def _build_threshold_violation(
+    *,
+    now: datetime,
+    violation_type: str,
+    value: float,
+    critical_limit: float,
+    warning_limit: float,
+    label: str,
+) -> Optional["Violation"]:
+    if value >= critical_limit:
+        return Violation(
+            timestamp=now,
+            violation_type=violation_type,
+            severity="critical",
+            current_value=value,
+            limit_value=critical_limit,
+            message=f"{label} {value:.2%} exceeds limit {critical_limit:.2%}",
+        )
+    if value >= warning_limit:
+        return Violation(
+            timestamp=now,
+            violation_type=violation_type,
+            severity="warning",
+            current_value=value,
+            limit_value=warning_limit,
+            message=f"{label} {value:.2%} exceeds warning {warning_limit:.2%}",
+        )
+    return None
+
+
 def _schedule_webhook_alert_method(
     self: Any,
     webhook_url: str,
@@ -460,75 +490,48 @@ class CircuitBreaker:
         violations = []
         now = datetime.now(timezone.utc)
 
-        # Check daily loss
         daily_pnl_pct = portfolio.daily_pnl_pct
-        if daily_pnl_pct <= -self.config.daily_loss_limit_pct:
-            violations.append(Violation(
-                timestamp=now,
+        if daily_pnl_pct < 0:
+            daily_loss_violation = _build_threshold_violation(
+                now=now,
                 violation_type="daily_loss",
-                severity="critical",
-                current_value=abs(daily_pnl_pct),
-                limit_value=self.config.daily_loss_limit_pct,
-                message=f"Daily loss {abs(daily_pnl_pct):.2%} exceeds limit {self.config.daily_loss_limit_pct:.2%}"
-            ))
-        elif daily_pnl_pct <= -self.config.daily_loss_warning_pct:
-            violations.append(Violation(
-                timestamp=now,
-                violation_type="daily_loss",
-                severity="warning",
-                current_value=abs(daily_pnl_pct),
-                limit_value=self.config.daily_loss_warning_pct,
-                message=f"Daily loss {abs(daily_pnl_pct):.2%} exceeds warning {self.config.daily_loss_warning_pct:.2%}"
-            ))
+                value=abs(daily_pnl_pct),
+                critical_limit=self.config.daily_loss_limit_pct,
+                warning_limit=self.config.daily_loss_warning_pct,
+                label="Daily loss",
+            )
+            if daily_loss_violation is not None:
+                violations.append(daily_loss_violation)
 
-        # Check drawdown
         max_dd = portfolio.max_drawdown
-        if max_dd <= -self.config.max_drawdown_pct:
-            violations.append(Violation(
-                timestamp=now,
+        if max_dd < 0:
+            drawdown_violation = _build_threshold_violation(
+                now=now,
                 violation_type="drawdown",
-                severity="critical",
-                current_value=abs(max_dd),
-                limit_value=self.config.max_drawdown_pct,
-                message=f"Drawdown {abs(max_dd):.2%} exceeds limit {self.config.max_drawdown_pct:.2%}"
-            ))
-        elif max_dd <= -self.config.drawdown_warning_pct:
-            violations.append(Violation(
-                timestamp=now,
-                violation_type="drawdown",
-                severity="warning",
-                current_value=abs(max_dd),
-                limit_value=self.config.drawdown_warning_pct,
-                message=f"Drawdown {abs(max_dd):.2%} exceeds warning {self.config.drawdown_warning_pct:.2%}"
-            ))
+                value=abs(max_dd),
+                critical_limit=self.config.max_drawdown_pct,
+                warning_limit=self.config.drawdown_warning_pct,
+                label="Drawdown",
+            )
+            if drawdown_violation is not None:
+                violations.append(drawdown_violation)
 
-        # Check position concentration
         instrument, concentration = portfolio.get_position_concentration()
-        if concentration >= self.config.position_concentration_limit:
-            violations.append(Violation(
-                timestamp=now,
-                violation_type="concentration",
-                severity="critical",
-                current_value=concentration,
-                limit_value=self.config.position_concentration_limit,
-                message=f"Position {instrument} concentration {concentration:.2%} exceeds limit {self.config.position_concentration_limit:.2%}"
-            ))
-        elif concentration >= self.config.concentration_warning_pct:
-            violations.append(Violation(
-                timestamp=now,
-                violation_type="concentration",
-                severity="warning",
-                current_value=concentration,
-                limit_value=self.config.concentration_warning_pct,
-                message=f"Position {instrument} concentration {concentration:.2%} exceeds warning {self.config.concentration_warning_pct:.2%}"
-            ))
+        concentration_violation = _build_threshold_violation(
+            now=now,
+            violation_type="concentration",
+            value=concentration,
+            critical_limit=self.config.position_concentration_limit,
+            warning_limit=self.config.concentration_warning_pct,
+            label=f"Position {instrument} concentration",
+        )
+        if concentration_violation is not None:
+            violations.append(concentration_violation)
 
-        # Check VaR and integrate with breaker.
         var_violation = self._check_var_limit_from_portfolio(portfolio)
         if var_violation is not None:
             violations.append(var_violation)
 
-        # Per-instrument limits
         if self.config.enable_per_instrument_limits:
             violations.extend(self._check_per_instrument_limits(portfolio))
 

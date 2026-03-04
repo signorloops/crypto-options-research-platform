@@ -1,19 +1,4 @@
-"""
-Hawkes process-based market making strategy.
-
-This strategy uses Hawkes process to model trade arrival clustering and dynamically
-adjusts quotes based on predicted market activity.
-
-Key features:
-1. Real-time Hawkes intensity estimation
-2. Dynamic spread adjustment based on predicted activity
-3. Inventory skew with activity-aware risk management
-4. Adverse selection detection through intensity anomalies
-
-References:
-- Cartea, A., Jaimungal, S., & Penalva, J. (2015). Algorithmic and high-frequency trading.
-- Bacry, E., Mastromatteo, I., & Muzy, J. F. (2015). Hawkes processes in finance.
-"""
+"""Hawkes-process market-making strategy."""
 import numpy as np
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
@@ -27,14 +12,49 @@ except ImportError:
 from core.types import MarketState, Position, QuoteAction
 from strategies.base import MarketMakingStrategy
 from data.generators.hawkes import HawkesParameters
+from strategies.market_making.hawkes_quote_helpers import (
+    build_control_signals as _build_control_signals,
+    build_quote_metadata as _build_quote_metadata,
+    price_change_ratio as _price_change_ratio,
+    select_spread_bps as _select_spread_bps,
+    timestamp_seconds as _timestamp_seconds,
+)
+
+
+def _flow_imbalance(buy_intensity: float, sell_intensity: float) -> float:
+    total = buy_intensity + sell_intensity
+    if total <= 0:
+        return 0.0
+    return float((buy_intensity - sell_intensity) / total)
+
+
+def _build_hawkes_quote_action(
+    *,
+    strategy_name: str,
+    quote: Tuple[float, float, float, float],
+    control_signals: Dict[str, float],
+    hawkes_params: Tuple[float, float, float],
+) -> QuoteAction:
+    bid_price, bid_size, ask_price, ask_size = quote
+    mu, alpha, beta = hawkes_params
+    return QuoteAction(
+        bid_price=bid_price,
+        bid_size=bid_size,
+        ask_price=ask_price,
+        ask_size=ask_size,
+        metadata=_build_quote_metadata(
+            strategy_name=strategy_name,
+            control_signals=control_signals,
+            mu=mu,
+            alpha=alpha,
+            beta=beta,
+        ),
+    )
 
 
 @dataclass
 class HawkesMMConfig:
-    """Configuration for Hawkes-based market maker.
-
-    All parameters can be set via environment variables.
-    """
+    """Configuration for Hawkes-based market maker."""
     # Base spread parameters
     base_spread_bps: float = field(default_factory=lambda: float(__import__('os').getenv("MM_BASE_SPREAD_BPS", "20.0")))
     min_spread_bps: float = field(default_factory=lambda: float(__import__('os').getenv("MM_MIN_SPREAD_BPS", "5.0")))
@@ -70,20 +90,10 @@ class HawkesMMConfig:
 
 
 class HawkesIntensityMonitor:
-    """Monitor and estimate Hawkes intensity from recent trade flow.
-
-    This class maintains a sliding window of recent trades and computes
-    the conditional intensity λ(t) in real-time.
-    """
+    """Monitor and estimate Hawkes intensity from recent trade flow."""
 
     def __init__(self, params: HawkesParameters, window_size: int = 100, mark_power: float = 0.5):
-        """
-        Initialize intensity monitor.
-
-        Args:
-            params: Hawkes process parameters
-            window_size: Number of recent trades to maintain
-        """
+        """Initialize intensity monitor."""
         self.params = params
         self.window_size = window_size
         self.mark_power = max(0.1, float(mark_power))
@@ -96,13 +106,7 @@ class HawkesIntensityMonitor:
         self._last_event_time: float = 0.0
 
     def add_trade(self, timestamp: float, direction: int = 0, size: float = 1.0):
-        """Record a new trade and update O(1) recursive intensity.
-
-        Args:
-            timestamp: Trade timestamp
-            direction: +1 for buyer-initiated, -1 for seller-initiated, 0 for unknown
-            size: Trade size (mark) used for marked excitation
-        """
+        """Record a new trade and update O(1) recursive intensity."""
         if self._last_event_time > 0:
             dt = max(0.0, timestamp - self._last_event_time)
             decay = np.exp(-self.params.beta * dt)
@@ -129,17 +133,7 @@ class HawkesIntensityMonitor:
         self.trade_sizes.append(float(size))
 
     def get_intensity(self, current_time: float) -> float:
-        """Compute conditional intensity λ(t) at current time in O(1).
-
-        Uses recursive formula: A(t) = exp(-β(t - t_last)) * A_last
-        λ(t) = μ + A(t)
-
-        Args:
-            current_time: Current timestamp
-
-        Returns:
-            Conditional intensity
-        """
+        """Compute conditional intensity λ(t) at current time in O(1)."""
         if self._last_event_time <= 0 or not self.trade_times:
             return self.params.mu
 
@@ -148,13 +142,7 @@ class HawkesIntensityMonitor:
         return self.params.mu + A_now
 
     def get_buy_sell_intensity(self, current_time: float) -> Tuple[float, float]:
-        """Compute separate intensities for buy and sell trades.
-
-        This helps detect order flow imbalance.
-
-        Returns:
-            (buy_intensity, sell_intensity)
-        """
+        """Compute separate intensities for buy and sell trades."""
         if self._last_event_time <= 0 or not self.trade_times:
             return self.params.mu / 2, self.params.mu / 2
 
@@ -165,19 +153,7 @@ class HawkesIntensityMonitor:
         return float(buy_intensity), float(sell_intensity)
 
     def detect_adverse_selection(self, current_time: float, price_change: float) -> bool:
-        """Detect potential adverse selection.
-
-        Adverse selection occurs when:
-        1. High trade intensity AND
-        2. Price moves against our position
-
-        Args:
-            current_time: Current timestamp
-            price_change: Recent price change (positive = up, negative = down)
-
-        Returns:
-            True if adverse selection detected
-        """
+        """Detect potential adverse selection."""
         if len(self.trade_times) < 10:
             return False
 
@@ -280,13 +256,7 @@ class HawkesIntensityMonitor:
             return None
 
     def estimate_parameters_online(self, use_mle: bool = False) -> Optional[HawkesParameters]:
-        """Update Hawkes parameters using recent trade history.
-
-        Uses method of moments for fast online estimation.
-
-        Returns:
-            Updated parameters or None if insufficient data
-        """
+        """Update Hawkes parameters using recent trade history."""
         moments_est = self._estimate_parameters_moments()
         if moments_est is None:
             return None
@@ -298,20 +268,10 @@ class HawkesIntensityMonitor:
 
 
 class HawkesMarketMaker(MarketMakingStrategy):
-    """Market making strategy with Hawkes process intensity monitoring.
-
-    Key innovations:
-    1. Dynamic spread based on predicted trade intensity
-    2. Activity-aware inventory management
-    3. Adverse selection detection and avoidance
-    """
+    """Market-making strategy with Hawkes intensity monitoring."""
 
     def __init__(self, config: Optional[HawkesMMConfig] = None):
-        """Initialize Hawkes market maker.
-
-        Args:
-            config: Configuration. If None, uses defaults from environment variables.
-        """
+        """Initialize Hawkes market maker."""
         self.config = config or HawkesMMConfig()
         self.name = "HawkesMM"
 
@@ -363,20 +323,7 @@ class HawkesMarketMaker(MarketMakingStrategy):
         self._seen_trade_keys.add(key)
 
     def _compute_dynamic_spread(self, intensity: float, inventory: float) -> float:
-        """Compute dynamic spread based on market intensity and inventory.
-
-        Strategy:
-        - High intensity -> narrow spread (capture more trades)
-        - Low intensity -> widen spread (compensate for lower fill probability)
-        - Large inventory -> widen spread on that side (risk management)
-
-        Args:
-            intensity: Current Hawkes intensity λ(t)
-            inventory: Current position (positive = long, negative = short)
-
-        Returns:
-            Spread in basis points
-        """
+        """Compute dynamic spread based on market intensity and inventory."""
         # Base adjustment based on intensity relative to long-term average
         long_term = self.monitor.params.long_term_intensity
         intensity_ratio = intensity / long_term if long_term > 0 else 1.0
@@ -400,16 +347,7 @@ class HawkesMarketMaker(MarketMakingStrategy):
         return np.clip(spread, self.config.min_spread_bps, self.config.max_spread_bps)
 
     def _compute_inventory_skew(self, inventory: float, buy_int: float, sell_int: float) -> float:
-        """Compute quote skew based on inventory and order flow imbalance.
-
-        Args:
-            inventory: Current position
-            buy_int: Buy trade intensity
-            sell_int: Sell trade intensity
-
-        Returns:
-            Skew factor (-1 to 1, negative = skew toward selling)
-        """
+        """Compute quote skew based on inventory and order flow imbalance."""
         # Inventory skew: want to reduce large positions
         inventory_skew = -np.sign(inventory) * min(abs(inventory) / self.config.inventory_limit, 1.0)
 
@@ -517,20 +455,12 @@ class HawkesMarketMaker(MarketMakingStrategy):
         return bid_size, ask_size
 
     def quote(self, state: MarketState, position: Position) -> QuoteAction:
-        """Generate quotes based on Hawkes intensity and market state.
-
-        Args:
-            state: Current market state including order book
-            position: Current position
-
-        Returns:
-            QuoteAction with bid/ask prices and sizes
-        """
+        """Generate quotes based on Hawkes intensity and market state."""
         mid = state.order_book.mid_price
         if mid is None:
             raise ValueError("Cannot quote without valid order book")
 
-        current_time = state.timestamp.timestamp() if hasattr(state.timestamp, 'timestamp') else 0.0
+        current_time = _timestamp_seconds(state.timestamp)
 
         # Update monitor with recent trades from market data if available
         self._ingest_recent_trades(state)
@@ -540,26 +470,21 @@ class HawkesMarketMaker(MarketMakingStrategy):
         buy_int, sell_int = self.monitor.get_buy_sell_intensity(current_time)
 
         # Check for adverse selection
-        price_change = 0.0
-        if self.last_price is not None:
-            price_change = (mid - self.last_price) / self.last_price if self.last_price > 0 else 0.0
-
+        price_change = _price_change_ratio(mid, self.last_price)
         adverse_selection = self.monitor.detect_adverse_selection(current_time, price_change)
 
         # Adjust spread based on conditions
-        if adverse_selection:
-            # Be defensive: widen spread significantly
-            spread_bps = self.config.max_spread_bps * 0.8
-        else:
-            spread_bps = self._compute_dynamic_spread(intensity, position.size)
+        spread_bps = _select_spread_bps(
+            adverse_selection=adverse_selection,
+            max_spread_bps=self.config.max_spread_bps,
+            dynamic_spread_bps=self._compute_dynamic_spread(intensity, position.size),
+        )
 
         # Compute inventory skew
         skew = self._compute_inventory_skew(position.size, buy_int, sell_int)
-        flow_imbalance = 0.0
-        if buy_int + sell_int > 0:
-            flow_imbalance = (buy_int - sell_int) / (buy_int + sell_int)
+        flow_imbalance = _flow_imbalance(buy_int, sell_int)
 
-        bid_price, ask_price, imbalance, adjusted_mid = self._compute_quote_prices(
+        bid_price, ask_price, imbalance, _ = self._compute_quote_prices(
             mid=mid,
             spread_bps=spread_bps,
             skew=skew,
@@ -574,32 +499,26 @@ class HawkesMarketMaker(MarketMakingStrategy):
             imbalance=imbalance,
         )
 
+        control_signals = _build_control_signals(
+            intensity=float(intensity),
+            buy_intensity=float(buy_int),
+            sell_intensity=float(sell_int),
+            flow_imbalance=float(flow_imbalance),
+            adverse_selection=bool(adverse_selection),
+            spread_bps=float(spread_bps),
+            skew=float(skew),
+        )
         self.last_price = mid
 
-        control_signals = {
-            "intensity": float(intensity),
-            "buy_intensity": float(buy_int),
-            "sell_intensity": float(sell_int),
-            "flow_imbalance": float(flow_imbalance),
-            "adverse_selection": bool(adverse_selection),
-            "spread_bps": float(spread_bps),
-            "skew_signal": float(skew),
-        }
-
-        return QuoteAction(
-            bid_price=bid_price,
-            bid_size=bid_size,
-            ask_price=ask_price,
-            ask_size=ask_size,
-            metadata={
-                "strategy": self.name,
-                "control_signals": control_signals,
-                "hawkes_params": {
-                    "mu": float(self.monitor.params.mu),
-                    "alpha": float(self.monitor.params.alpha),
-                    "beta": float(self.monitor.params.beta),
-                },
-            },
+        return _build_hawkes_quote_action(
+            strategy_name=self.name,
+            quote=(bid_price, bid_size, ask_price, ask_size),
+            control_signals=control_signals,
+            hawkes_params=(
+                self.monitor.params.mu,
+                self.monitor.params.alpha,
+                self.monitor.params.beta,
+            ),
         )
 
     def get_internal_state(self) -> Dict:
@@ -632,11 +551,7 @@ class HawkesMarketMaker(MarketMakingStrategy):
 
 
 class AdaptiveHawkesMarketMaker(HawkesMarketMaker):
-    """Advanced version with online parameter estimation.
-
-    This strategy continuously updates Hawkes parameters based on
-    recent market activity, adapting to changing market regimes.
-    """
+    """Hawkes market maker with online parameter estimation."""
 
     def __init__(self, config: Optional[HawkesMMConfig] = None):
         """Initialize adaptive Hawkes market maker."""

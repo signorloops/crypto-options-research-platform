@@ -1,15 +1,4 @@
-"""
-Integrated Market Making Strategy.
-
-Combines multiple advanced components:
-1. Circuit Breaker - Risk management and trading halts
-2. Volatility Regime Detector - Dynamic spread adjustment based on market regime
-3. Adaptive Delta Hedger - Price-drop aware hedging for coin-margined options
-4. Inventory Management - Skewed quotes based on position
-
-This is a production-ready strategy that adapts to market conditions
-and protects against extreme losses.
-"""
+"""Integrated market-making strategy with risk controls and hedging."""
 from dataclasses import dataclass, field
 from collections import deque
 from datetime import datetime, timedelta
@@ -36,6 +25,12 @@ from research.hedging.adaptive_delta import (
     HedgeDecision,
 )
 from strategies.base import MarketMakingStrategy
+
+
+def _log_return(current_price: float, prev_price: Optional[float]) -> Optional[float]:
+    if prev_price is None or prev_price <= 0:
+        return None
+    return float(np.log(current_price / prev_price))
 
 
 @dataclass
@@ -97,24 +92,7 @@ class StrategyMetrics:
 
 
 class IntegratedMarketMakingStrategy(MarketMakingStrategy):
-    """
-    Integrated market making strategy with risk management.
-
-    Features:
-    1. Circuit breaker protection (4-tier system)
-    2. Regime-aware spread adjustment (HMM-based)
-    3. Adaptive delta hedging (price-drop acceleration)
-    4. Inventory management with skewed quotes
-    5. Coin-margined PnL tracking
-
-    State flow:
-    1. Check circuit breaker - halt if needed
-    2. Update regime detector
-    3. Check/adjust hedge
-    4. Calculate reservation price with inventory skew
-    5. Adjust spread based on regime and circuit state
-    6. Generate quotes
-    """
+    """Integrated market-making strategy with risk management."""
 
     def __init__(self, config: IntegratedStrategyConfig = None):
         self.config = config or IntegratedStrategyConfig()
@@ -172,7 +150,7 @@ class IntegratedMarketMakingStrategy(MarketMakingStrategy):
 
     def _update_regime_state(self, mid: float, prev_price: Optional[float]) -> RegimeState:
         """Update returns/regime from latest mid price."""
-        ret = self._calculate_return(mid, prev_price)
+        ret = _log_return(mid, prev_price)
         if ret is not None:
             detector_input = np.expm1(ret) if self.regime_detector.config.use_log_returns else ret
             self.regime_detector.update(detector_input)
@@ -238,17 +216,10 @@ class IntegratedMarketMakingStrategy(MarketMakingStrategy):
             **calibration_meta,
         }
 
-    def quote(self, state: MarketState, position: Position) -> QuoteAction:
-        """
-        Generate quotes using integrated strategy.
-
-        Args:
-            state: Current market state
-            position: Current position
-
-        Returns:
-            QuoteAction with bid/ask prices and sizes
-        """
+    def _prepare_quote_state(
+        self, state: MarketState, position: Position
+    ) -> Tuple[float, RegimeState, Dict[str, float], object, bool, str]:
+        """Prepare shared quote state before branching on trade gate."""
         self._current_position = position
         mid = state.order_book.mid_price
         if mid is None:
@@ -257,54 +228,56 @@ class IntegratedMarketMakingStrategy(MarketMakingStrategy):
         self._current_price = mid
         self._current_greeks = state.greeks
 
-        # 1. Update returns/regime on every tick (even when trading is halted).
         current_regime = self._update_regime_state(mid, prev_price)
-
-        # 2. Update online calibration before risk gate so metadata stays observable.
         calibration_meta = self._update_online_calibration(state, position.size)
-
-        # 4. Check circuit breaker
         circuit_state, can_trade, reason = self._evaluate_trading_gate(state, position)
+        return float(mid), current_regime, calibration_meta, circuit_state, can_trade, reason
 
-        if not can_trade:
-            # Return zero quotes - don't trade
-            return QuoteAction(
-                bid_price=mid,
-                bid_size=0.0,
-                ask_price=mid,
-                ask_size=0.0,
-                metadata={
-                    "strategy": self.name,
-                    "circuit_state": circuit_state.value,
-                    "regime": current_regime.name,
-                    "trading_halted": True,
-                    "halt_reason": reason,
-                    **calibration_meta,
-                }
-            )
+    def _build_halted_quote(
+        self,
+        *,
+        mid: float,
+        circuit_state: object,
+        current_regime: RegimeState,
+        reason: str,
+        calibration_meta: Dict[str, float],
+    ) -> QuoteAction:
+        """Build zero-size quote when risk gate blocks trading."""
+        return QuoteAction(
+            bid_price=mid,
+            bid_size=0.0,
+            ask_price=mid,
+            ask_size=0.0,
+            metadata={
+                "strategy": self.name,
+                "circuit_state": circuit_state.value,
+                "regime": current_regime.name,
+                "trading_halted": True,
+                "halt_reason": reason,
+                **calibration_meta,
+            },
+        )
 
-        # 5. Check if hedging is needed
+    def _build_active_quote(
+        self,
+        *,
+        state: MarketState,
+        position: Position,
+        mid: float,
+        circuit_state: object,
+        current_regime: RegimeState,
+        calibration_meta: Dict[str, float],
+    ) -> QuoteAction:
+        """Build normal market-making quote after risk gate passes."""
         hedge_decision = self._evaluate_hedge_decision(state, mid, position)
-
-        # 5. Calculate spread based on regime and circuit state
         spread_multiplier = self._get_spread_multiplier()
         spread_bps = self.config.base_spread_bps * spread_multiplier
-
-        # 6. Calculate reservation price with inventory skew
         reservation_price, half_spread = self._calculate_reservation_price(
             mid, position.size, spread_bps
         )
-
-        # 7. Apply circuit breaker position limits
         position_limit_mult = self.circuit_breaker.get_position_limit_multiplier()
         effective_inventory_limit = self.config.inventory_limit * position_limit_mult
-
-        # 8. Determine quote sizes
-        bid_size, ask_size = self._calculate_quote_sizes(
-            position.size, effective_inventory_limit
-        )
-
-        # 9. Build metadata
+        bid_size, ask_size = self._calculate_quote_sizes(position.size, effective_inventory_limit)
         metadata = self._build_quote_metadata(
             circuit_state=circuit_state,
             current_regime=current_regime,
@@ -318,17 +291,37 @@ class IntegratedMarketMakingStrategy(MarketMakingStrategy):
             hedge_decision=hedge_decision,
             calibration_meta=calibration_meta,
         )
-
-        # Record metrics
-        self._record_metrics(state.timestamp, current_regime, circuit_state.value,
-                           spread_bps, position.size)
-
+        self._record_metrics(
+            state.timestamp, current_regime, circuit_state.value, spread_bps, position.size
+        )
         return QuoteAction(
             bid_price=reservation_price - half_spread,
             bid_size=bid_size,
             ask_price=reservation_price + half_spread,
             ask_size=ask_size,
-            metadata=metadata
+            metadata=metadata,
+        )
+
+    def quote(self, state: MarketState, position: Position) -> QuoteAction:
+        """Generate quotes using integrated strategy."""
+        mid, current_regime, calibration_meta, circuit_state, can_trade, reason = (
+            self._prepare_quote_state(state, position)
+        )
+        if not can_trade:
+            return self._build_halted_quote(
+                mid=mid,
+                circuit_state=circuit_state,
+                current_regime=current_regime,
+                reason=reason,
+                calibration_meta=calibration_meta,
+            )
+        return self._build_active_quote(
+            state=state,
+            position=position,
+            mid=mid,
+            circuit_state=circuit_state,
+            current_regime=current_regime,
+            calibration_meta=calibration_meta,
         )
 
     def _update_portfolio_state(self, state: MarketState, position: Position) -> PortfolioState:
@@ -362,13 +355,6 @@ class IntegratedMarketMakingStrategy(MarketMakingStrategy):
         unrealized = position.unrealized_pnl(current_price, inverse=True)
         return self._realized_pnl + unrealized
 
-    def _calculate_return(self, current_price: float, prev_price: Optional[float]) -> Optional[float]:
-        """Calculate log return from consecutive mid prices."""
-        if prev_price is None or prev_price <= 0:
-            return None
-
-        return np.log(current_price / prev_price)
-
     def _get_spread_multiplier(self) -> float:
         """Calculate total spread multiplier from all components."""
         # Base: regime multiplier
@@ -387,13 +373,7 @@ class IntegratedMarketMakingStrategy(MarketMakingStrategy):
         inventory: float,
         spread_bps: float
     ) -> Tuple[float, float]:
-        """
-        Calculate reservation price with inventory skew.
-
-        Based on Avellaneda-Stoikov model with modifications:
-        - Inventory skew pushes reservation price to reduce inventory
-        - Spread widens in high volatility regimes
-        """
+        """Calculate reservation price with inventory skew."""
         gamma = self.config.gamma
         sigma = self._effective_sigma
 
@@ -536,11 +516,7 @@ class IntegratedMarketMakingStrategy(MarketMakingStrategy):
 
 
 class IntegratedStrategyWithFeatures(IntegratedMarketMakingStrategy):
-    """
-    Extended integrated strategy with additional feature extraction.
-
-    Extracts and uses additional market features for better decision making.
-    """
+    """Extended integrated strategy with additional feature extraction."""
 
     def __init__(self, config: IntegratedStrategyConfig = None):
         super().__init__(config)

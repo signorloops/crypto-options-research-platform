@@ -1,31 +1,4 @@
-"""
-转换套利 (Conversion) 和反转套利 (Reversal)。
-
-利用期权平价公式 (Put-Call Parity) 进行套利:
-    C - P = S - K * exp(-rT)
-
-其中:
-    C = 看涨期权价格
-    P = 看跌期权价格
-    S = 标的资产价格
-    K = 执行价格
-    r = 无风险利率
-    T = 到期时间
-
-套利策略:
-1. Conversion (转换套利):
-   - 当 C - P > S - K*exp(-rT) 时
-   - 卖出看涨 + 买入看跌 + 买入标的
-   - 锁定无风险利润
-
-2. Reversal (反转套利):
-   - 当 C - P < S - K*exp(-rT) 时
-   - 买入看涨 + 卖出看跌 + 卖出标的
-   - 锁定无风险利润
-
-边界条件:
-    |C - P - S + K*exp(-rT)| < 交易成本
-"""
+"""Conversion and reversal arbitrage based on put-call parity."""
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, Literal, Optional
@@ -39,6 +12,40 @@ def _time_to_expiry_years(expiry: datetime) -> float:
         expiry = expiry.replace(tzinfo=timezone.utc)
     now = datetime.now(timezone.utc)
     return max(0.0, (expiry - now).total_seconds() / (365.0 * 24 * 3600))
+
+
+def _resolve_opportunity_inputs(
+    *,
+    strategy: "ConversionArbitrage",
+    underlying: str,
+    call_price: Optional[float],
+    put_price: Optional[float],
+    spot_price: Optional[float],
+    strike: Optional[float],
+    expiry: Optional[datetime],
+) -> Optional[tuple[float, float, float, float, datetime]]:
+    if any(v is None for v in [call_price, put_price, spot_price, strike, expiry]):
+        snapshot = strategy.get_latest_snapshot(underlying)
+        if snapshot is None:
+            return None
+        call_price = snapshot["call_price"] if call_price is None else call_price
+        put_price = snapshot["put_price"] if put_price is None else put_price
+        spot_price = snapshot["spot_price"] if spot_price is None else spot_price
+        strike = snapshot["strike"] if strike is None else strike
+        expiry = snapshot["expiry"] if expiry is None else expiry
+    return float(call_price), float(put_price), float(spot_price), float(strike), expiry
+
+
+def _strategy_and_profit_from_deviation(
+    *,
+    deviation: float,
+    total_cost: float,
+) -> Optional[tuple[Literal["conversion", "reversal"], float]]:
+    if deviation > total_cost:
+        return "conversion", float(deviation - total_cost)
+    if deviation < -total_cost:
+        return "reversal", float(-deviation - total_cost)
+    return None
 
 
 @dataclass
@@ -59,12 +66,38 @@ class ConversionOpportunity:
     annualized_return: float  # 年化收益率
 
 
-class ConversionArbitrage:
-    """
-    转换/反转套利策略。
+def _build_conversion_opportunity(
+    *,
+    underlying: str,
+    strike: float,
+    expiry: datetime,
+    call_price: float,
+    put_price: float,
+    spot_price: float,
+    strategy: Literal["conversion", "reversal"],
+    parity: Dict[str, float],
+    deviation: float,
+    profit: float,
+    annualized_return: float,
+) -> ConversionOpportunity:
+    return ConversionOpportunity(
+        underlying=underlying,
+        strike=float(strike),
+        expiry=expiry,
+        call_price=float(call_price),
+        put_price=float(put_price),
+        spot_price=float(spot_price),
+        strategy=strategy,
+        synthetic_forward=parity["synthetic_forward"],
+        actual_forward=parity["theoretical_forward"],
+        deviation=deviation,
+        profit=profit,
+        annualized_return=annualized_return,
+    )
 
-    基于期权平价公式监控套利机会。
-    """
+
+class ConversionArbitrage:
+    """Conversion/reversal arbitrage strategy."""
 
     def __init__(
         self,
@@ -109,17 +142,7 @@ class ConversionArbitrage:
         expiry: datetime,
         carry_yield: Optional[float] = None
     ) -> Dict[str, float]:
-        """
-        计算期权平价偏离。
-
-        Returns:
-            {
-                'synthetic_forward': C - P,
-                'theoretical_forward': S - K*exp(-rT),
-                'deviation': 偏离值,
-                'deviation_pct': 偏离百分比
-            }
-        """
+        """计算期权平价偏离。"""
         # 合成远期价格
         synthetic_fwd = call_price - put_price
 
@@ -149,32 +172,22 @@ class ConversionArbitrage:
         strike: Optional[float] = None,
         expiry: Optional[datetime] = None
     ) -> Optional[ConversionOpportunity]:
-        """
-        检查是否存在转换/反转套利机会。
-
-        Args:
-            underlying: 标的资产
-            call_price: 看涨期权价格
-            put_price: 看跌期权价格
-            spot_price: 现货价格
-            strike: 执行价格
-            expiry: 到期日
-
-        Returns:
-            ConversionOpportunity 或 None
-        """
-        if any(v is None for v in [call_price, put_price, spot_price, strike, expiry]):
-            snapshot = self.get_latest_snapshot(underlying)
-            if snapshot is None:
-                return None
-            call_price = snapshot["call_price"] if call_price is None else call_price
-            put_price = snapshot["put_price"] if put_price is None else put_price
-            spot_price = snapshot["spot_price"] if spot_price is None else spot_price
-            strike = snapshot["strike"] if strike is None else strike
-            expiry = snapshot["expiry"] if expiry is None else expiry
+        """检查是否存在转换/反转套利机会。"""
+        resolved = _resolve_opportunity_inputs(
+            strategy=self,
+            underlying=underlying,
+            call_price=call_price,
+            put_price=put_price,
+            spot_price=spot_price,
+            strike=strike,
+            expiry=expiry,
+        )
+        if resolved is None:
+            return None
+        call_price, put_price, spot_price, strike, expiry = resolved
 
         parity = self.calculate_parity_deviation(
-            float(call_price), float(put_price), float(spot_price), float(strike), expiry
+            call_price, put_price, spot_price, strike, expiry
         )
 
         if spot_price <= 0:
@@ -188,17 +201,13 @@ class ConversionArbitrage:
         # 扣除交易成本 (3 条腿: 看涨+看跌+标的)
         total_cost = 3 * self.transaction_cost * spot_price
 
-        strategy: Literal["conversion", "reversal"]
-        if deviation > total_cost:
-            # Conversion 套利: 卖出看涨 + 买入看跌 + 买入标的
-            strategy = "conversion"
-            profit = deviation - total_cost
-        elif deviation < -total_cost:
-            # Reversal 套利: 买入看涨 + 卖出看跌 + 卖出标的
-            strategy = "reversal"
-            profit = -deviation - total_cost
-        else:
+        strategy_profit = _strategy_and_profit_from_deviation(
+            deviation=deviation,
+            total_cost=total_cost,
+        )
+        if strategy_profit is None:
             return None
+        strategy, profit = strategy_profit
 
         # 检查最小利润阈值
         if profit / spot_price < self.min_profit:
@@ -207,19 +216,18 @@ class ConversionArbitrage:
         # 年化收益率
         annualized_return = (profit / spot_price) / T
 
-        return ConversionOpportunity(
+        return _build_conversion_opportunity(
             underlying=underlying,
-            strike=float(strike),
+            strike=strike,
             expiry=expiry,
-            call_price=float(call_price),
-            put_price=float(put_price),
-            spot_price=float(spot_price),
+            call_price=call_price,
+            put_price=put_price,
+            spot_price=spot_price,
             strategy=strategy,
-            synthetic_forward=parity['synthetic_forward'],
-            actual_forward=parity['theoretical_forward'],
+            parity=parity,
             deviation=deviation,
             profit=profit,
-            annualized_return=annualized_return
+            annualized_return=annualized_return,
         )
 
     def get_hedge_position(self, opp: ConversionOpportunity) -> Dict[str, float]:

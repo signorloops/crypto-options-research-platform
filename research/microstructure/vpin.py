@@ -1,13 +1,86 @@
-"""
-VPIN (Volume-Synchronized Probability of Informed Trading) calculator.
-VPIN is a measure of order flow toxicity based on volume buckets rather than time.
-Reference: Easley, Lopez de Prado, and O'Hara (2012)
-"""
+"""VPIN (volume-synchronized probability of informed trading) calculator."""
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+
+
+def _empty_bucket_arrays() -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    empty = np.array([])
+    return empty, empty, empty, empty
+
+
+def _full_bucket_components(
+    *,
+    cum_total: np.ndarray,
+    volumes: np.ndarray,
+    is_buy: np.ndarray,
+    cum_buy: np.ndarray,
+    cum_sell: np.ndarray,
+    timestamps: np.ndarray,
+    bucket_size: float,
+    n_full: int,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    if n_full <= 0:
+        empty_float = np.array([], dtype=float)
+        empty_ts = np.array([], dtype=timestamps.dtype)
+        return empty_float, empty_float, empty_ts, empty_float, empty_float, empty_float
+
+    boundaries = (np.arange(1, n_full + 1, dtype=float) * bucket_size)
+    boundary_idx = np.searchsorted(cum_total, boundaries, side="left")
+    boundary_idx = np.clip(boundary_idx, 0, len(cum_total) - 1)
+
+    trade_starts = cum_total[boundary_idx] - volumes[boundary_idx]
+    partial_to_boundary = boundaries - trade_starts
+    buy_prefix = np.where(boundary_idx > 0, cum_buy[boundary_idx - 1], 0.0)
+    sell_prefix = np.where(boundary_idx > 0, cum_sell[boundary_idx - 1], 0.0)
+    buy_partial = np.where(is_buy[boundary_idx], partial_to_boundary, 0.0)
+    sell_partial = np.where(is_buy[boundary_idx], 0.0, partial_to_boundary)
+
+    cum_buy_at_boundaries = buy_prefix + buy_partial
+    cum_sell_at_boundaries = sell_prefix + sell_partial
+    full_buy = np.diff(np.concatenate(([0.0], cum_buy_at_boundaries)))
+    full_sell = np.diff(np.concatenate(([0.0], cum_sell_at_boundaries)))
+    full_totals = np.full(n_full, bucket_size, dtype=float)
+    full_timestamps = timestamps[boundary_idx]
+    return (
+        full_buy,
+        full_sell,
+        full_timestamps,
+        full_totals,
+        cum_buy_at_boundaries,
+        cum_sell_at_boundaries,
+    )
+
+
+def _append_partial_bucket(
+    *,
+    include_partial: bool,
+    n_full: int,
+    timestamps: np.ndarray,
+    cum_buy: np.ndarray,
+    cum_sell: np.ndarray,
+    cum_buy_at_boundaries: np.ndarray,
+    cum_sell_at_boundaries: np.ndarray,
+    full_timestamps: np.ndarray,
+    full_buy: np.ndarray,
+    full_sell: np.ndarray,
+    full_totals: np.ndarray,
+    residual: float,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    if not include_partial:
+        return full_timestamps, full_buy, full_sell, full_totals
+
+    prev_buy = float(cum_buy_at_boundaries[-1]) if n_full > 0 else 0.0
+    prev_sell = float(cum_sell_at_boundaries[-1]) if n_full > 0 else 0.0
+    partial_buy = float(cum_buy[-1] - prev_buy)
+    partial_sell = float(cum_sell[-1] - prev_sell)
+    bucket_timestamps = np.concatenate((full_timestamps, np.array([timestamps[-1]])))
+    buy_buckets = np.concatenate((full_buy, np.array([partial_buy])))
+    sell_buckets = np.concatenate((full_sell, np.array([partial_sell])))
+    total_buckets = np.concatenate((full_totals, np.array([residual])))
+    return bucket_timestamps, buy_buckets, sell_buckets, total_buckets
 
 
 @dataclass
@@ -38,6 +111,53 @@ class VPINResult:
             periods.append((start, self.timestamps[-1]))
 
         return periods
+
+
+def _fallback_vpin_result(df: pd.DataFrame) -> VPINResult:
+    volume = np.maximum(df["size"].to_numpy(dtype=float) * df["price"].to_numpy(dtype=float), 0.0)
+    is_buy = df["side"].to_numpy() == "buy"
+    buy_vol = np.where(is_buy, volume, 0.0)
+    sell_vol = np.where(is_buy, 0.0, volume)
+    total_vol = float(np.sum(volume))
+    fallback_vpin = 0.0
+    if total_vol > 0:
+        flow_imbalance = np.abs(np.sum(buy_vol) - np.sum(sell_vol))
+        fallback_vpin = float(np.clip(flow_imbalance / total_vol, 0.0, 1.0))
+    return VPINResult(
+        timestamps=df["timestamp"].values,
+        vpin_values=np.full(len(df), fallback_vpin),
+        buy_volumes=buy_vol,
+        sell_volumes=sell_vol,
+        volume_buckets=np.zeros(len(df)),
+    )
+
+
+def _rolling_vpin_values(
+    *,
+    buy_arr: np.ndarray,
+    sell_arr: np.ndarray,
+    total_arr: np.ndarray,
+    num_buckets: int,
+) -> np.ndarray:
+    n = len(total_arr)
+    imbalance_arr = np.abs(buy_arr - sell_arr)
+    cum_imbalance = np.concatenate(([0], np.cumsum(imbalance_arr)))
+    cum_total = np.concatenate(([0], np.cumsum(total_arr)))
+
+    w = num_buckets
+    half_w = max(1, w // 2)
+    vpin_values = np.full(n, 0.5)
+    idx = np.arange(n)
+    starts = np.maximum(0, idx - w + 1)
+    window_lengths = idx - starts + 1
+    valid = window_lengths >= half_w
+    window_total = cum_total[idx + 1] - cum_total[starts]
+    window_imbalance = cum_imbalance[idx + 1] - cum_imbalance[starts]
+    safe_total = np.where(window_total > 0, window_total, 1.0)
+    computed = np.where(window_total > 0, window_imbalance / safe_total, 0.0)
+    computed = np.clip(computed, 0.0, 1.0)
+    vpin_values[valid] = computed[valid]
+    return vpin_values
 
 
 class VPINCalculator:
@@ -92,45 +212,15 @@ class VPINCalculator:
         bucket_timestamps, buy_arr, sell_arr, total_arr = self._create_volume_buckets(df)
 
         if len(total_arr) < self.num_buckets:
-            # Not enough buckets: use observed flow imbalance as fallback toxicity.
-            volume = np.maximum(df['size'].to_numpy(dtype=float) * df['price'].to_numpy(dtype=float), 0.0)
-            is_buy = df['side'].to_numpy() == 'buy'
-            buy_vol = np.where(is_buy, volume, 0.0)
-            sell_vol = np.where(is_buy, 0.0, volume)
-            total_vol = float(np.sum(volume))
-            fallback_vpin = 0.0
-            if total_vol > 0:
-                fallback_vpin = float(np.clip(np.abs(np.sum(buy_vol) - np.sum(sell_vol)) / total_vol, 0.0, 1.0))
-            return VPINResult(
-                timestamps=df['timestamp'].values,
-                vpin_values=np.full(len(df), fallback_vpin),
-                buy_volumes=buy_vol,
-                sell_volumes=sell_vol,
-                volume_buckets=np.zeros(len(df))
-            )
+            return _fallback_vpin_result(df)
 
-        # Vectorized VPIN computation using numpy arrays and cumsum
         n = len(total_arr)
-        imbalance_arr = np.abs(buy_arr - sell_arr)
-
-        # Rolling sums via cumsum difference (O(n) instead of O(n*w))
-        cum_imbalance = np.concatenate(([0], np.cumsum(imbalance_arr)))
-        cum_total = np.concatenate(([0], np.cumsum(total_arr)))
-
-        w = self.num_buckets
-        half_w = max(1, w // 2)
-        vpin_values = np.full(n, 0.5)
-        idx = np.arange(n)
-        starts = np.maximum(0, idx - w + 1)
-        window_lengths = idx - starts + 1
-        valid = window_lengths >= half_w
-        window_total = cum_total[idx + 1] - cum_total[starts]
-        window_imbalance = cum_imbalance[idx + 1] - cum_imbalance[starts]
-        safe_total = np.where(window_total > 0, window_total, 1.0)
-        computed = np.where(window_total > 0, window_imbalance / safe_total, 0.0)
-        computed = np.clip(computed, 0.0, 1.0)
-        vpin_values[valid] = computed[valid]
-
+        vpin_values = _rolling_vpin_values(
+            buy_arr=buy_arr,
+            sell_arr=sell_arr,
+            total_arr=total_arr,
+            num_buckets=self.num_buckets,
+        )
         return VPINResult(
             timestamps=bucket_timestamps,
             vpin_values=vpin_values,
@@ -158,8 +248,7 @@ class VPINCalculator:
     def _create_volume_buckets(self, df: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Create volume-synchronized buckets via cumsum/searchsorted."""
         if df.empty:
-            empty = np.array([])
-            return empty, empty, empty, empty
+            return _empty_bucket_arrays()
 
         prices = df['price'].to_numpy(dtype=float)
         sizes = df['size'].to_numpy(dtype=float)
@@ -167,14 +256,12 @@ class VPINCalculator:
         timestamps = df['timestamp'].to_numpy()
         volumes = np.maximum(sizes * prices, 0.0)  # Volume in quote currency
         if len(volumes) == 0:
-            empty = np.array([])
-            return empty, empty, empty, empty
+            return _empty_bucket_arrays()
 
         cum_total = np.cumsum(volumes)
         total_volume = float(cum_total[-1]) if len(cum_total) else 0.0
         if total_volume <= 0:
-            empty = np.array([])
-            return empty, empty, empty, empty
+            return _empty_bucket_arrays()
 
         bucket_size = float(self.volume_bucket_size)
         n_full = int(total_volume // bucket_size)
@@ -182,60 +269,44 @@ class VPINCalculator:
         include_partial = residual >= bucket_size * 0.5
         n_buckets = n_full + (1 if include_partial else 0)
         if n_buckets == 0:
-            empty = np.array([])
-            return empty, empty, empty, empty
+            return _empty_bucket_arrays()
 
         is_buy = sides == 'buy'
         buy_trade_vol = np.where(is_buy, volumes, 0.0)
         sell_trade_vol = np.where(is_buy, 0.0, volumes)
         cum_buy = np.cumsum(buy_trade_vol)
         cum_sell = np.cumsum(sell_trade_vol)
-
-        full_buy = np.array([], dtype=float)
-        full_sell = np.array([], dtype=float)
-        full_timestamps = np.array([], dtype=timestamps.dtype)
-        full_totals = np.array([], dtype=float)
-        cum_buy_at_boundaries = np.array([], dtype=float)
-        cum_sell_at_boundaries = np.array([], dtype=float)
-
-        if n_full > 0:
-            boundaries = (np.arange(1, n_full + 1, dtype=float) * bucket_size)
-            boundary_idx = np.searchsorted(cum_total, boundaries, side='left')
-            boundary_idx = np.clip(boundary_idx, 0, len(cum_total) - 1)
-
-            trade_starts = cum_total[boundary_idx] - volumes[boundary_idx]
-            partial_to_boundary = boundaries - trade_starts
-
-            buy_prefix = np.where(boundary_idx > 0, cum_buy[boundary_idx - 1], 0.0)
-            sell_prefix = np.where(boundary_idx > 0, cum_sell[boundary_idx - 1], 0.0)
-            buy_partial = np.where(is_buy[boundary_idx], partial_to_boundary, 0.0)
-            sell_partial = np.where(is_buy[boundary_idx], 0.0, partial_to_boundary)
-
-            cum_buy_at_boundaries = buy_prefix + buy_partial
-            cum_sell_at_boundaries = sell_prefix + sell_partial
-
-            full_buy = np.diff(np.concatenate(([0.0], cum_buy_at_boundaries)))
-            full_sell = np.diff(np.concatenate(([0.0], cum_sell_at_boundaries)))
-            full_totals = np.full(n_full, bucket_size, dtype=float)
-            full_timestamps = timestamps[boundary_idx]
-
-        if include_partial:
-            prev_buy = float(cum_buy_at_boundaries[-1]) if n_full > 0 else 0.0
-            prev_sell = float(cum_sell_at_boundaries[-1]) if n_full > 0 else 0.0
-            partial_buy = float(cum_buy[-1] - prev_buy)
-            partial_sell = float(cum_sell[-1] - prev_sell)
-
-            bucket_timestamps = np.concatenate((full_timestamps, np.array([timestamps[-1]])))
-            buy_buckets = np.concatenate((full_buy, np.array([partial_buy])))
-            sell_buckets = np.concatenate((full_sell, np.array([partial_sell])))
-            total_buckets = np.concatenate((full_totals, np.array([residual])))
-        else:
-            bucket_timestamps = full_timestamps
-            buy_buckets = full_buy
-            sell_buckets = full_sell
-            total_buckets = full_totals
-
-        return bucket_timestamps, buy_buckets, sell_buckets, total_buckets
+        (
+            full_buy,
+            full_sell,
+            full_timestamps,
+            full_totals,
+            cum_buy_at_boundaries,
+            cum_sell_at_boundaries,
+        ) = _full_bucket_components(
+            cum_total=cum_total,
+            volumes=volumes,
+            is_buy=is_buy,
+            cum_buy=cum_buy,
+            cum_sell=cum_sell,
+            timestamps=timestamps,
+            bucket_size=bucket_size,
+            n_full=n_full,
+        )
+        return _append_partial_bucket(
+            include_partial=include_partial,
+            n_full=n_full,
+            timestamps=timestamps,
+            cum_buy=cum_buy,
+            cum_sell=cum_sell,
+            cum_buy_at_boundaries=cum_buy_at_boundaries,
+            cum_sell_at_boundaries=cum_sell_at_boundaries,
+            full_timestamps=full_timestamps,
+            full_buy=full_buy,
+            full_sell=full_sell,
+            full_totals=full_totals,
+            residual=residual,
+        )
 
 
 class OrderFlowToxicityAnalyzer:

@@ -1,7 +1,4 @@
-"""
-Value at Risk (VaR) and Expected Shortfall (CVaR) calculations.
-Includes parametric, historical, and Monte Carlo methods.
-"""
+"""Value at Risk (VaR) and Expected Shortfall (CVaR) calculations."""
 
 from __future__ import annotations
 
@@ -55,6 +52,49 @@ class _OptionRevaluationInputs:
     implied_vol: float
     risk_free_rate: float
     vol_of_vol: float
+
+
+def _option_schema_available(aligned_positions: pd.DataFrame) -> bool:
+    """Check whether positions include full option-revaluation schema."""
+    option_fields = {"spot", "strike", "time_to_expiry", "option_type", "implied_vol"}
+    return option_fields.issubset(set(aligned_positions.columns))
+
+
+def _compute_monte_carlo_pnl(
+    *,
+    calculator: "VaRCalculator",
+    aligned_positions: pd.DataFrame,
+    aligned_columns: list[str],
+    simulated_returns: np.ndarray,
+    weights: np.ndarray,
+    total_value: float,
+    greeks: pd.DataFrame | None,
+    n_simulations: int,
+    holding_period: int,
+    leverage_correlation: float,
+    rng: Any,
+) -> np.ndarray:
+    """Dispatch to option-schema, Greeks approximation, or linear PnL path."""
+    if _option_schema_available(aligned_positions):
+        return calculator._option_schema_pnl(
+            aligned_positions=aligned_positions,
+            aligned_columns=aligned_columns,
+            simulated_returns=simulated_returns,
+            greeks=greeks,
+            n_simulations=n_simulations,
+            holding_period=holding_period,
+            leverage_correlation=leverage_correlation,
+            rng=rng,
+        )
+    if greeks is not None:
+        return calculator._greeks_approximation_pnl(
+            aligned_positions=aligned_positions,
+            simulated_returns=simulated_returns,
+            greeks=greeks,
+            n_simulations=n_simulations,
+            rng=rng,
+        )
+    return simulated_returns @ weights * total_value
 
 
 class VaRCalculator:
@@ -700,13 +740,10 @@ class VaRCalculator:
         total_value, weights, aligned_returns = self._prepare_portfolio_inputs(positions, returns)
         aligned_positions = positions.loc[aligned_returns.columns]
 
-        # Estimate parameters from historical returns
         mean = aligned_returns.mean().values
         cov = self._regularize_covariance(aligned_returns.cov().to_numpy(copy=True))
 
-        # Always use local RNG so simulations never mutate global NumPy random state.
         rng = np.random.default_rng(random_seed)
-
         simulated_returns = self._simulate_correlated_returns(
             mean=mean,
             cov=cov,
@@ -716,33 +753,19 @@ class VaRCalculator:
             leverage_correlation=leverage_correlation,
             rng=rng,
         )
-
-        # Calculate PnL for each simulation.
-        option_fields = {"spot", "strike", "time_to_expiry", "option_type", "implied_vol"}
-        option_schema_available = option_fields.issubset(set(aligned_positions.columns))
-
-        if option_schema_available:
-            pnl = self._option_schema_pnl(
-                aligned_positions=aligned_positions,
-                aligned_columns=list(aligned_returns.columns),
-                simulated_returns=simulated_returns,
-                greeks=greeks,
-                n_simulations=n_simulations,
-                holding_period=holding_period,
-                leverage_correlation=leverage_correlation,
-                rng=rng,
-            )
-        elif greeks is not None:
-            pnl = self._greeks_approximation_pnl(
-                aligned_positions=aligned_positions,
-                simulated_returns=simulated_returns,
-                greeks=greeks,
-                n_simulations=n_simulations,
-                rng=rng,
-            )
-        else:
-            # Linear approximation
-            pnl = simulated_returns @ weights * total_value
+        pnl = _compute_monte_carlo_pnl(
+            calculator=self,
+            aligned_positions=aligned_positions,
+            aligned_columns=list(aligned_returns.columns),
+            simulated_returns=simulated_returns,
+            weights=weights,
+            total_value=total_value,
+            greeks=greeks,
+            n_simulations=n_simulations,
+            holding_period=holding_period,
+            leverage_correlation=leverage_correlation,
+            rng=rng,
+        )
 
         var_95, var_99, cvar_95, cvar_99 = self._tail_risk_from_pnl(pnl)
 

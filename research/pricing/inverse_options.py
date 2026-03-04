@@ -279,81 +279,45 @@ class InverseOptionPricer:
         context: _GreeksComputationContext,
     ) -> InverseGreeks:
         """从已计算的 d1, d2 计算希腊字母（内部辅助函数）。"""
-        inv_S = context.inv_S
-        inv_K = context.inv_K
-        discount = context.discount
-        sqrt_T = context.sqrt_T
-        n_d1 = context.n_d1
-
-        # Delta (对S的偏导)
-        # 币本位期权需要完整的Delta推导，包含n(d1)项
-        # d(d1)/dS = -1/(S * sigma * sqrt(T))
-        d1_dS = -1.0 / (S * sigma * sqrt_T)
-
-        if option_type == "call":
-            # 完整Delta = (1/S^2)*N(-d1) + (1/S)*n(d1)*d(d1)/dS - discount*(1/K)*n(-d2)*d(d2)/dS
-            # 由于d2 = d1 - sigma*sqrt(T)，所以d(d2)/dS = d(d1)/dS
-            delta = ((inv_S ** 2) * norm.cdf(-d1)
-                     + inv_S * n_d1 * d1_dS
-                     - discount * inv_K * norm.pdf(-d2) * d1_dS)
-        else:
-            # 币本位put: delta = -(1/S^2)*N(d1) + (1/S)*n(d1)*d(d1)/dS - discount*(1/K)*n(d2)*d(d2)/dS
-            delta = (-(inv_S ** 2) * norm.cdf(d1)
-                     + inv_S * n_d1 * d1_dS
-                     - discount * inv_K * norm.pdf(d2) * d1_dS)
-
-        # Gamma (delta对S的二阶导)
-        # 币本位期权Gamma推导:
-        # Call: Gamma = -2/S³ * N(-d1) + n(d1)/(S³*σ*√T)
-        # Put:  Gamma = 2/S³ * N(d1) + n(d1)/(S³*σ*√T)
-        # 注意: 币本位期权的Call和Put Gamma不相等
-        gamma_term2 = n_d1 / (S ** 3 * sigma * sqrt_T)
-        if option_type == "call":
-            gamma = -2 * (inv_S ** 3) * norm.cdf(-d1) + gamma_term2
-        else:
-            gamma = 2 * (inv_S ** 3) * norm.cdf(d1) + gamma_term2
-
-        # Theta (时间衰减，每日）
-        # 币本位期权 Theta = -dV/dT / 365 (负号表示时间流逝导致价值减少)
-        # 从 Black-76 币本位公式推导
-        # dV/dT = -r*e^(-rT)*(1/K)*N(-d2) - e^(-rT)*(1/K)*n(d2)*dd2/dT + (1/S)*n(d1)*dd1/dT
-        d_d1_dT = ((r + 0.5 * sigma ** 2) * T - np.log(K / S)) / (2 * sigma * T ** 1.5)
-        d_d2_dT = d_d1_dT - sigma / (2 * sqrt_T)
-
-        if option_type == "call":
-            dV_dT = (-r * discount * inv_K * norm.cdf(-d2)
-                     - discount * inv_K * norm.pdf(d2) * d_d2_dT
-                     + inv_S * n_d1 * d_d1_dT)
-            theta = -dV_dT / InverseOptionPricer.THETA_DAYS_PER_YEAR
-        else:
-            dV_dT = (r * discount * inv_K * norm.cdf(d2)
-                     + discount * inv_K * norm.pdf(d2) * d_d2_dT
-                     - inv_S * n_d1 * d_d1_dT)
-            theta = -dV_dT / InverseOptionPricer.THETA_DAYS_PER_YEAR
-
-        # Vega (波动率变化1%时的价格变化）
-        # 完整的Vega推导需要考虑所有项对sigma的导数
-        # d(d1)/dsigma = (ln(S/K) + (r - 0.5*sigma^2)*T) / (sigma^2 * sqrt(T)) = -d2/sigma
-        d1_dsigma = -d2 / sigma if abs(sigma) > 1e-10 else 0.0
-        d2_dsigma = d1_dsigma - sqrt_T
-
-        if option_type == "call":
-            # Vega = dV/dsigma = discount*(1/K)*n(-d2)*(-d2_dsigma) - (1/S)*n(-d1)*(-d1_dsigma)
-            # 由于n(-x) = n(x)（正态分布对称性）
-            vega_per_unit = (discount * inv_K * norm.pdf(d2) * (-d2_dsigma)
-                            - inv_S * n_d1 * (-d1_dsigma))
-        else:
-            # Vega = (1/S)*n(d1)*d1_dsigma - discount*(1/K)*n(d2)*d2_dsigma
-            vega_per_unit = (inv_S * n_d1 * d1_dsigma
-                            - discount * inv_K * norm.pdf(d2) * d2_dsigma)
-
-        vega = vega_per_unit * InverseOptionPricer.VEGA_SCALING
-
-        # Rho (利率变化1%时的价格变化）
-        if option_type == "call":
-            rho = -T * discount * inv_K * norm.cdf(-d2) / InverseOptionPricer.RHO_SCALING
-        else:
-            rho = T * discount * inv_K * norm.cdf(d2) / InverseOptionPricer.RHO_SCALING
+        delta = InverseOptionPricer._calculate_delta_from_d(
+            d1=d1,
+            d2=d2,
+            S=S,
+            sigma=sigma,
+            option_type=option_type,
+            context=context,
+        )
+        gamma = InverseOptionPricer._calculate_gamma_from_d(
+            d1=d1,
+            S=S,
+            sigma=sigma,
+            option_type=option_type,
+            context=context,
+        )
+        theta = InverseOptionPricer._calculate_theta_from_d(
+            d1=d1,
+            d2=d2,
+            S=S,
+            K=K,
+            T=T,
+            r=r,
+            sigma=sigma,
+            option_type=option_type,
+            context=context,
+        )
+        vega = InverseOptionPricer._calculate_vega_from_d(
+            d1=d1,
+            d2=d2,
+            sigma=sigma,
+            option_type=option_type,
+            context=context,
+        )
+        rho = InverseOptionPricer._calculate_rho_from_d(
+            d2=d2,
+            T=T,
+            option_type=option_type,
+            context=context,
+        )
 
         return InverseGreeks(
             delta=delta,
@@ -362,6 +326,135 @@ class InverseOptionPricer:
             vega=vega,
             rho=rho
         )
+
+    @staticmethod
+    def _calculate_delta_from_d(
+        *,
+        d1: float,
+        d2: float,
+        S: float,
+        sigma: float,
+        option_type: Literal["call", "put"],
+        context: _GreeksComputationContext,
+    ) -> float:
+        """Compute inverse-option delta from precomputed d1/d2 terms."""
+        inv_S = context.inv_S
+        inv_K = context.inv_K
+        discount = context.discount
+        n_d1 = context.n_d1
+        sqrt_T = context.sqrt_T
+        d1_dS = -1.0 / (S * sigma * sqrt_T)
+        if option_type == "call":
+            return float(
+                (inv_S ** 2) * norm.cdf(-d1)
+                + inv_S * n_d1 * d1_dS
+                - discount * inv_K * norm.pdf(-d2) * d1_dS
+            )
+        return float(
+            -(inv_S ** 2) * norm.cdf(d1)
+            + inv_S * n_d1 * d1_dS
+            - discount * inv_K * norm.pdf(d2) * d1_dS
+        )
+
+    @staticmethod
+    def _calculate_gamma_from_d(
+        *,
+        d1: float,
+        S: float,
+        sigma: float,
+        option_type: Literal["call", "put"],
+        context: _GreeksComputationContext,
+    ) -> float:
+        """Compute inverse-option gamma from precomputed d1 terms."""
+        inv_S = context.inv_S
+        n_d1 = context.n_d1
+        sqrt_T = context.sqrt_T
+        gamma_term2 = n_d1 / (S ** 3 * sigma * sqrt_T)
+        if option_type == "call":
+            return float(-2 * (inv_S ** 3) * norm.cdf(-d1) + gamma_term2)
+        return float(2 * (inv_S ** 3) * norm.cdf(d1) + gamma_term2)
+
+    @staticmethod
+    def _calculate_theta_from_d(
+        *,
+        d1: float,
+        d2: float,
+        S: float,
+        K: float,
+        T: float,
+        r: float,
+        sigma: float,
+        option_type: Literal["call", "put"],
+        context: _GreeksComputationContext,
+    ) -> float:
+        """Compute daily theta from precomputed d terms."""
+        inv_S = context.inv_S
+        inv_K = context.inv_K
+        discount = context.discount
+        n_d1 = context.n_d1
+        sqrt_T = context.sqrt_T
+        d_d1_dT = ((r + 0.5 * sigma ** 2) * T - np.log(K / S)) / (2 * sigma * T ** 1.5)
+        d_d2_dT = d_d1_dT - sigma / (2 * sqrt_T)
+        if option_type == "call":
+            dV_dT = (
+                -r * discount * inv_K * norm.cdf(-d2)
+                - discount * inv_K * norm.pdf(d2) * d_d2_dT
+                + inv_S * n_d1 * d_d1_dT
+            )
+        else:
+            dV_dT = (
+                r * discount * inv_K * norm.cdf(d2)
+                + discount * inv_K * norm.pdf(d2) * d_d2_dT
+                - inv_S * n_d1 * d_d1_dT
+            )
+        return float(-dV_dT / InverseOptionPricer.THETA_DAYS_PER_YEAR)
+
+    @staticmethod
+    def _calculate_vega_from_d(
+        *,
+        d1: float,
+        d2: float,
+        sigma: float,
+        option_type: Literal["call", "put"],
+        context: _GreeksComputationContext,
+    ) -> float:
+        """Compute vega scaled to 1% volatility changes."""
+        del d1  # d1 density is provided in context
+        inv_S = context.inv_S
+        inv_K = context.inv_K
+        discount = context.discount
+        n_d1 = context.n_d1
+        sqrt_T = context.sqrt_T
+        d1_dsigma = -d2 / sigma if abs(sigma) > 1e-10 else 0.0
+        d2_dsigma = d1_dsigma - sqrt_T
+        if option_type == "call":
+            vega_per_unit = (
+                discount * inv_K * norm.pdf(d2) * (-d2_dsigma)
+                - inv_S * n_d1 * (-d1_dsigma)
+            )
+        else:
+            vega_per_unit = (
+                inv_S * n_d1 * d1_dsigma
+                - discount * inv_K * norm.pdf(d2) * d2_dsigma
+            )
+        return float(vega_per_unit * InverseOptionPricer.VEGA_SCALING)
+
+    @staticmethod
+    def _calculate_rho_from_d(
+        *,
+        d2: float,
+        T: float,
+        option_type: Literal["call", "put"],
+        context: _GreeksComputationContext,
+    ) -> float:
+        """Compute rho scaled to 1% rate changes."""
+        inv_K = context.inv_K
+        discount = context.discount
+        if option_type == "call":
+            rho = -T * discount * inv_K * norm.cdf(-d2)
+        else:
+            rho = T * discount * inv_K * norm.cdf(d2)
+        return float(rho / InverseOptionPricer.RHO_SCALING)
 
     @staticmethod
     def _stabilize_iv_estimate(
@@ -421,6 +514,62 @@ class InverseOptionPricer:
             return sigma_new, False, False
         except (ValueError, FloatingPointError, RuntimeError):
             return None, False, True
+
+    @staticmethod
+    def _iv_price_upper_bound(
+        *,
+        S: float,
+        K: float,
+        T: float,
+        r: float,
+        option_type: Literal["call", "put"],
+    ) -> float:
+        """Theoretical upper bound for inverse-option prices."""
+        if option_type == "call":
+            return float(np.exp(-r * T) / K)
+        return float(1.0 / S)
+
+    @staticmethod
+    def _initial_iv_guess(S: float, K: float) -> float:
+        """ATM-style initial guess clipped to stable range."""
+        moneyness = S / K
+        sigma = float(0.5 + 0.1 * abs(np.log(moneyness)))
+        return float(np.clip(sigma, 0.1, 2.0))
+
+    @staticmethod
+    def _solve_iv_newton(
+        *,
+        price: float,
+        S: float,
+        K: float,
+        T: float,
+        r: float,
+        option_type: Literal["call", "put"],
+        tol: float,
+        max_iter: int,
+    ) -> Optional[float]:
+        """Attempt Newton IV solve, returning None when fallback is required."""
+        sigma = InverseOptionPricer._initial_iv_guess(S, K)
+        price_scale = max(abs(price), InverseOptionPricer.EPSILON)
+        rel_tol = tol
+        for _ in range(max_iter):
+            sigma_new, converged, use_bisection = InverseOptionPricer._newton_iv_update(
+                price=price,
+                S=S,
+                K=K,
+                T=T,
+                r=r,
+                option_type=option_type,
+                sigma=sigma,
+                rel_tol=rel_tol,
+                price_scale=price_scale,
+            )
+            if converged and sigma_new is not None:
+                return float(sigma_new)
+            if use_bisection or sigma_new is None:
+                return None
+            sigma = sigma_new
+        return None
 
     @staticmethod
     def calculate_greeks(
@@ -505,54 +654,37 @@ class InverseOptionPricer:
         InverseOptionPricer._validate_option_type(option_type)
         if price <= 0:
             return 0.0
-
-        # 检查价格合理性（不能超过理论上限）
-        if option_type == "call":
-            max_price = np.exp(-r * T) / K  # 当S->inf时的极限
-        else:
-            max_price = 1.0 / S  # 当S->0时的极限
-
-        if price >= max_price:
+        if price >= InverseOptionPricer._iv_price_upper_bound(
+            S=S,
+            K=K,
+            T=T,
+            r=r,
+            option_type=option_type,
+        ):
             return 0.0
 
-        # 初始猜测：使用ATM近似
-        moneyness = S / K
-        sigma = float(0.5 + 0.1 * abs(np.log(moneyness)))
-        sigma = max(0.1, min(2.0, sigma))
-
-        # 使用相对容差，适应不同价格尺度
-        price_scale = max(abs(price), InverseOptionPricer.EPSILON)
-        rel_tol = tol
-
-        for _ in range(max_iter):
-            sigma_new, converged, use_bisection = InverseOptionPricer._newton_iv_update(
-                price=price,
-                S=S,
-                K=K,
-                T=T,
-                r=r,
-                option_type=option_type,
-                sigma=sigma,
-                rel_tol=rel_tol,
-                price_scale=price_scale,
+        raw_sigma = InverseOptionPricer._solve_iv_newton(
+            price=price,
+            S=S,
+            K=K,
+            T=T,
+            r=r,
+            option_type=option_type,
+            tol=tol,
+            max_iter=max_iter,
+        )
+        if raw_sigma is None:
+            # 如果牛顿法失败，使用二分法作为fallback
+            raw_sigma = InverseOptionPricer._iv_bisection(
+                price,
+                S,
+                K,
+                T,
+                r,
+                option_type,
+                tol,
+                max_iter,
             )
-            if converged and sigma_new is not None:
-                return InverseOptionPricer._stabilize_iv_estimate(
-                    sigma_new,
-                    T,
-                    stabilize_short_maturity=stabilize_short_maturity,
-                    short_maturity_threshold=short_maturity_threshold,
-                    anchor_sigma=anchor_sigma,
-                    max_anchor_deviation=max_anchor_deviation,
-                )
-            if use_bisection:
-                break
-            if sigma_new is None:
-                break
-            sigma = sigma_new
-
-        # 如果牛顿法失败，使用二分法作为fallback
-        raw_sigma = InverseOptionPricer._iv_bisection(price, S, K, T, r, option_type, tol, max_iter)
         return InverseOptionPricer._stabilize_iv_estimate(
             raw_sigma,
             T,

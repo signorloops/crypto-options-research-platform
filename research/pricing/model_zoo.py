@@ -38,6 +38,70 @@ class OptionQuote:
     is_call: bool = True
 
 
+def _safe_iv_abs_error(quote: OptionQuote, predicted_price: float) -> Optional[float]:
+    try:
+        market_iv = implied_volatility(
+            quote.market_price,
+            quote.spot,
+            quote.strike,
+            quote.maturity,
+            quote.rate,
+            is_call=quote.is_call,
+            method="hybrid",
+        )
+        pred_iv = implied_volatility(
+            predicted_price,
+            quote.spot,
+            quote.strike,
+            quote.maturity,
+            quote.rate,
+            is_call=quote.is_call,
+            method="hybrid",
+        )
+        if np.isfinite(market_iv) and np.isfinite(pred_iv):
+            return abs(float(pred_iv - market_iv))
+    except IV_INVERSION_EXCEPTIONS:
+        return None
+    return None
+
+
+def _benchmark_row(
+    *,
+    zoo: "CryptoOptionModelZoo",
+    model: str,
+    quotes: Sequence[OptionQuote],
+    sigma: float,
+    model_params: Optional[Dict[str, float]],
+) -> Dict[str, float]:
+    abs_err = []
+    sq_err = []
+    iv_abs_err = []
+    for quote in quotes:
+        predicted = zoo.price_option(
+            model=model,
+            spot=quote.spot,
+            strike=quote.strike,
+            maturity=quote.maturity,
+            rate=quote.rate,
+            sigma=sigma,
+            is_call=quote.is_call,
+            model_params=model_params,
+        )
+        err = float(predicted - quote.market_price)
+        abs_err.append(abs(err))
+        sq_err.append(err * err)
+        iv_err = _safe_iv_abs_error(quote, predicted)
+        if iv_err is not None:
+            iv_abs_err.append(iv_err)
+    return {
+        "model": model,
+        "rmse": float(np.sqrt(np.mean(sq_err))) if sq_err else np.nan,
+        "mae": float(np.mean(abs_err)) if abs_err else np.nan,
+        "mean_abs_iv_error": float(np.mean(iv_abs_err)) if iv_abs_err else np.nan,
+        "n_quotes": float(len(abs_err)),
+    }
+
+
 class CryptoOptionModelZoo:
     """Unified model-pricing and benchmark interface."""
 
@@ -260,63 +324,16 @@ class CryptoOptionModelZoo:
             )
 
         model_params_by_model = model_params_by_model or {}
-        rows: List[Dict[str, float]] = []
-
-        for model in self.available_models:
-            abs_err = []
-            sq_err = []
-            iv_abs_err = []
-
-            for q in quotes:
-                pred = self.price_option(
-                    model=model,
-                    spot=q.spot,
-                    strike=q.strike,
-                    maturity=q.maturity,
-                    rate=q.rate,
-                    sigma=sigma,
-                    is_call=q.is_call,
-                    model_params=model_params_by_model.get(model),
-                )
-                err = float(pred - q.market_price)
-                abs_err.append(abs(err))
-                sq_err.append(err * err)
-
-                try:
-                    market_iv = implied_volatility(
-                        q.market_price,
-                        q.spot,
-                        q.strike,
-                        q.maturity,
-                        q.rate,
-                        is_call=q.is_call,
-                        method="hybrid",
-                    )
-                    pred_iv = implied_volatility(
-                        pred,
-                        q.spot,
-                        q.strike,
-                        q.maturity,
-                        q.rate,
-                        is_call=q.is_call,
-                        method="hybrid",
-                    )
-                    if np.isfinite(market_iv) and np.isfinite(pred_iv):
-                        iv_abs_err.append(abs(float(pred_iv - market_iv)))
-                except IV_INVERSION_EXCEPTIONS:
-                    # Keep benchmark robust to occasional IV inversion failure.
-                    continue
-
-            rows.append(
-                {
-                    "model": model,
-                    "rmse": float(np.sqrt(np.mean(sq_err))) if sq_err else np.nan,
-                    "mae": float(np.mean(abs_err)) if abs_err else np.nan,
-                    "mean_abs_iv_error": float(np.mean(iv_abs_err)) if iv_abs_err else np.nan,
-                    "n_quotes": float(len(abs_err)),
-                }
+        rows = [
+            _benchmark_row(
+                zoo=self,
+                model=model,
+                quotes=quotes,
+                sigma=sigma,
+                model_params=model_params_by_model.get(model),
             )
-
+            for model in self.available_models
+        ]
         table = pd.DataFrame(rows)
         return table.sort_values("rmse", ascending=True, na_position="last").reset_index(drop=True)
 

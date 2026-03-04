@@ -1,8 +1,4 @@
-"""
-Health check server for Kubernetes/Docker deployments.
-
-Provides HTTP endpoints for liveness and readiness probes.
-"""
+"""Health check server with liveness/readiness/metrics endpoints."""
 
 import asyncio
 import inspect
@@ -158,11 +154,11 @@ async def _database_healthy() -> bool:
     return await _tcp_connectivity_check(host, port)
 
 
-def create_health_app(service_name: str = "trading-engine") -> FastAPI:
-    """Create FastAPI app with health endpoints."""
-    app = FastAPI(title=f"CORP {service_name} Health")
+def _set_check_status_metric(service_name: str, kind: str, check_name: str, passed: bool) -> None:
+    HEALTH_CHECK_STATUS.labels(service_name, kind, check_name).set(1 if passed else 0)
 
-    @app.middleware("http")
+
+def _build_request_instrumenter(service_name: str):
     async def instrument_requests(request, call_next):
         path = request.url.path
         method = request.method
@@ -186,18 +182,44 @@ def create_health_app(service_name: str = "trading-engine") -> FastAPI:
                 path=path,
             ).observe(duration)
 
+    return instrument_requests
+
+
+async def _collect_health_checks(service_name: str) -> Dict[str, bool]:
+    checks: Dict[str, bool] = {}
+    for name, func in _health_checks.items():
+        try:
+            checks[name] = await _run_check(func)
+        except Exception as exc:
+            logger.error("Health check '%s' failed: %s", name, exc)
+            checks[name] = False
+        _set_check_status_metric(service_name, "health", name, checks[name])
+    return checks
+
+
+async def _collect_failed_readiness_checks(service_name: str) -> list[str]:
+    failed: list[str] = []
+    for name, check_func in _readiness_checks.items():
+        try:
+            passed = await _run_check(check_func)
+        except Exception as exc:
+            logger.error("Readiness check '%s' failed: %s", name, exc)
+            passed = False
+        _set_check_status_metric(service_name, "readiness", name, passed)
+        if not passed:
+            failed.append(name)
+    return failed
+
+
+def create_health_app(service_name: str = "trading-engine") -> FastAPI:
+    """Create FastAPI app with health endpoints."""
+    app = FastAPI(title=f"CORP {service_name} Health")
+    app.middleware("http")(_build_request_instrumenter(service_name))
+
     @app.get("/health", response_class=JSONResponse)
     async def health() -> Dict:
         """Liveness probe - basic service health."""
-        checks: Dict[str, bool] = {}
-        for name, func in _health_checks.items():
-            try:
-                checks[name] = await _run_check(func)
-            except Exception as e:
-                logger.error(f"Health check '{name}' failed: {e}")
-                checks[name] = False
-            HEALTH_CHECK_STATUS.labels(service_name, "health", name).set(1 if checks[name] else 0)
-
+        checks = await _collect_health_checks(service_name)
         overall_healthy = all(checks.values()) if checks else True
         return {
             "status": "healthy" if overall_healthy else "degraded",
@@ -208,19 +230,7 @@ def create_health_app(service_name: str = "trading-engine") -> FastAPI:
     @app.get("/ready", response_class=JSONResponse)
     async def readiness() -> Dict:
         """Readiness probe - check if ready to serve traffic."""
-        failed = []
-
-        for name, check_func in _readiness_checks.items():
-            try:
-                if not await _run_check(check_func):
-                    failed.append(name)
-            except Exception as e:
-                logger.error(f"Readiness check '{name}' failed: {e}")
-                failed.append(name)
-                HEALTH_CHECK_STATUS.labels(service_name, "readiness", name).set(0)
-            else:
-                HEALTH_CHECK_STATUS.labels(service_name, "readiness", name).set(1)
-
+        failed = await _collect_failed_readiness_checks(service_name)
         if failed:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

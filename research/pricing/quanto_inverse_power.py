@@ -1,8 +1,4 @@
-"""Quanto-inverse-power option pricing utilities.
-
-This module extends inverse-power option pricing with a lightweight quanto
-adjustment for settlement-currency mismatch risk.
-"""
+"""Quanto adjustment layer for inverse-power option pricing."""
 
 from __future__ import annotations
 
@@ -98,6 +94,85 @@ class QuantoInversePowerOptionPricer:
         return float(max(0.0, base_price * factor))
 
     @staticmethod
+    def _resolve_pricer_kwargs(
+        pricer_kwargs: Optional[Dict[str, Any]],
+        legacy_pricer_kwargs: Dict[str, Any],
+    ) -> tuple[int, int | None, float]:
+        """Resolve supported inverse-power pricer kwargs with legacy compatibility."""
+        merged_pricer_kwargs: Dict[str, Any] = {
+            "n_paths": 100_000,
+            "seed": 42,
+            "bump_rel": 1e-3,
+        }
+        if pricer_kwargs:
+            merged_pricer_kwargs.update(pricer_kwargs)
+        for key in ("n_paths", "seed", "bump_rel"):
+            if key in legacy_pricer_kwargs:
+                merged_pricer_kwargs[key] = legacy_pricer_kwargs.pop(key)
+        if legacy_pricer_kwargs:
+            unknown_keys = ", ".join(sorted(legacy_pricer_kwargs.keys()))
+            raise TypeError(f"Unexpected keyword arguments: {unknown_keys}")
+
+        n_paths_value = int(merged_pricer_kwargs["n_paths"])
+        seed_raw = merged_pricer_kwargs["seed"]
+        seed_value = None if seed_raw is None else int(seed_raw)
+        bump_rel_value = float(merged_pricer_kwargs["bump_rel"])
+        return n_paths_value, seed_value, bump_rel_value
+
+    @staticmethod
+    def _compute_quanto_scalars(
+        *,
+        T: float,
+        sigma: float,
+        sigma_fx: float,
+        rho: float,
+        fx_rate: float,
+    ) -> tuple[float, float, float]:
+        """Compute maturity-effective time, quanto adjustment, and FX-scaled factor."""
+        t_eff = max(float(T), 0.0)
+        quanto_adjustment = float(np.exp(-rho * sigma * sigma_fx * t_eff))
+        factor = quanto_adjustment / fx_rate
+        return t_eff, quanto_adjustment, factor
+
+    @staticmethod
+    def _compose_quanto_price_and_greeks(
+        *,
+        base_price: float,
+        base_greeks: Any,
+        factor: float,
+        t_eff: float,
+        sigma: float,
+        sigma_fx: float,
+        rho: float,
+        fx_rate: float,
+        quanto_adjustment: float,
+    ) -> tuple[float, QuantoInversePowerGreeks]:
+        """Map base inverse-power outputs to settlement-currency quanto outputs."""
+        price = float(max(0.0, base_price * factor))
+        delta = float(base_greeks.delta * factor)
+        gamma = float(base_greeks.gamma * factor)
+        rho_rate = float(base_greeks.rho * factor)
+
+        d_factor_dT = -rho * sigma * sigma_fx * factor
+        theta = float(base_greeks.theta * factor + base_price * d_factor_dT)
+        d_factor_d_sigma = -rho * sigma_fx * t_eff * factor
+        vega = float(base_greeks.vega * factor + base_price * d_factor_d_sigma)
+        fx_delta = float(-price / fx_rate)
+        corr_sensitivity = float(-base_price * factor * sigma * sigma_fx * t_eff)
+
+        greeks = QuantoInversePowerGreeks(
+            delta=delta,
+            gamma=gamma,
+            theta=theta,
+            vega=vega,
+            rho=rho_rate,
+            fx_delta=fx_delta,
+            corr_sensitivity=corr_sensitivity,
+            quanto_adjustment=quanto_adjustment,
+        )
+        return price, greeks
+
+    @staticmethod
     def calculate_price_and_greeks(
         S: float,
         K: float,
@@ -119,26 +194,12 @@ class QuantoInversePowerOptionPricer:
         Legacy direct kwargs remain supported for backward compatibility.
         """
         QuantoInversePowerOptionPricer._validate_quanto_inputs(fx_rate, sigma_fx, rho)
-
-        merged_pricer_kwargs: Dict[str, Any] = {
-            "n_paths": 100_000,
-            "seed": 42,
-            "bump_rel": 1e-3,
-        }
-        if pricer_kwargs:
-            merged_pricer_kwargs.update(pricer_kwargs)
-
-        for key in ("n_paths", "seed", "bump_rel"):
-            if key in legacy_pricer_kwargs:
-                merged_pricer_kwargs[key] = legacy_pricer_kwargs.pop(key)
-        if legacy_pricer_kwargs:
-            unknown_keys = ", ".join(sorted(legacy_pricer_kwargs.keys()))
-            raise TypeError(f"Unexpected keyword arguments: {unknown_keys}")
-
-        n_paths_value = int(merged_pricer_kwargs["n_paths"])
-        seed_raw = merged_pricer_kwargs["seed"]
-        seed_value = None if seed_raw is None else int(seed_raw)
-        bump_rel_value = float(merged_pricer_kwargs["bump_rel"])
+        n_paths_value, seed_value, bump_rel_value = (
+            QuantoInversePowerOptionPricer._resolve_pricer_kwargs(
+                pricer_kwargs,
+                legacy_pricer_kwargs,
+            )
+        )
 
         base_price, base_greeks = InversePowerOptionPricer.calculate_price_and_greeks(
             S=S,
@@ -152,33 +213,23 @@ class QuantoInversePowerOptionPricer:
             seed=seed_value,
             bump_rel=bump_rel_value,
         )
-
-        t_eff = max(float(T), 0.0)
-        quanto_adjustment = float(np.exp(-rho * sigma * sigma_fx * t_eff))
-        factor = quanto_adjustment / fx_rate
-
-        price = float(max(0.0, base_price * factor))
-        delta = float(base_greeks.delta * factor)
-        gamma = float(base_greeks.gamma * factor)
-        rho_rate = float(base_greeks.rho * factor)
-
-        d_factor_dT = -rho * sigma * sigma_fx * factor
-        theta = float(base_greeks.theta * factor + base_price * d_factor_dT)
-
-        d_factor_d_sigma = -rho * sigma_fx * t_eff * factor
-        vega = float(base_greeks.vega * factor + base_price * d_factor_d_sigma)
-
-        fx_delta = float(-price / fx_rate)
-        corr_sensitivity = float(-base_price * factor * sigma * sigma_fx * t_eff)
-
-        greeks = QuantoInversePowerGreeks(
-            delta=delta,
-            gamma=gamma,
-            theta=theta,
-            vega=vega,
-            rho=rho_rate,
-            fx_delta=fx_delta,
-            corr_sensitivity=corr_sensitivity,
+        t_eff, quanto_adjustment, factor = (
+            QuantoInversePowerOptionPricer._compute_quanto_scalars(
+                T=T,
+                sigma=sigma,
+                sigma_fx=sigma_fx,
+                rho=rho,
+                fx_rate=fx_rate,
+            )
+        )
+        return QuantoInversePowerOptionPricer._compose_quanto_price_and_greeks(
+            base_price=base_price,
+            base_greeks=base_greeks,
+            factor=factor,
+            t_eff=t_eff,
+            sigma=sigma,
+            sigma_fx=sigma_fx,
+            rho=rho,
+            fx_rate=fx_rate,
             quanto_adjustment=quanto_adjustment,
         )
-        return price, greeks

@@ -207,6 +207,46 @@ def validate_exchange_name(exchange: str) -> str:
     return exchange
 
 
+def _validate_order_book_level(level: Any, side: str, index: int) -> Tuple[float, float]:
+    if not isinstance(level, (tuple, list)) or len(level) != 2:
+        raise DataValidationError(
+            f"{side.capitalize()} level must be a (price, size) pair",
+            field=f"{side}[{index}]",
+            value=level,
+        )
+    price, size = level
+    if not isinstance(price, (int, float)) or not np.isfinite(price):
+        raise DataValidationError(
+            f"{side.capitalize()} price must be a finite number",
+            field=f"{side}[{index}].price",
+            value=price,
+        )
+    if not isinstance(size, (int, float)) or not np.isfinite(size):
+        raise DataValidationError(
+            f"{side.capitalize()} size must be a finite number",
+            field=f"{side}[{index}].size",
+            value=size,
+        )
+    return float(price), float(size)
+
+
+def _validate_order_book_side(levels: list, side: str) -> None:
+    for i, level in enumerate(levels):
+        price, size = _validate_order_book_level(level, side, i)
+        if price <= 0:
+            raise DataValidationError(
+                f"{side[:-1].capitalize()} price must be positive",
+                field=f"{side}[{i}].price",
+                value=price,
+            )
+        if size < 0:
+            raise DataValidationError(
+                f"{side[:-1].capitalize()} size cannot be negative",
+                field=f"{side}[{i}].size",
+                value=size,
+            )
+
+
 def validate_order_book(bids: list, asks: list) -> Tuple[list, list]:
     """
     Validate order book data.
@@ -226,53 +266,8 @@ def validate_order_book(bids: list, asks: list) -> Tuple[list, list]:
             "Order book cannot be empty", field="order_book", value=(bids, asks)
         )
 
-    def _validate_level(level: Any, side: str, index: int) -> Tuple[float, float]:
-        if not isinstance(level, (tuple, list)) or len(level) != 2:
-            raise DataValidationError(
-                f"{side.capitalize()} level must be a (price, size) pair",
-                field=f"{side}[{index}]",
-                value=level,
-            )
-
-        price, size = level
-        if not isinstance(price, (int, float)) or not np.isfinite(price):
-            raise DataValidationError(
-                f"{side.capitalize()} price must be a finite number",
-                field=f"{side}[{index}].price",
-                value=price,
-            )
-        if not isinstance(size, (int, float)) or not np.isfinite(size):
-            raise DataValidationError(
-                f"{side.capitalize()} size must be a finite number",
-                field=f"{side}[{index}].size",
-                value=size,
-            )
-
-        return float(price), float(size)
-
-    # Validate bid prices
-    for i, level in enumerate(bids):
-        price, size = _validate_level(level, "bids", i)
-        if price <= 0:
-            raise DataValidationError(
-                "Bid price must be positive", field=f"bids[{i}].price", value=price
-            )
-        if size < 0:
-            raise DataValidationError(
-                "Bid size cannot be negative", field=f"bids[{i}].size", value=size
-            )
-
-    # Validate ask prices
-    for i, level in enumerate(asks):
-        price, size = _validate_level(level, "asks", i)
-        if price <= 0:
-            raise DataValidationError(
-                "Ask price must be positive", field=f"asks[{i}].price", value=price
-            )
-        if size < 0:
-            raise DataValidationError(
-                "Ask size cannot be negative", field=f"asks[{i}].size", value=size
-            )
+    _validate_order_book_side(bids, "bids")
+    _validate_order_book_side(asks, "asks")
 
     # Check spread
     if bids and asks:

@@ -38,16 +38,57 @@ class FillSimulatorConfig:
     )
 
 
-class RealisticFillSimulator:
-    """
-    Simulates realistic order fills based on market microstructure.
+def _apply_transaction_cost_to_fill(
+    *,
+    fill_price: float,
+    side: OrderSide,
+    size: float,
+    transaction_cost_bps: float,
+    cost_against_side_fn,
+) -> tuple[float, float]:
+    cost_multiplier = transaction_cost_bps / 10_000
+    pre_fee_price = fill_price
+    if side == OrderSide.BUY:
+        fill_price *= 1 + cost_multiplier
+    else:
+        fill_price *= 1 - cost_multiplier
+    cost = cost_against_side_fn(
+        reference_price=pre_fee_price,
+        executed_price=fill_price,
+        side=side,
+        size=size,
+    )
+    return fill_price, float(cost)
 
-    Key features:
-    1. Queue position model: Orders at front of queue fill faster
-    2. Latency simulation: Quote updates have delay
-    3. Adverse selection: Informed trades hit stale quotes
-    4. Size-based probability: Larger quotes less likely to fully fill
-    """
+
+def _apply_adverse_selection_slippage(
+    *,
+    fill_price: float,
+    side: OrderSide,
+    size: float,
+    adverse_selection_factor: float,
+    is_adverse: bool,
+    cost_against_side_fn,
+) -> tuple[float, float]:
+    if not is_adverse:
+        return fill_price, 0.0
+    adverse_slip = adverse_selection_factor * 0.001
+    pre_adverse_price = fill_price
+    if side == OrderSide.BUY:
+        fill_price *= 1 + adverse_slip
+    else:
+        fill_price *= 1 - adverse_slip
+    cost = cost_against_side_fn(
+        reference_price=pre_adverse_price,
+        executed_price=fill_price,
+        side=side,
+        size=size,
+    )
+    return fill_price, float(cost)
+
+
+class RealisticFillSimulator:
+    """Simulate realistic order fills based on market microstructure."""
 
     def __init__(
         self,
@@ -74,19 +115,7 @@ class RealisticFillSimulator:
         inventory_pressure: float = 0.0,
         transaction_cost_bps: float = 0.0,
     ) -> Fill | None:
-        """
-        Simulate whether a quote gets filled by incoming trades.
-
-        Args:
-            quote: The quote we placed
-            market_state: Current market state
-            next_trades: Trades that occur after our quote
-            quote_timestamp: Time when quote was placed (defaults to market_state timestamp)
-            inventory_pressure: How much we're pushing inventory limits
-
-        Returns:
-            Fill object if filled, None otherwise
-        """
+        """Simulate whether a quote gets filled by incoming trades."""
         if not next_trades:
             return None
         if quote_timestamp is None:
@@ -178,35 +207,24 @@ class RealisticFillSimulator:
             size=fill_size,
         )
 
-        # Apply transaction cost: buyer pays more, seller receives less
-        cost_multiplier = transaction_cost_bps / 10_000
-        pre_fee_price = fill_price
-        if our_side == OrderSide.BUY:
-            fill_price *= 1 + cost_multiplier
-        else:
-            fill_price *= 1 - cost_multiplier
-        self.transaction_cost_paid += self._cost_against_side(
-            reference_price=pre_fee_price,
-            executed_price=fill_price,
+        fill_price, transaction_cost = _apply_transaction_cost_to_fill(
+            fill_price=fill_price,
             side=our_side,
             size=fill_size,
+            transaction_cost_bps=transaction_cost_bps,
+            cost_against_side_fn=self._cost_against_side,
         )
+        self.transaction_cost_paid += transaction_cost
 
-        # Adverse selection: additional slippage against us
-        is_adverse = self._check_adverse_selection(trade, market_state)
-        if is_adverse:
-            adverse_slip = self.config.adverse_selection_factor * 0.001
-            pre_adverse_price = fill_price
-            if our_side == OrderSide.BUY:
-                fill_price *= 1 + adverse_slip
-            else:
-                fill_price *= 1 - adverse_slip
-            self.adverse_selection_cost += self._cost_against_side(
-                reference_price=pre_adverse_price,
-                executed_price=fill_price,
-                side=our_side,
-                size=fill_size,
-            )
+        fill_price, adverse_selection_cost = _apply_adverse_selection_slippage(
+            fill_price=fill_price,
+            side=our_side,
+            size=fill_size,
+            adverse_selection_factor=self.config.adverse_selection_factor,
+            is_adverse=self._check_adverse_selection(trade, market_state),
+            cost_against_side_fn=self._cost_against_side,
+        )
+        self.adverse_selection_cost += adverse_selection_cost
 
         return Fill(
             timestamp=trade.timestamp,

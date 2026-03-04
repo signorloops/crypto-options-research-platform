@@ -69,6 +69,85 @@ def _bucket_abs_delta(abs_delta: pd.Series) -> pd.Series:
     return pd.cut(clipped, bins=bins, labels=labels)
 
 
+def _resolve_deviation_columns(
+    df: pd.DataFrame,
+) -> Tuple[str, str, Optional[str], Optional[str], Optional[str]]:
+    """Resolve market/model and optional bucket columns."""
+    market_col = _find_first_existing(df, MARKET_PRICE_CANDIDATES)
+    model_col = _find_first_existing(df, MODEL_PRICE_CANDIDATES)
+    if market_col is None or model_col is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Deviation analysis requires market_price and model_price style columns",
+        )
+    expiry_col = _find_first_existing(df, EXPIRY_CANDIDATES)
+    delta_col = _find_first_existing(df, DELTA_CANDIDATES)
+    venue_col = _find_first_existing(df, VENUE_CANDIDATES)
+    return market_col, model_col, expiry_col, delta_col, venue_col
+
+
+def _prepare_deviation_frame(
+    df: pd.DataFrame,
+    *,
+    market_col: str,
+    model_col: str,
+    expiry_col: Optional[str],
+    delta_col: Optional[str],
+) -> pd.DataFrame:
+    """Build normalized frame with deviation metrics and buckets."""
+    work = df.copy()
+    work["market_px"] = pd.to_numeric(work[market_col], errors="coerce")
+    work["model_px"] = pd.to_numeric(work[model_col], errors="coerce")
+    work = work.dropna(subset=["market_px", "model_px"])
+    if work.empty:
+        raise HTTPException(status_code=422, detail="No valid rows for deviation analysis")
+    denom = work["model_px"].abs().clip(lower=1e-12)
+    work["deviation_bps"] = (work["market_px"] - work["model_px"]) / denom * 10000.0
+    work["abs_deviation_bps"] = work["deviation_bps"].abs()
+
+    if expiry_col:
+        work["expiry_bucket"] = _bucket_expiry(
+            pd.to_numeric(work[expiry_col], errors="coerce").fillna(0.0)
+        )
+    else:
+        work["expiry_bucket"] = "ALL"
+    if delta_col:
+        abs_delta = pd.to_numeric(work[delta_col], errors="coerce").abs().fillna(0.5)
+        work["delta_bucket"] = _bucket_abs_delta(abs_delta)
+    else:
+        work["delta_bucket"] = "ALL"
+    return work
+
+
+def _build_deviation_heatmap(work: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Create heatmap table and pivot matrix for abs deviation bps."""
+    heatmap = (
+        work.groupby(["expiry_bucket", "delta_bucket"], observed=False)["abs_deviation_bps"]
+        .mean()
+        .reset_index()
+    )
+    heatmap["abs_deviation_bps"] = heatmap["abs_deviation_bps"].fillna(0.0)
+    pivot = heatmap.pivot(index="expiry_bucket", columns="delta_bucket", values="abs_deviation_bps")
+    pivot = pivot.fillna(0.0)
+    return heatmap, pivot
+
+
+def _build_deviation_alerts(
+    work: pd.DataFrame,
+    *,
+    threshold_bps: float,
+    venue_col: Optional[str],
+    expiry_col: Optional[str],
+    delta_col: Optional[str],
+) -> Tuple[pd.DataFrame, List[str]]:
+    """Build sorted alert table and selected output columns."""
+    alerts = work[work["abs_deviation_bps"] >= float(threshold_bps)].copy()
+    alert_cols = [c for c in [venue_col, expiry_col, delta_col] if c is not None]
+    alert_cols += ["market_px", "model_px", "deviation_bps", "abs_deviation_bps"]
+    alerts = alerts.sort_values("abs_deviation_bps", ascending=False)
+    return alerts, alert_cols
+
+
 def build_cross_market_deviation_report(
     df: pd.DataFrame, threshold_bps: float = 300.0
 ) -> Dict[str, Any]:
@@ -83,55 +162,22 @@ def build_cross_market_deviation_report(
     - delta proxy: delta/abs_delta
     - venue label: venue/exchange/source/market
     """
-    market_col = _find_first_existing(df, MARKET_PRICE_CANDIDATES)
-    model_col = _find_first_existing(df, MODEL_PRICE_CANDIDATES)
-    if market_col is None or model_col is None:
-        raise HTTPException(
-            status_code=422,
-            detail="Deviation analysis requires market_price and model_price style columns",
-        )
-
-    expiry_col = _find_first_existing(df, EXPIRY_CANDIDATES)
-    delta_col = _find_first_existing(df, DELTA_CANDIDATES)
-    venue_col = _find_first_existing(df, VENUE_CANDIDATES)
-
-    work = df.copy()
-    work["market_px"] = pd.to_numeric(work[market_col], errors="coerce")
-    work["model_px"] = pd.to_numeric(work[model_col], errors="coerce")
-    work = work.dropna(subset=["market_px", "model_px"])
-    if work.empty:
-        raise HTTPException(status_code=422, detail="No valid rows for deviation analysis")
-
-    denom = work["model_px"].abs().clip(lower=1e-12)
-    work["deviation_bps"] = (work["market_px"] - work["model_px"]) / denom * 10000.0
-    work["abs_deviation_bps"] = work["deviation_bps"].abs()
-
-    if expiry_col:
-        work["expiry_bucket"] = _bucket_expiry(
-            pd.to_numeric(work[expiry_col], errors="coerce").fillna(0.0)
-        )
-    else:
-        work["expiry_bucket"] = "ALL"
-
-    if delta_col:
-        abs_delta = pd.to_numeric(work[delta_col], errors="coerce").abs().fillna(0.5)
-        work["delta_bucket"] = _bucket_abs_delta(abs_delta)
-    else:
-        work["delta_bucket"] = "ALL"
-
-    heatmap = (
-        work.groupby(["expiry_bucket", "delta_bucket"], observed=False)["abs_deviation_bps"]
-        .mean()
-        .reset_index()
+    market_col, model_col, expiry_col, delta_col, venue_col = _resolve_deviation_columns(df)
+    work = _prepare_deviation_frame(
+        df,
+        market_col=market_col,
+        model_col=model_col,
+        expiry_col=expiry_col,
+        delta_col=delta_col,
     )
-    heatmap["abs_deviation_bps"] = heatmap["abs_deviation_bps"].fillna(0.0)
-    pivot = heatmap.pivot(index="expiry_bucket", columns="delta_bucket", values="abs_deviation_bps")
-    pivot = pivot.fillna(0.0)
-
-    alerts = work[work["abs_deviation_bps"] >= float(threshold_bps)].copy()
-    alert_cols = [c for c in [venue_col, expiry_col, delta_col] if c is not None]
-    alert_cols += ["market_px", "model_px", "deviation_bps", "abs_deviation_bps"]
-    alerts = alerts.sort_values("abs_deviation_bps", ascending=False)
+    heatmap, pivot = _build_deviation_heatmap(work)
+    alerts, alert_cols = _build_deviation_alerts(
+        work,
+        threshold_bps=float(threshold_bps),
+        venue_col=venue_col,
+        expiry_col=expiry_col,
+        delta_col=delta_col,
+    )
 
     summary = {
         "n_rows": int(len(work)),
@@ -240,35 +286,17 @@ def _build_deviation_section(df: pd.DataFrame) -> str:
     )
 
 
-def _build_dashboard_html(df: pd.DataFrame, selected: Path, files: List[Path]) -> str:
-    time_col = _find_time_column(df)
-    value_col = _find_value_column(df)
-    if value_col is None:
-        raise HTTPException(status_code=422, detail="No numeric column available for plotting")
-
+def _resolve_dashboard_axis(df: pd.DataFrame, time_col: Optional[str]) -> Tuple[pd.DataFrame, str]:
+    """Return plotting frame and x-axis column for dashboard charts."""
     if time_col:
-        x_axis = time_col
-    else:
-        df = df.reset_index(drop=False).rename(columns={"index": "index"})
-        x_axis = "index"
+        return df, time_col
+    indexed = df.reset_index(drop=False).rename(columns={"index": "index"})
+    return indexed, "index"
 
-    primary_fig = px.line(
-        df,
-        x=x_axis,
-        y=value_col,
-        title=f"{selected.name}: {value_col}",
-        template="plotly_white",
-    )
 
-    returns = df[value_col].pct_change().dropna()
-    returns_fig = px.histogram(
-        returns,
-        nbins=40,
-        title=f"Return Distribution ({value_col})",
-        template="plotly_white",
-    )
-
-    summary = {
+def _build_dashboard_summary(df: pd.DataFrame, value_col: str) -> Dict[str, Any]:
+    """Compute summary stats for dashboard metrics card."""
+    return {
         "rows": len(df),
         "value_column": value_col,
         "mean": float(df[value_col].mean()),
@@ -277,10 +305,16 @@ def _build_dashboard_html(df: pd.DataFrame, selected: Path, files: List[Path]) -
         "max": float(df[value_col].max()),
     }
 
-    file_options = _build_file_options(files, selected)
-    summary_rows = _build_summary_rows(summary)
-    deviation_section = _build_deviation_section(df)
 
+def _render_dashboard_html(
+    *,
+    file_options: str,
+    primary_fig_html: str,
+    returns_fig_html: str,
+    deviation_section: str,
+    summary_rows: str,
+) -> str:
+    """Render full dashboard HTML page."""
     return f"""
 <!DOCTYPE html>
 <html>
@@ -312,8 +346,8 @@ def _build_dashboard_html(df: pd.DataFrame, selected: Path, files: List[Path]) -
         </form>
       </div>
 
-      <div class=\"card\">{primary_fig.to_html(full_html=False, include_plotlyjs='cdn')}</div>
-      <div class=\"card\">{returns_fig.to_html(full_html=False, include_plotlyjs=False)}</div>
+      <div class=\"card\">{primary_fig_html}</div>
+      <div class=\"card\">{returns_fig_html}</div>
       {deviation_section}
       <div class=\"card\">
         <h2>Summary</h2>
@@ -325,10 +359,107 @@ def _build_dashboard_html(df: pd.DataFrame, selected: Path, files: List[Path]) -
 """
 
 
-def create_dashboard_app(results_dir: Optional[Path] = None) -> FastAPI:
-    """Create dashboard API application."""
-    directory = results_dir or DEFAULT_RESULTS_DIR
-    app = FastAPI(title="CORP Research Dashboard", version="1.0.0")
+def _build_dashboard_html(df: pd.DataFrame, selected: Path, files: List[Path]) -> str:
+    time_col = _find_time_column(df)
+    value_col = _find_value_column(df)
+    if value_col is None:
+        raise HTTPException(status_code=422, detail="No numeric column available for plotting")
+
+    plot_df, x_axis = _resolve_dashboard_axis(df, time_col)
+
+    primary_fig = px.line(
+        plot_df,
+        x=x_axis,
+        y=value_col,
+        title=f"{selected.name}: {value_col}",
+        template="plotly_white",
+    )
+
+    returns = plot_df[value_col].pct_change().dropna()
+    returns_fig = px.histogram(
+        returns,
+        nbins=40,
+        title=f"Return Distribution ({value_col})",
+        template="plotly_white",
+    )
+
+    summary = _build_dashboard_summary(plot_df, value_col)
+
+    file_options = _build_file_options(files, selected)
+    summary_rows = _build_summary_rows(summary)
+    deviation_section = _build_deviation_section(plot_df)
+    return _render_dashboard_html(
+        file_options=file_options,
+        primary_fig_html=primary_fig.to_html(full_html=False, include_plotlyjs="cdn"),
+        returns_fig_html=returns_fig.to_html(full_html=False, include_plotlyjs=False),
+        deviation_section=deviation_section,
+        summary_rows=summary_rows,
+    )
+
+
+async def _build_live_deviation_report(
+    *,
+    threshold_bps: float,
+    align_tolerance_seconds: float,
+    cex_file: Optional[str],
+    cex_provider: Optional[str],
+    underlying: str,
+    defi_file: Optional[str],
+) -> dict:
+    """Build live/file-based CEX-DEFI deviation report payload."""
+    cex_source = cex_file or os.getenv("CEX_QUOTES_FILE", "")
+    provider = cex_provider or os.getenv("CEX_QUOTES_PROVIDER", "")
+    defi_source = defi_file or os.getenv("DEFI_QUOTES_FILE", "")
+    if not defi_source:
+        raise HTTPException(
+            status_code=422,
+            detail="defi_file is required (query or env)",
+        )
+    if not cex_source and not provider:
+        raise HTTPException(
+            status_code=422,
+            detail="Either cex_file or cex_provider is required (query or env)",
+        )
+
+    try:
+        if cex_source:
+            dataset = build_cex_defi_deviation_dataset(
+                Path(cex_source),
+                Path(defi_source),
+                align_tolerance_seconds=align_tolerance_seconds,
+            )
+            source_meta = {
+                "mode": "file",
+                "cex_file": cex_source,
+                "defi_file": defi_source,
+            }
+        else:
+            dataset = await build_cex_defi_deviation_dataset_live(
+                provider,
+                Path(defi_source),
+                underlying=underlying,
+                align_tolerance_seconds=align_tolerance_seconds,
+            )
+            source_meta = {
+                "mode": "provider",
+                "cex_provider": provider,
+                "underlying": underlying,
+                "defi_file": defi_source,
+            }
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    report = build_cross_market_deviation_report(dataset, threshold_bps=float(threshold_bps))
+    report["sources"] = {
+        **source_meta,
+        "align_tolerance_seconds": float(align_tolerance_seconds),
+        "rows_aligned": int(len(dataset)),
+    }
+    return report
+
+
+def _register_basic_routes(app: FastAPI, directory: Path) -> None:
+    """Register health and file-list endpoints."""
 
     @app.get("/health", response_class=JSONResponse)
     async def health() -> dict:
@@ -338,14 +469,17 @@ def create_dashboard_app(results_dir: Optional[Path] = None) -> FastAPI:
     async def files() -> dict:
         return {"files": [path.name for path in available_result_files(directory)]}
 
+
+def _register_deviation_routes(app: FastAPI, directory: Path) -> None:
+    """Register historical and live deviation endpoints."""
+
     @app.get("/api/deviation", response_class=JSONResponse)
     async def deviation(
         file: Optional[str] = Query(default=None),
         threshold_bps: float = Query(default=300.0, ge=0.0),
     ) -> dict:
         df, _ = _load_results_dataframe(directory, file)
-        report = build_cross_market_deviation_report(df, threshold_bps=float(threshold_bps))
-        return report
+        return build_cross_market_deviation_report(df, threshold_bps=float(threshold_bps))
 
     @app.get("/api/deviation/live", response_class=JSONResponse)
     async def deviation_live(
@@ -356,55 +490,18 @@ def create_dashboard_app(results_dir: Optional[Path] = None) -> FastAPI:
         underlying: str = Query(default="BTC-USD"),
         defi_file: Optional[str] = Query(default=None),
     ) -> dict:
-        cex_source = cex_file or os.getenv("CEX_QUOTES_FILE", "")
-        provider = cex_provider or os.getenv("CEX_QUOTES_PROVIDER", "")
-        defi_source = defi_file or os.getenv("DEFI_QUOTES_FILE", "")
-        if not defi_source:
-            raise HTTPException(
-                status_code=422,
-                detail="defi_file is required (query or env)",
-            )
-        if not cex_source and not provider:
-            raise HTTPException(
-                status_code=422,
-                detail="Either cex_file or cex_provider is required (query or env)",
-            )
+        return await _build_live_deviation_report(
+            threshold_bps=float(threshold_bps),
+            align_tolerance_seconds=float(align_tolerance_seconds),
+            cex_file=cex_file,
+            cex_provider=cex_provider,
+            underlying=underlying,
+            defi_file=defi_file,
+        )
 
-        try:
-            if cex_source:
-                dataset = build_cex_defi_deviation_dataset(
-                    Path(cex_source),
-                    Path(defi_source),
-                    align_tolerance_seconds=align_tolerance_seconds,
-                )
-                source_meta = {
-                    "mode": "file",
-                    "cex_file": cex_source,
-                    "defi_file": defi_source,
-                }
-            else:
-                dataset = await build_cex_defi_deviation_dataset_live(
-                    provider,
-                    Path(defi_source),
-                    underlying=underlying,
-                    align_tolerance_seconds=align_tolerance_seconds,
-                )
-                source_meta = {
-                    "mode": "provider",
-                    "cex_provider": provider,
-                    "underlying": underlying,
-                    "defi_file": defi_source,
-                }
-        except (FileNotFoundError, ValueError) as exc:
-            raise HTTPException(status_code=422, detail=str(exc))
 
-        report = build_cross_market_deviation_report(dataset, threshold_bps=float(threshold_bps))
-        report["sources"] = {
-            **source_meta,
-            "align_tolerance_seconds": float(align_tolerance_seconds),
-            "rows_aligned": int(len(dataset)),
-        }
-        return report
+def _register_dashboard_route(app: FastAPI, directory: Path) -> None:
+    """Register HTML dashboard endpoint."""
 
     @app.get("/", response_class=HTMLResponse)
     async def dashboard(file: Optional[str] = Query(default=None)) -> HTMLResponse:
@@ -412,6 +509,14 @@ def create_dashboard_app(results_dir: Optional[Path] = None) -> FastAPI:
         html = _build_dashboard_html(df, selected, available_result_files(directory))
         return HTMLResponse(content=html)
 
+
+def create_dashboard_app(results_dir: Optional[Path] = None) -> FastAPI:
+    """Create dashboard API application."""
+    directory = results_dir or DEFAULT_RESULTS_DIR
+    app = FastAPI(title="CORP Research Dashboard", version="1.0.0")
+    _register_basic_routes(app, directory)
+    _register_deviation_routes(app, directory)
+    _register_dashboard_route(app, directory)
     return app
 
 

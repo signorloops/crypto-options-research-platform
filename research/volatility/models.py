@@ -652,80 +652,157 @@ def hamilton_filter_regime_switching(
     """
     x = np.asarray(returns, dtype=float)
     if len(x) < 20:
-        vol = float(np.std(x) + 1e-6) if len(x) else 0.01
-        mean = float(np.mean(x)) if len(x) else 0.0
-        return {
-            "current_high_vol_probability": 0.5,
-            "transition_matrix": [[0.95, 0.05], [0.05, 0.95]],
-            "state_means": [mean, mean],
-            "state_vols": [vol, vol],
-            "low_vol_state": {"mean": mean, "vol": vol},
-            "high_vol_state": {"mean": mean, "vol": vol},
-            "threshold": float(np.median(np.abs(x))) if len(x) else 0.0,
-            "smoothed_probabilities": []
-        }
+        return _hamilton_small_sample_result(x)
 
-    # Initialization from quantiles
+    mu, sigma, transition_matrix, state_prior = _hamilton_initialize(x)
+    for _ in range(n_iter):
+        alpha, scale = _hamilton_forward_pass(x, mu, sigma, transition_matrix, state_prior)
+        beta = _hamilton_backward_pass(x, mu, sigma, transition_matrix, scale)
+        gamma_prob, xi_sum = _hamilton_posterior_stats(x, mu, sigma, transition_matrix, alpha, beta)
+        state_prior, transition_matrix, mu, sigma = _hamilton_m_step(x, gamma_prob, xi_sum)
+
+    return _hamilton_result_payload(x, gamma_prob, mu, sigma, transition_matrix)
+
+
+def _hamilton_small_sample_result(x: np.ndarray) -> Dict:
+    """Fallback regime payload when series is too short for stable EM."""
+    vol = float(np.std(x) + 1e-6) if len(x) else 0.01
+    mean = float(np.mean(x)) if len(x) else 0.0
+    return {
+        "current_high_vol_probability": 0.5,
+        "transition_matrix": [[0.95, 0.05], [0.05, 0.95]],
+        "state_means": [mean, mean],
+        "state_vols": [vol, vol],
+        "low_vol_state": {"mean": mean, "vol": vol},
+        "high_vol_state": {"mean": mean, "vol": vol},
+        "threshold": float(np.median(np.abs(x))) if len(x) else 0.0,
+        "smoothed_probabilities": [],
+    }
+
+
+def _hamilton_initialize(x: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Initialize means/vols/transitions from return quantiles."""
     q = np.quantile(np.abs(x), [0.4, 0.8])
     s0 = np.abs(x) <= q[0]
     s1 = np.abs(x) >= q[1]
-    mu = np.array([
-        np.mean(x[s0]) if np.any(s0) else np.mean(x),
-        np.mean(x[s1]) if np.any(s1) else np.mean(x),
-    ])
-    sigma = np.array([
-        max(np.std(x[s0]) if np.any(s0) else np.std(x), 1e-4),
-        max(np.std(x[s1]) if np.any(s1) else np.std(x), 1e-4),
-    ])
-    P = np.array([[0.95, 0.05], [0.05, 0.95]], dtype=float)
-    pi = np.array([0.5, 0.5], dtype=float)
+    mu = np.array(
+        [
+            np.mean(x[s0]) if np.any(s0) else np.mean(x),
+            np.mean(x[s1]) if np.any(s1) else np.mean(x),
+        ],
+        dtype=float,
+    )
+    sigma = np.array(
+        [
+            max(np.std(x[s0]) if np.any(s0) else np.std(x), 1e-4),
+            max(np.std(x[s1]) if np.any(s1) else np.std(x), 1e-4),
+        ],
+        dtype=float,
+    )
+    transition_matrix = np.array([[0.95, 0.05], [0.05, 0.95]], dtype=float)
+    state_prior = np.array([0.5, 0.5], dtype=float)
+    return mu, sigma, transition_matrix, state_prior
 
-    def emission(val: float) -> np.ndarray:
-        coef = 1.0 / (np.sqrt(2 * np.pi) * sigma)
-        expo = np.exp(-0.5 * ((val - mu) / sigma) ** 2)
-        return np.maximum(coef * expo, 1e-14)
 
-    T = len(x)
-    for _ in range(n_iter):
-        # Forward
-        alpha = np.zeros((T, 2), dtype=float)
-        c = np.zeros(T, dtype=float)
-        alpha[0] = pi * emission(x[0])
-        c[0] = max(alpha[0].sum(), 1e-14)
-        alpha[0] /= c[0]
+def _hamilton_emission(value: float, mu: np.ndarray, sigma: np.ndarray) -> np.ndarray:
+    """Gaussian emission density for each latent state."""
+    coef = 1.0 / (np.sqrt(2.0 * np.pi) * sigma)
+    expo = np.exp(-0.5 * ((value - mu) / sigma) ** 2)
+    return np.maximum(coef * expo, 1e-14)
 
-        for t in range(1, T):
-            alpha[t] = (alpha[t - 1] @ P) * emission(x[t])
-            c[t] = max(alpha[t].sum(), 1e-14)
-            alpha[t] /= c[t]
 
-        # Backward
-        beta = np.zeros((T, 2), dtype=float)
-        beta[-1] = 1.0
-        for t in range(T - 2, -1, -1):
-            beta[t] = (P @ (emission(x[t + 1]) * beta[t + 1])) / max(c[t + 1], 1e-14)
+def _hamilton_forward_pass(
+    x: np.ndarray,
+    mu: np.ndarray,
+    sigma: np.ndarray,
+    transition_matrix: np.ndarray,
+    state_prior: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Forward filtering with scaling for numerical stability."""
+    n_obs = len(x)
+    alpha = np.zeros((n_obs, 2), dtype=float)
+    scale = np.zeros(n_obs, dtype=float)
+    alpha[0] = state_prior * _hamilton_emission(x[0], mu, sigma)
+    scale[0] = max(alpha[0].sum(), 1e-14)
+    alpha[0] /= scale[0]
+    for t in range(1, n_obs):
+        alpha[t] = (alpha[t - 1] @ transition_matrix) * _hamilton_emission(x[t], mu, sigma)
+        scale[t] = max(alpha[t].sum(), 1e-14)
+        alpha[t] /= scale[t]
+    return alpha, scale
 
-        gamma_prob = alpha * beta
-        gamma_prob /= np.maximum(gamma_prob.sum(axis=1, keepdims=True), 1e-14)
 
-        xi_sum = np.zeros((2, 2), dtype=float)
-        for t in range(T - 1):
-            num = np.outer(alpha[t], emission(x[t + 1]) * beta[t + 1]) * P
-            denom = max(num.sum(), 1e-14)
-            xi_sum += num / denom
+def _hamilton_backward_pass(
+    x: np.ndarray,
+    mu: np.ndarray,
+    sigma: np.ndarray,
+    transition_matrix: np.ndarray,
+    scale: np.ndarray,
+) -> np.ndarray:
+    """Backward smoothing pass."""
+    n_obs = len(x)
+    beta = np.zeros((n_obs, 2), dtype=float)
+    beta[-1] = 1.0
+    for t in range(n_obs - 2, -1, -1):
+        beta[t] = (
+            transition_matrix
+            @ (_hamilton_emission(x[t + 1], mu, sigma) * beta[t + 1])
+        ) / max(scale[t + 1], 1e-14)
+    return beta
 
-        pi = gamma_prob[0]
-        P = xi_sum / np.maximum(xi_sum.sum(axis=1, keepdims=True), 1e-14)
-        mu = (gamma_prob.T @ x) / np.maximum(gamma_prob.sum(axis=0), 1e-14)
-        for j in range(2):
-            var_j = np.sum(gamma_prob[:, j] * (x - mu[j]) ** 2) / max(np.sum(gamma_prob[:, j]), 1e-14)
-            sigma[j] = max(np.sqrt(var_j), 1e-4)
 
+def _hamilton_posterior_stats(
+    x: np.ndarray,
+    mu: np.ndarray,
+    sigma: np.ndarray,
+    transition_matrix: np.ndarray,
+    alpha: np.ndarray,
+    beta: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Compute smoothed state probabilities and transition posteriors."""
+    gamma_prob = alpha * beta
+    gamma_prob /= np.maximum(gamma_prob.sum(axis=1, keepdims=True), 1e-14)
+    xi_sum = np.zeros((2, 2), dtype=float)
+    for t in range(len(x) - 1):
+        num = np.outer(
+            alpha[t],
+            _hamilton_emission(x[t + 1], mu, sigma) * beta[t + 1],
+        ) * transition_matrix
+        denom = max(num.sum(), 1e-14)
+        xi_sum += num / denom
+    return gamma_prob, xi_sum
+
+
+def _hamilton_m_step(
+    x: np.ndarray,
+    gamma_prob: np.ndarray,
+    xi_sum: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """EM M-step updates for prior, transition matrix, means, and vols."""
+    state_prior = gamma_prob[0]
+    transition_matrix = xi_sum / np.maximum(xi_sum.sum(axis=1, keepdims=True), 1e-14)
+    state_weights = np.maximum(gamma_prob.sum(axis=0), 1e-14)
+    mu = (gamma_prob.T @ x) / state_weights
+    sigma = np.zeros(2, dtype=float)
+    for j in range(2):
+        var_j = np.sum(gamma_prob[:, j] * (x - mu[j]) ** 2) / max(np.sum(gamma_prob[:, j]), 1e-14)
+        sigma[j] = max(np.sqrt(var_j), 1e-4)
+    return state_prior, transition_matrix, mu, sigma
+
+
+def _hamilton_result_payload(
+    x: np.ndarray,
+    gamma_prob: np.ndarray,
+    mu: np.ndarray,
+    sigma: np.ndarray,
+    transition_matrix: np.ndarray,
+) -> Dict:
+    """Format final Hamilton-filter output payload."""
     high_idx = int(np.argmax(sigma))
     low_idx = 1 - high_idx
     return {
         "current_high_vol_probability": float(gamma_prob[-1, high_idx]),
-        "transition_matrix": P.tolist(),
+        "transition_matrix": transition_matrix.tolist(),
         "state_means": [float(mu[low_idx]), float(mu[high_idx])],
         "state_vols": [float(sigma[low_idx]), float(sigma[high_idx])],
         "low_vol_state": {"mean": float(mu[low_idx]), "vol": float(sigma[low_idx])},

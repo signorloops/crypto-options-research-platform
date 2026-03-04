@@ -243,6 +243,54 @@ class TradeFlowSimulator:
         self.size_alpha = size_alpha
         self.informed_trade_prob = informed_trade_prob
 
+    @staticmethod
+    def _compute_hour_vol(row_returns: float) -> float:
+        """Compute per-row volatility proxy used for arrival scaling."""
+        return float(abs(row_returns)) if not np.isnan(row_returns) else 0.0
+
+    def _compute_arrival_rate(self, row_returns: float) -> float:
+        """Compute trade arrival rate from return volatility."""
+        hour_vol = self._compute_hour_vol(row_returns)
+        return float(self.base_arrival_rate * (1 + 5 * hour_vol * np.sqrt(365 * 24)))
+
+    @staticmethod
+    def _select_trade_side(
+        *,
+        is_informed: bool,
+        row_index: int,
+        row_returns: float,
+        rng: np.random.Generator,
+    ) -> OrderSide:
+        """Select trade direction with informed/momentum logic."""
+        if is_informed and row_index > 0:
+            return OrderSide.BUY if row_returns > 0 else OrderSide.SELL
+        momentum_bias = 0.5 + 0.3 * np.sign(row_returns) if row_returns != 0 else 0.5
+        return OrderSide.BUY if rng.random() < momentum_bias else OrderSide.SELL
+
+    def _sample_trade_size(self, *, is_informed: bool, rng: np.random.Generator) -> float:
+        """Sample size from Pareto tail and scale informed flow."""
+        base_size = float(rng.pareto(self.size_alpha) * 0.1)
+        if is_informed:
+            base_size *= 3.0
+        return max(0.001, base_size)
+
+    @staticmethod
+    def _sample_trade_price(
+        *,
+        row_price: float,
+        side: OrderSide,
+        row_index: int,
+        order_books: Optional[List[OrderBook]],
+        rng: np.random.Generator,
+    ) -> float:
+        """Sample execution price from book edge or noisy mid."""
+        if order_books:
+            ob = order_books[row_index]
+            if side == OrderSide.BUY:
+                return float(ob.best_ask * (1 + rng.exponential(0.0001)))
+            return float(ob.best_bid * (1 - rng.exponential(0.0001)))
+        return float(row_price * (1 + rng.normal(0, 0.001)))
+
     def generate(
         self,
         price_path: pd.DataFrame,
@@ -254,9 +302,8 @@ class TradeFlowSimulator:
         trades = []
 
         for i, row in price_path.iterrows():
-            # Arrival rate varies with volatility
-            hour_vol = abs(row["returns"]) if not np.isnan(row["returns"]) else 0
-            arrival_rate = self.base_arrival_rate * (1 + 5 * hour_vol * np.sqrt(365 * 24))
+            row_returns = float(row["returns"])
+            arrival_rate = self._compute_arrival_rate(row_returns)
 
             # Number of trades this hour (Poisson)
             n_trades = rng.poisson(arrival_rate * 3600)
@@ -269,30 +316,20 @@ class TradeFlowSimulator:
                 # Is this an informed trade?
                 is_informed = rng.random() < self.informed_trade_prob
 
-                # Direction: informed trades follow current momentum (no look-ahead)
-                if is_informed and i > 0:
-                    current_return = row["returns"]
-                    side = OrderSide.BUY if current_return > 0 else OrderSide.SELL
-                else:
-                    # Uninformed: slight momentum following
-                    momentum_bias = 0.5 + 0.3 * np.sign(row["returns"]) if row["returns"] != 0 else 0.5
-                    side = OrderSide.BUY if rng.random() < momentum_bias else OrderSide.SELL
-
-                # Size: Pareto distribution (many small, few large)
-                base_size = rng.pareto(self.size_alpha) * 0.1
-                if is_informed:
-                    base_size *= 3  # Informed trades are larger
-                size = max(0.001, base_size)
-
-                # Price: within spread or outside for market orders
-                if order_books:
-                    ob = order_books[i]
-                    if side == OrderSide.BUY:
-                        price = ob.best_ask * (1 + rng.exponential(0.0001))
-                    else:
-                        price = ob.best_bid * (1 - rng.exponential(0.0001))
-                else:
-                    price = row["price"] * (1 + rng.normal(0, 0.001))
+                side = self._select_trade_side(
+                    is_informed=is_informed,
+                    row_index=i,
+                    row_returns=row_returns,
+                    rng=rng,
+                )
+                size = self._sample_trade_size(is_informed=is_informed, rng=rng)
+                price = self._sample_trade_price(
+                    row_price=float(row["price"]),
+                    side=side,
+                    row_index=i,
+                    order_books=order_books,
+                    rng=rng,
+                )
 
                 trades.append({
                     "timestamp": timestamp,
@@ -439,6 +476,51 @@ class CompleteMarketSimulator:
         self.trade_sim = TradeFlowSimulator()
         self.option_sim = OptionMarketSimulator()
 
+    @staticmethod
+    def _resolve_time_horizon(days: int, hours: Optional[int]) -> float:
+        """Resolve simulation horizon in years."""
+        if hours is not None:
+            return float(hours / 24 / 365)
+        return float(days / 365)
+
+    def _generate_options_dataset(self, spot: pd.DataFrame) -> pd.DataFrame:
+        """Generate option surface records for each spot timestamp."""
+        option_data = []
+        for _, row in spot.iloc[::1].iterrows():  # Hourly
+            expiries = [row["timestamp"] + timedelta(days=d) for d in [7, 14, 30, 60, 90]]
+            chain = self.option_sim.generate_option_chain(
+                spot=row["price"],
+                expiry_dates=expiries,
+            )
+
+            for contract in chain:
+                time_to_expiry = contract.time_to_expiry(row["timestamp"])
+                if time_to_expiry <= 0:
+                    continue
+                moneyness = contract.strike / row["price"]
+                iv = self.option_sim.implied_volatility_smile(moneyness, time_to_expiry)
+                greeks = self.option_sim.calculate_greeks(
+                    contract, row["price"], iv, row["timestamp"]
+                )
+                spread_bps = 50 + 100 * iv  # Higher vol = wider spread
+                option_data.append({
+                    "timestamp": row["timestamp"],
+                    "instrument": contract.instrument_name,
+                    "underlying": contract.underlying,
+                    "strike": contract.strike,
+                    "expiry": contract.expiry,
+                    "option_type": contract.option_type.value,
+                    "spot": row["price"],
+                    "implied_vol": iv,
+                    "delta": greeks.delta,
+                    "gamma": greeks.gamma,
+                    "theta": greeks.theta,
+                    "vega": greeks.vega,
+                    "bid_iv": iv * (1 - spread_bps / 20000),
+                    "ask_iv": iv * (1 + spread_bps / 20000),
+                })
+        return pd.DataFrame(option_data)
+
     def generate(
         self,
         days: int = 30,
@@ -457,12 +539,7 @@ class CompleteMarketSimulator:
             Dictionary with keys: spot, order_book, trades, options
         """
         rng = np.random.default_rng(self.seed)
-
-        # Support hours parameter for shorter simulations (useful in tests)
-        if hours is not None:
-            T = hours / 24 / 365
-        else:
-            T = days / 365
+        T = self._resolve_time_horizon(days, hours)
 
         # 1. Generate spot price
         spot = self.price_gen.generate(T, rng=rng)
@@ -481,52 +558,7 @@ class CompleteMarketSimulator:
 
         # 4. Generate option data if requested
         if include_options:
-            option_data = []
-
-            # Sample timestamps (every hour)
-            for _, row in spot.iloc[::1].iterrows():  # Hourly
-                # Generate option chain
-                expiries = [
-                    row["timestamp"] + timedelta(days=d)
-                    for d in [7, 14, 30, 60, 90]
-                ]
-                chain = self.option_sim.generate_option_chain(
-                    spot=row["price"],
-                    expiry_dates=expiries
-                )
-
-                for contract in chain:
-                    T = contract.time_to_expiry(row["timestamp"])
-                    if T <= 0:
-                        continue
-
-                    moneyness = contract.strike / row["price"]
-                    iv = self.option_sim.implied_volatility_smile(moneyness, T)
-                    greeks = self.option_sim.calculate_greeks(
-                        contract, row["price"], iv, row["timestamp"]
-                    )
-
-                    # Generate bid/ask around theoretical price
-                    spread_bps = 50 + 100 * iv  # Higher vol = wider spread
-
-                    option_data.append({
-                        "timestamp": row["timestamp"],
-                        "instrument": contract.instrument_name,
-                        "underlying": contract.underlying,
-                        "strike": contract.strike,
-                        "expiry": contract.expiry,
-                        "option_type": contract.option_type.value,
-                        "spot": row["price"],
-                        "implied_vol": iv,
-                        "delta": greeks.delta,
-                        "gamma": greeks.gamma,
-                        "theta": greeks.theta,
-                        "vega": greeks.vega,
-                        "bid_iv": iv * (1 - spread_bps / 20000),
-                        "ask_iv": iv * (1 + spread_bps / 20000),
-                    })
-
-            result["options"] = pd.DataFrame(option_data)
+            result["options"] = self._generate_options_dataset(spot)
 
         return result
 
