@@ -191,6 +191,80 @@ class MarketMakingEnv:
 
         return self._get_state()
 
+    def _estimate_recent_market_conditions(self) -> Tuple[float, float]:
+        if self.current_step >= 10:
+            recent_data = self.market_data.iloc[
+                self.episode_start + self.current_step - 10 : self.episode_start + self.current_step
+            ]
+            recent_volatility = recent_data["price"].pct_change().std() * np.sqrt(365 * 24)
+            recent_volume = recent_data.get("volume", pd.Series([1.0])).mean()
+        else:
+            recent_volatility = 0.5
+            recent_volume = 1.0
+        return float(recent_volatility), float(recent_volume)
+
+    def _compute_fill_probabilities(
+        self, bid_offset: float, ask_offset: float, recent_volume: float
+    ) -> Tuple[float, float]:
+        fill_prob_bid = max(0.05, min(0.6, 0.3 * (20 / max(bid_offset, 5))))
+        fill_prob_ask = max(0.05, min(0.6, 0.3 * (20 / max(ask_offset, 5))))
+        volume_factor = min(2.0, max(0.0, float(recent_volume))) if np.isfinite(recent_volume) else 1.0
+        fill_prob_bid = float(np.clip(fill_prob_bid * volume_factor, 0.0, self.max_fill_probability))
+        fill_prob_ask = float(np.clip(fill_prob_ask * volume_factor, 0.0, self.max_fill_probability))
+        return fill_prob_bid, fill_prob_ask
+
+    def _simulate_bid_fill(
+        self,
+        *,
+        fill_prob_bid: float,
+        mid_price: float,
+        bid_price: float,
+        quote_size: float,
+        recent_volatility: float,
+        info: Dict,
+    ) -> float:
+        if float(self.rng.random()) >= fill_prob_bid:
+            return 0.0
+        adverse_move = float(self.rng.normal(-recent_volatility * 0.01, recent_volatility * 0.02))
+        effective_price = mid_price * (1 + adverse_move)
+        fill_pnl = (effective_price - bid_price) * quote_size
+        self.cash -= bid_price * quote_size
+        self.position += quote_size
+        info["fills"] += 1
+        info["pnl"] += fill_pnl
+        info["bid_fill"] = True
+        return fill_pnl
+
+    def _simulate_ask_fill(
+        self,
+        *,
+        fill_prob_ask: float,
+        mid_price: float,
+        ask_price: float,
+        quote_size: float,
+        recent_volatility: float,
+        info: Dict,
+    ) -> float:
+        if float(self.rng.random()) >= fill_prob_ask:
+            return 0.0
+        adverse_move = float(self.rng.normal(recent_volatility * 0.01, recent_volatility * 0.02))
+        effective_price = mid_price * (1 + adverse_move)
+        fill_pnl = (ask_price - effective_price) * quote_size
+        self.cash += ask_price * quote_size
+        self.position -= quote_size
+        info["fills"] += 1
+        info["pnl"] += fill_pnl
+        info["ask_fill"] = True
+        return fill_pnl
+
+    @staticmethod
+    def _reward_penalty(position: float, bid_offset: float, ask_offset: float) -> float:
+        penalty = 0.01 * (position ** 2)
+        spread = bid_offset + ask_offset
+        if spread > 80:
+            penalty += 0.001 * (spread - 80)
+        return float(penalty)
+
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, Dict]:
         """
         Execute action and return next state, reward, done, info.
@@ -223,71 +297,28 @@ class MarketMakingEnv:
         }
 
         if not done:
-            # Instead of using next_price (look-ahead bias),
-            # we use historical patterns and current order book to simulate fills
-            # This simulates what would happen if we quoted at current time
+            recent_volatility, recent_volume = self._estimate_recent_market_conditions()
+            fill_prob_bid, fill_prob_ask = self._compute_fill_probabilities(
+                bid_offset, ask_offset, recent_volume
+            )
+            reward += self._simulate_bid_fill(
+                fill_prob_bid=fill_prob_bid,
+                mid_price=mid_price,
+                bid_price=bid_price,
+                quote_size=quote_size,
+                recent_volatility=recent_volatility,
+                info=info,
+            )
+            reward += self._simulate_ask_fill(
+                fill_prob_ask=fill_prob_ask,
+                mid_price=mid_price,
+                ask_price=ask_price,
+                quote_size=quote_size,
+                recent_volatility=recent_volatility,
+                info=info,
+            )
 
-            # Get recent market conditions for fill simulation
-            if self.current_step >= 10:
-                recent_data = self.market_data.iloc[self.episode_start + self.current_step - 10:
-                                                   self.episode_start + self.current_step]
-                recent_volatility = recent_data['price'].pct_change().std() * np.sqrt(365 * 24)
-                recent_volume = recent_data.get('volume', pd.Series([1.0])).mean()
-            else:
-                recent_volatility = 0.5
-                recent_volume = 1.0
-
-            # Simulate fills based on spread width and market conditions
-            # Wider spreads = lower fill probability but better PnL when filled
-            # Narrower spreads = higher fill probability but worse PnL when filled (adverse selection)
-
-            # Fill probability decreases with spread width
-            fill_prob_bid = max(0.05, min(0.6, 0.3 * (20 / max(bid_offset, 5))))
-            fill_prob_ask = max(0.05, min(0.6, 0.3 * (20 / max(ask_offset, 5))))
-
-            # Adjust for market conditions
-            volume_factor = min(2.0, max(0.0, float(recent_volume))) if np.isfinite(recent_volume) else 1.0
-            fill_prob_bid = float(np.clip(fill_prob_bid * volume_factor, 0.0, self.max_fill_probability))
-            fill_prob_ask = float(np.clip(fill_prob_ask * volume_factor, 0.0, self.max_fill_probability))
-
-            # Simulate bid fill (someone sells to our bid)
-            if float(self.rng.random()) < fill_prob_bid:
-                # Adverse selection: when we get filled on bid, price often moves down
-                adverse_move = float(
-                    self.rng.normal(-recent_volatility * 0.01, recent_volatility * 0.02)
-                )
-                effective_price = mid_price * (1 + adverse_move)
-                fill_pnl = (effective_price - bid_price) * quote_size
-                self.cash -= bid_price * quote_size
-                self.position += quote_size
-                reward += fill_pnl
-                info['fills'] += 1
-                info['pnl'] += fill_pnl
-                info['bid_fill'] = True
-
-            # Simulate ask fill (someone buys from our ask)
-            if float(self.rng.random()) < fill_prob_ask:
-                # Adverse selection: when we get filled on ask, price often moves up
-                adverse_move = float(
-                    self.rng.normal(recent_volatility * 0.01, recent_volatility * 0.02)
-                )
-                effective_price = mid_price * (1 + adverse_move)
-                fill_pnl = (ask_price - effective_price) * quote_size
-                self.cash += ask_price * quote_size
-                self.position -= quote_size
-                reward += fill_pnl
-                info['fills'] += 1
-                info['pnl'] += fill_pnl
-                info['ask_fill'] = True
-
-        # Inventory penalty (risk management)
-        inventory_penalty = 0.01 * (self.position ** 2)
-        reward -= inventory_penalty
-
-        # Spread penalty (too wide = opportunity cost)
-        spread = bid_offset + ask_offset
-        if spread > 80:
-            reward -= 0.001 * (spread - 80)
+        reward -= self._reward_penalty(self.position, bid_offset, ask_offset)
 
         self.current_step += 1
         next_state = self._get_state()
