@@ -450,14 +450,15 @@ class TestCircuitBreakerVaRAndPerInstrument:
             cooldown_period_seconds=0
         )
         cb = CircuitBreaker(config)
+        rng = np.random.default_rng(20260310)
 
         idx = pd.date_range(start=datetime.now(timezone.utc) - timedelta(hours=80), periods=80, freq="h")
         # Synthetic volatile returns
         asset_returns = pd.DataFrame({
-            "BTC": np.random.normal(0, 0.05, len(idx)),
-            "ETH": np.random.normal(0, 0.06, len(idx)),
+            "BTC": rng.normal(0, 0.05, len(idx)),
+            "ETH": rng.normal(0, 0.06, len(idx)),
         }, index=idx)
-        pnl_series = pd.Series(np.cumsum(np.random.normal(0, 0.02, len(idx))), index=idx)
+        pnl_series = pd.Series(np.cumsum(rng.normal(0, 0.02, len(idx))), index=idx)
 
         from core.types import Position
         portfolio = PortfolioState(
@@ -497,7 +498,8 @@ class TestCircuitBreakerVaRAndPerInstrument:
 
         cb._var_calculator.parametric_var = fake_parametric_var
         positions = pd.DataFrame({"value": [1000.0]}, index=["BTC"])
-        returns = pd.DataFrame({"BTC": np.random.normal(0, 0.01, 64)})
+        rng = np.random.default_rng(20260311)
+        returns = pd.DataFrame({"BTC": rng.normal(0, 0.01, 64)})
 
         violation = cb.check_var_limit(positions, returns, portfolio_value=1000.0)
 
@@ -520,8 +522,9 @@ class TestCircuitBreakerVaRAndPerInstrument:
 
         from core.types import Position
 
+        rng = np.random.default_rng(20260312)
         idx = pd.date_range(start=datetime.now(timezone.utc) - timedelta(hours=40), periods=40, freq="h")
-        pnl_series = pd.Series(np.cumsum(np.random.normal(0, 0.01, len(idx))), index=idx)
+        pnl_series = pd.Series(np.cumsum(rng.normal(0, 0.01, len(idx))), index=idx)
         portfolio = PortfolioState(
             timestamp=idx[-1].to_pydatetime(),
             positions={
@@ -552,10 +555,11 @@ class TestCircuitBreakerVaRAndPerInstrument:
         from core.types import Position
 
         now = datetime.now(timezone.utc)
+        rng = np.random.default_rng(20260313)
         returns = pd.DataFrame(
             {
-                "BTC": np.random.normal(0, 0.01, 60),
-                "ETH": np.random.normal(0, 0.01, 60),
+                "BTC": rng.normal(0, 0.01, 60),
+                "ETH": rng.normal(0, 0.01, 60),
             }
         )
         portfolio = PortfolioState(
@@ -565,7 +569,7 @@ class TestCircuitBreakerVaRAndPerInstrument:
                 "ETH": Position("ETH", -1.0, 3000.0),
             },
             cash=1000.0,
-            pnl_series=pd.Series(np.cumsum(np.random.normal(0, 0.01, 60))),
+            pnl_series=pd.Series(np.cumsum(rng.normal(0, 0.01, 60))),
             asset_returns=returns,
             initial_capital=100000.0,
         )

@@ -88,13 +88,13 @@ class TestVPINCalculator:
         calc = VPINCalculator(volume_bucket_size=100, num_buckets=10)
 
         # Create synthetic trade data
-        np.random.seed(42)
+        rng = np.random.default_rng(42)
         n_trades = 1000
         trades = pd.DataFrame({
             'timestamp': pd.date_range('2024-01-01', periods=n_trades, freq='1min'),
-            'price': np.cumsum(np.random.randn(n_trades) * 0.1) + 50000,
-            'size': np.random.uniform(0.1, 2.0, n_trades),
-            'side': np.random.choice(['buy', 'sell'], n_trades)
+            'price': np.cumsum(rng.normal(0, 0.1, n_trades)) + 50000,
+            'size': rng.uniform(0.1, 2.0, n_trades),
+            'side': rng.choice(['buy', 'sell'], n_trades)
         })
 
         result = calc.calculate(trades)
@@ -178,6 +178,7 @@ class TestVPINCalculator:
     def test_vpin_result_get_high_toxicity_periods(self):
         """Test VPINResult.get_high_toxicity_periods method."""
         calc = VPINCalculator(volume_bucket_size=100, num_buckets=10)
+        rng = np.random.default_rng(43)
 
         # Create trade data
         n_trades = 500
@@ -185,7 +186,7 @@ class TestVPINCalculator:
             'timestamp': pd.date_range('2024-01-01', periods=n_trades, freq='1min'),
             'price': np.ones(n_trades) * 50000,
             'size': np.ones(n_trades),
-            'side': np.random.choice(['buy', 'sell'], n_trades)
+            'side': rng.choice(['buy', 'sell'], n_trades)
         })
 
         result = calc.calculate(trades)
@@ -232,14 +233,15 @@ class TestOrderFlowToxicityAnalyzer:
     def test_analyze(self):
         """Test full toxicity analysis."""
         analyzer = OrderFlowToxicityAnalyzer()
+        rng = np.random.default_rng(44)
 
         # Create trade data
         n = 200
         trades = pd.DataFrame({
             'timestamp': pd.date_range('2024-01-01', periods=n, freq='1s'),
-            'price': 50000 + np.random.randn(n) * 10,
-            'size': np.random.uniform(0.1, 1.0, n),
-            'side': np.random.choice(['buy', 'sell'], n)
+            'price': 50000 + rng.normal(0, 10, n),
+            'size': rng.uniform(0.1, 1.0, n),
+            'side': rng.choice(['buy', 'sell'], n)
         })
 
         result = analyzer.analyze(trades)
@@ -252,14 +254,15 @@ class TestOrderFlowToxicityAnalyzer:
     def test_detect_anomalies(self):
         """Test anomaly detection."""
         analyzer = OrderFlowToxicityAnalyzer()
+        rng = np.random.default_rng(45)
 
         # Create trade data
         n = 200
         trades = pd.DataFrame({
             'timestamp': pd.date_range('2024-01-01', periods=n, freq='1s'),
-            'price': 50000 + np.random.randn(n) * 10,
-            'size': np.random.uniform(0.1, 1.0, n),
-            'side': np.random.choice(['buy', 'sell'], n)
+            'price': 50000 + rng.normal(0, 10, n),
+            'size': rng.uniform(0.1, 1.0, n),
+            'side': rng.choice(['buy', 'sell'], n)
         })
 
         analysis_df = analyzer.analyze(trades)

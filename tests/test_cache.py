@@ -39,12 +39,13 @@ class TestDataCache:
     def test_put_and_get_raw(self, temp_cache_dir):
         """Test storing and retrieving raw data."""
         cache = DataCache(base_dir=temp_cache_dir)
+        rng = np.random.default_rng(42)
 
         # Create sample data for single date
         date = datetime(2024, 1, 1)
         df = pd.DataFrame({
             'timestamp': pd.date_range(date, periods=24, freq='h'),
-            'price': np.random.uniform(50000, 51000, 24)
+            'price': rng.uniform(50000, 51000, 24)
         })
 
         # Store data
@@ -93,6 +94,7 @@ class TestDataCache:
     def test_get_date_range(self, temp_cache_dir):
         """Test retrieving data across multiple dates."""
         cache = DataCache(base_dir=temp_cache_dir)
+        rng = np.random.default_rng(43)
 
         # Store data for multiple days using put_range
         dfs = []
@@ -100,7 +102,7 @@ class TestDataCache:
             date = datetime(2024, 1, 1 + day)
             df = pd.DataFrame({
                 'timestamp': pd.date_range(date, periods=24, freq='h'),
-                'price': np.random.uniform(50000, 51000, 24)
+                'price': rng.uniform(50000, 51000, 24)
             })
             dfs.append(df)
 
