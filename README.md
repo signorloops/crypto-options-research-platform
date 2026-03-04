@@ -111,6 +111,7 @@ corp/
 Documentation follows an index-first pattern to avoid maintaining duplicate descriptions across files.
 
 - [Weekly operating checklist](docs/plans/weekly-operating-checklist.md)
+- [Algorithm freeze checklist](docs/plans/algorithm-freeze-checklist.md)
 - [Q1 historical archive summary](docs/archive/2026-Q1-archive-summary.md)
 
 Common topics:
@@ -144,6 +145,7 @@ make workspace-slim-clean
 make complexity-audit
 make complexity-audit-regression
 make algorithm-performance-baseline
+make algorithm-freeze-check
 
 # Weekly governance pipeline and pre-release hard gates
 # (weekly-operating-audit runs and enforces algorithm-performance-baseline)

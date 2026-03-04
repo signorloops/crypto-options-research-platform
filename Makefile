@@ -1,4 +1,4 @@
-.PHONY: help install install-dev install-dev-full workspace-slim-report workspace-slim-clean workspace-slim-clean-venv test test-unit test-integration test-cov lint lint-fix format format-check type-check quality branch-name-guard check-service-entrypoint docs-link-check complexity-audit complexity-audit-regression algorithm-performance-baseline daily-regression live-deviation-snapshot weekly-operating-audit weekly-close-gate weekly-pnl-attribution weekly-canary-checklist weekly-decision-log weekly-manual-prefill weekly-signoff-pack weekly-consistency-replay weekly-adr-draft clean
+.PHONY: help install install-dev install-dev-full workspace-slim-report workspace-slim-clean workspace-slim-clean-venv test test-unit test-integration test-cov lint lint-fix format format-check type-check quality branch-name-guard check-service-entrypoint docs-link-check complexity-audit complexity-audit-regression algorithm-performance-baseline algorithm-freeze-check daily-regression live-deviation-snapshot weekly-operating-audit weekly-close-gate weekly-pnl-attribution weekly-canary-checklist weekly-decision-log weekly-manual-prefill weekly-signoff-pack weekly-consistency-replay weekly-adr-draft clean
 
 # Detect Python interpreter with project minimum version (3.9+).
 PYTHON_CANDIDATES := ./venv/bin/python ./.venv/bin/python ./env/bin/python python3.13 python3.12 python3.11 python3.10 python3.9 python3 python
@@ -52,6 +52,7 @@ help:
 	@echo "  complexity-audit Run strict complexity governance checks"
 	@echo "  complexity-audit-regression Run strict complexity check against baseline (fail only on regressions)"
 	@echo "  algorithm-performance-baseline Generate VaR/backtest latency baseline report"
+	@echo "  algorithm-freeze-check Run full algorithm consistency freeze checklist"
 	@echo "  daily-regression Run daily regression gate report"
 	@echo "  live-deviation-snapshot Generate live CEX-vs-DeFi deviation snapshot report"
 	@echo "  weekly-operating-audit Generate weekly KPI and risk exception report"
@@ -145,6 +146,14 @@ complexity-audit-regression:
 		--baseline-json $(BASELINE_COMPLEXITY_JSON) \
 		--strict \
 		--strict-regression-only
+
+algorithm-freeze-check:
+	$(PYTEST) -q -m "not integration"
+	$(MAKE) docs-link-check
+	$(MAKE) branch-name-guard
+	$(MAKE) complexity-audit-regression BASELINE_COMPLEXITY_JSON=$(BASELINE_COMPLEXITY_JSON)
+	$(MAKE) algorithm-performance-baseline
+	$(MAKE) daily-regression
 
 algorithm-performance-baseline:
 	$(PYTHON) scripts/governance/algorithm_performance_baseline.py \

@@ -60,3 +60,15 @@ pytest -q -m "not integration"
 make docs-link-check
 make complexity-audit
 ```
+
+## 5. 算法冻结门禁
+
+目标：当算法链路满足发布条件时，使用统一门禁判定“停止继续优化”。
+
+```bash
+make algorithm-freeze-check
+```
+
+详细冻结标准见：
+
+- `docs/plans/algorithm-freeze-checklist.md`

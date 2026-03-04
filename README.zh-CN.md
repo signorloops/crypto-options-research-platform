@@ -111,6 +111,7 @@ corp/
 文档入口已收敛为“索引优先”，避免在多个文件重复维护同一说明。
 
 - [周执行清单](docs/plans/weekly-operating-checklist.md)
+- [算法冻结清单](docs/plans/algorithm-freeze-checklist.md)
 - [Q1 历史归档总览](docs/archive/2026-Q1-archive-summary.md)
 
 常用专题：
@@ -144,6 +145,7 @@ make workspace-slim-clean
 make complexity-audit
 make complexity-audit-regression
 make algorithm-performance-baseline
+make algorithm-freeze-check
 
 # 每周治理链路与发布前硬门禁
 # （weekly-operating-audit 会先执行并强制校验 algorithm-performance-baseline）
