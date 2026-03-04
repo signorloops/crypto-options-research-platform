@@ -93,8 +93,8 @@ class TestVolatilityModels:
 
     def test_ewma_volatility(self):
         """Test EWMA volatility."""
-        np.random.seed(42)
-        returns = np.random.normal(0, 0.02, 100)
+        rng = np.random.default_rng(42)
+        returns = rng.normal(0, 0.02, 100)
         vol = ewma_volatility(returns, lambda_param=0.94, annualize=False)
         assert vol > 0
         assert vol < 1.0
@@ -107,8 +107,8 @@ class TestVolatilityModels:
 
     def test_garch_volatility(self):
         """Test GARCH(1,1) volatility."""
-        np.random.seed(42)
-        returns = np.random.normal(0, 0.02, 100)
+        rng = np.random.default_rng(43)
+        returns = rng.normal(0, 0.02, 100)
         vol = garch_volatility(
             returns, omega=1e-6, alpha=0.1, beta=0.85, annualize=False
         )
@@ -117,15 +117,16 @@ class TestVolatilityModels:
 
     def test_garch_nonstationary(self):
         """Test GARCH with non-stationary parameters raises error."""
-        returns = np.random.normal(0, 0.02, 50)
+        rng = np.random.default_rng(44)
+        returns = rng.normal(0, 0.02, 50)
         with pytest.raises(ValueError, match="Non-stationary"):
             garch_volatility(returns, alpha=0.6, beta=0.5)
 
     def test_har_volatility(self):
         """Test HAR-RV model."""
         # Generate synthetic daily RV data
-        np.random.seed(42)
-        rv_daily = np.abs(np.random.normal(0.0001, 0.001, 30)) ** 2
+        rng = np.random.default_rng(45)
+        rv_daily = np.abs(rng.normal(0.0001, 0.001, 30)) ** 2
         rv_pred = har_volatility(rv_daily)
         assert rv_pred >= 0
 
