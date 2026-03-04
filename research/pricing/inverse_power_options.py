@@ -40,6 +40,31 @@ class InversePowerGreeks:
     rho: float
 
 
+@dataclass(frozen=True)
+class _InversePowerFDBase:
+    """Shared base inputs for finite-difference pricing with common normals."""
+
+    normals: np.ndarray
+    S: float
+    K: float
+    T: float
+    r: float
+    sigma: float
+    option_type: Literal["call", "put"]
+    power: float
+    n_paths: int
+
+
+@dataclass(frozen=True)
+class _InversePowerFDBumps:
+    """Finite-difference bump sizes."""
+
+    ds: float
+    dv: float
+    dr: float
+    dt: float
+
+
 class InversePowerOptionPricer:
     """Monte Carlo baseline pricer for inverse-power options."""
 
@@ -183,119 +208,108 @@ class InversePowerOptionPricer:
     @staticmethod
     def _finite_difference_bumps(
         *, S: float, T: float, r: float, sigma: float, bump_rel: float
-    ) -> tuple[float, float, float, float]:
+    ) -> _InversePowerFDBumps:
         ds = max(S * bump_rel, 1e-6)
         dv = max(sigma * bump_rel, 1e-6)
         dr = max(abs(r) * bump_rel, 1e-6)
         dt = max(T * bump_rel, 1e-6)
-        return ds, dv, dr, dt
+        return _InversePowerFDBumps(ds=ds, dv=dv, dr=dr, dt=dt)
 
     @staticmethod
     def _finite_difference_prices(
         *,
-        normals: np.ndarray,
-        S: float,
-        K: float,
-        T: float,
-        r: float,
-        sigma: float,
-        option_type: Literal["call", "put"],
-        power: float,
-        n_paths: int,
-        ds: float,
-        dv: float,
-        dr: float,
-        dt: float,
+        base: _InversePowerFDBase,
+        bumps: _InversePowerFDBumps,
     ) -> tuple[float, float, float, float, float, float, float, float]:
         call = InversePowerOptionPricer._price_with_normals
 
         p_up_s = call(
-            normals=normals,
-            S=S + ds,
-            K=K,
-            T=T,
-            r=r,
-            sigma=sigma,
-            option_type=option_type,
-            power=power,
-            n_paths=n_paths,
+            normals=base.normals,
+            S=base.S + bumps.ds,
+            K=base.K,
+            T=base.T,
+            r=base.r,
+            sigma=base.sigma,
+            option_type=base.option_type,
+            power=base.power,
+            n_paths=base.n_paths,
         )
         p_dn_s = call(
-            normals=normals,
-            S=max(S - ds, InversePowerOptionPricer.EPS),
-            K=K,
-            T=T,
-            r=r,
-            sigma=sigma,
-            option_type=option_type,
-            power=power,
-            n_paths=n_paths,
+            normals=base.normals,
+            S=max(base.S - bumps.ds, InversePowerOptionPricer.EPS),
+            K=base.K,
+            T=base.T,
+            r=base.r,
+            sigma=base.sigma,
+            option_type=base.option_type,
+            power=base.power,
+            n_paths=base.n_paths,
         )
         p_up_v = call(
-            normals=normals,
-            S=S,
-            K=K,
-            T=T,
-            r=r,
-            sigma=sigma + dv,
-            option_type=option_type,
-            power=power,
-            n_paths=n_paths,
+            normals=base.normals,
+            S=base.S,
+            K=base.K,
+            T=base.T,
+            r=base.r,
+            sigma=base.sigma + bumps.dv,
+            option_type=base.option_type,
+            power=base.power,
+            n_paths=base.n_paths,
         )
         p_dn_v = call(
-            normals=normals,
-            S=S,
-            K=K,
-            T=T,
-            r=r,
-            sigma=max(sigma - dv, 0.0),
-            option_type=option_type,
-            power=power,
-            n_paths=n_paths,
+            normals=base.normals,
+            S=base.S,
+            K=base.K,
+            T=base.T,
+            r=base.r,
+            sigma=max(base.sigma - bumps.dv, 0.0),
+            option_type=base.option_type,
+            power=base.power,
+            n_paths=base.n_paths,
         )
         p_up_r = call(
-            normals=normals,
-            S=S,
-            K=K,
-            T=T,
-            r=r + dr,
-            sigma=sigma,
-            option_type=option_type,
-            power=power,
-            n_paths=n_paths,
+            normals=base.normals,
+            S=base.S,
+            K=base.K,
+            T=base.T,
+            r=base.r + bumps.dr,
+            sigma=base.sigma,
+            option_type=base.option_type,
+            power=base.power,
+            n_paths=base.n_paths,
         )
         p_dn_r = call(
-            normals=normals,
-            S=S,
-            K=K,
-            T=T,
-            r=r - dr,
-            sigma=sigma,
-            option_type=option_type,
-            power=power,
-            n_paths=n_paths,
+            normals=base.normals,
+            S=base.S,
+            K=base.K,
+            T=base.T,
+            r=base.r - bumps.dr,
+            sigma=base.sigma,
+            option_type=base.option_type,
+            power=base.power,
+            n_paths=base.n_paths,
         )
         p_up_t = call(
-            normals=normals,
-            S=S,
-            K=K,
-            T=T + dt,
-            r=r,
-            sigma=sigma,
-            option_type=option_type,
-            power=power,
-            n_paths=n_paths,
+            normals=base.normals,
+            S=base.S,
+            K=base.K,
+            T=base.T + bumps.dt,
+            r=base.r,
+            sigma=base.sigma,
+            option_type=base.option_type,
+            power=base.power,
+            n_paths=base.n_paths,
         )
         p_dn_t = call(
-            normals=normals,
-            S=S,
-            K=K,
-            T=max(T - dt, 0.0),
-            r=r,
-            sigma=sigma,
-            option_type=option_type,
-            power=power,
-            n_paths=n_paths,
+            normals=base.normals,
+            S=base.S,
+            K=base.K,
+            T=max(base.T - bumps.dt, 0.0),
+            r=base.r,
+            sigma=base.sigma,
+            option_type=base.option_type,
+            power=base.power,
+            n_paths=base.n_paths,
         )
         return p_up_s, p_dn_s, p_up_v, p_dn_v, p_up_r, p_dn_r, p_up_t, p_dn_t
 
@@ -329,36 +343,36 @@ class InversePowerOptionPricer:
             n_paths=n_paths,
         )
 
-        ds, dv, dr, dt = InversePowerOptionPricer._finite_difference_bumps(
+        bumps = InversePowerOptionPricer._finite_difference_bumps(
             S=S,
             T=T,
             r=r,
             sigma=sigma,
             bump_rel=bump_rel,
         )
+        fd_base = _InversePowerFDBase(
+            normals=normals,
+            S=S,
+            K=K,
+            T=T,
+            r=r,
+            sigma=sigma,
+            option_type=option_type,
+            power=power,
+            n_paths=n_paths,
+        )
         p_up_s, p_dn_s, p_up_v, p_dn_v, p_up_r, p_dn_r, p_up_t, p_dn_t = (
             InversePowerOptionPricer._finite_difference_prices(
-                normals=normals,
-                S=S,
-                K=K,
-                T=T,
-                r=r,
-                sigma=sigma,
-                option_type=option_type,
-                power=power,
-                n_paths=n_paths,
-                ds=ds,
-                dv=dv,
-                dr=dr,
-                dt=dt,
+                base=fd_base,
+                bumps=bumps,
             )
         )
 
-        delta = (p_up_s - p_dn_s) / (2.0 * ds)
-        gamma = (p_up_s - 2.0 * price + p_dn_s) / (ds**2)
-        vega = (p_up_v - p_dn_v) / (2.0 * dv)
-        rho = (p_up_r - p_dn_r) / (2.0 * dr)
-        theta = -(p_up_t - p_dn_t) / (2.0 * dt)
+        delta = (p_up_s - p_dn_s) / (2.0 * bumps.ds)
+        gamma = (p_up_s - 2.0 * price + p_dn_s) / (bumps.ds**2)
+        vega = (p_up_v - p_dn_v) / (2.0 * bumps.dv)
+        rho = (p_up_r - p_dn_r) / (2.0 * bumps.dr)
+        theta = -(p_up_t - p_dn_t) / (2.0 * bumps.dt)
 
         greeks = InversePowerGreeks(
             delta=float(delta),

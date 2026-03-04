@@ -425,6 +425,97 @@ class HawkesMarketMaker(MarketMakingStrategy):
         combined_skew = 0.7 * inventory_skew + 0.3 * flow_skew
         return np.clip(combined_skew, -1.0, 1.0)
 
+    def _ingest_recent_trades(self, state: MarketState) -> None:
+        """Ingest unseen recent trades into Hawkes monitor."""
+        if not hasattr(state, "recent_trades") or not state.recent_trades:
+            return
+
+        for trade in state.recent_trades:
+            trade_key = self._build_trade_key(trade)
+            if trade_key in self._seen_trade_keys:
+                continue
+            side_val = trade.side.value if hasattr(trade.side, "value") else trade.side
+            direction = 1 if side_val == "buy" else -1 if side_val == "sell" else 0
+            trade_ts = (
+                trade.timestamp.timestamp()
+                if hasattr(trade.timestamp, "timestamp")
+                else float(trade.timestamp)
+            )
+            self.monitor.add_trade(trade_ts, direction, size=float(getattr(trade, "size", 1.0)))
+            self._remember_trade_key(trade_key)
+            self.last_trade_time = trade.timestamp
+            self.trade_count += 1
+
+    def _compute_quote_prices(
+        self,
+        *,
+        mid: float,
+        spread_bps: float,
+        skew: float,
+        buy_int: float,
+        sell_int: float,
+        adverse_selection: bool,
+    ) -> Tuple[float, float, float, float]:
+        """Compute final bid/ask with skew and adverse-selection asymmetry."""
+        max_skew_bps = spread_bps * 0.3  # Max 30% of spread can be skew
+        skew_bps = skew * max_skew_bps
+        adjusted_mid = mid * (1 + skew_bps / 10000)
+        half_spread = mid * spread_bps / 10000 / 2
+
+        imbalance = 0.0
+        total_int = buy_int + sell_int
+        if total_int > 0:
+            imbalance = (buy_int - sell_int) / total_int
+
+        asym_factor = np.clip(abs(imbalance), 0.0, 1.0) * 0.5
+        bid_half = half_spread
+        ask_half = half_spread
+        if adverse_selection:
+            if imbalance > 0:
+                ask_half *= (1.0 + asym_factor)
+                bid_half *= (1.0 - 0.3 * asym_factor)
+            elif imbalance < 0:
+                bid_half *= (1.0 + asym_factor)
+                ask_half *= (1.0 - 0.3 * asym_factor)
+
+        bid_price = adjusted_mid - bid_half
+        ask_price = adjusted_mid + ask_half
+        return bid_price, ask_price, imbalance, adjusted_mid
+
+    def _compute_quote_sizes(
+        self,
+        *,
+        intensity: float,
+        inventory: float,
+        adverse_selection: bool,
+        imbalance: float,
+    ) -> Tuple[float, float]:
+        """Compute quote sizes with activity, inventory, and adverse-selection controls."""
+        if intensity > self.config.high_intensity_threshold:
+            bid_size = self.config.quote_size * 1.2
+            ask_size = self.config.quote_size * 1.2
+        elif intensity < self.config.low_intensity_threshold:
+            bid_size = self.config.quote_size * 0.8
+            ask_size = self.config.quote_size * 0.8
+        else:
+            bid_size = self.config.quote_size
+            ask_size = self.config.quote_size
+
+        if inventory > self.config.inventory_limit * 0.5:
+            bid_size *= 0.7
+            ask_size *= 1.3
+        elif inventory < -self.config.inventory_limit * 0.5:
+            bid_size *= 1.3
+            ask_size *= 0.7
+
+        if adverse_selection:
+            if imbalance > 0:
+                ask_size *= 0.7
+            elif imbalance < 0:
+                bid_size *= 0.7
+
+        return bid_size, ask_size
+
     def quote(self, state: MarketState, position: Position) -> QuoteAction:
         """Generate quotes based on Hawkes intensity and market state.
 
@@ -442,18 +533,7 @@ class HawkesMarketMaker(MarketMakingStrategy):
         current_time = state.timestamp.timestamp() if hasattr(state.timestamp, 'timestamp') else 0.0
 
         # Update monitor with recent trades from market data if available
-        if hasattr(state, 'recent_trades') and state.recent_trades:
-            for trade in state.recent_trades:
-                trade_key = self._build_trade_key(trade)
-                if trade_key in self._seen_trade_keys:
-                    continue
-                side_val = trade.side.value if hasattr(trade.side, "value") else trade.side
-                direction = 1 if side_val == 'buy' else -1 if side_val == 'sell' else 0
-                trade_ts = trade.timestamp.timestamp() if hasattr(trade.timestamp, "timestamp") else float(trade.timestamp)
-                self.monitor.add_trade(trade_ts, direction, size=float(getattr(trade, "size", 1.0)))
-                self._remember_trade_key(trade_key)
-                self.last_trade_time = trade.timestamp
-                self.trade_count += 1
+        self._ingest_recent_trades(state)
 
         # Compute current intensity
         intensity = self.monitor.get_intensity(current_time)
@@ -479,65 +559,20 @@ class HawkesMarketMaker(MarketMakingStrategy):
         if buy_int + sell_int > 0:
             flow_imbalance = (buy_int - sell_int) / (buy_int + sell_int)
 
-        # Apply skew to mid price
-        max_skew_bps = spread_bps * 0.3  # Max 30% of spread can be skew
-        skew_bps = skew * max_skew_bps
-        adjusted_mid = mid * (1 + skew_bps / 10000)
-
-        # Calculate final prices
-        half_spread = mid * spread_bps / 10000 / 2
-
-        # Asymmetric adverse selection response:
-        # if buy intensity dominates, getting lifted on ask is riskier -> widen ask more.
-        # if sell intensity dominates, getting hit on bid is riskier -> widen bid more.
-        imbalance = 0.0
-        total_int = buy_int + sell_int
-        if total_int > 0:
-            imbalance = (buy_int - sell_int) / total_int
-        asym_factor = np.clip(abs(imbalance), 0.0, 1.0) * 0.5
-
-        bid_half = half_spread
-        ask_half = half_spread
-        if adverse_selection:
-            if imbalance > 0:
-                ask_half *= (1.0 + asym_factor)
-                bid_half *= (1.0 - 0.3 * asym_factor)
-            elif imbalance < 0:
-                bid_half *= (1.0 + asym_factor)
-                ask_half *= (1.0 - 0.3 * asym_factor)
-
-        bid_price = adjusted_mid - bid_half
-        ask_price = adjusted_mid + ask_half
-
-        # Adjust sizes based on intensity
-        if intensity > self.config.high_intensity_threshold:
-            # High activity: quote more aggressively
-            bid_size = self.config.quote_size * 1.2
-            ask_size = self.config.quote_size * 1.2
-        elif intensity < self.config.low_intensity_threshold:
-            # Low activity: reduce exposure
-            bid_size = self.config.quote_size * 0.8
-            ask_size = self.config.quote_size * 0.8
-        else:
-            bid_size = self.config.quote_size
-            ask_size = self.config.quote_size
-
-        # Inventory-based size adjustment
-        if position.size > self.config.inventory_limit * 0.5:
-            # Long inventory: reduce bid, increase ask
-            bid_size *= 0.7
-            ask_size *= 1.3
-        elif position.size < -self.config.inventory_limit * 0.5:
-            # Short inventory: increase bid, reduce ask
-            bid_size *= 1.3
-            ask_size *= 0.7
-
-        # Reduce risky side size under adverse selection.
-        if adverse_selection:
-            if imbalance > 0:
-                ask_size *= 0.7
-            elif imbalance < 0:
-                bid_size *= 0.7
+        bid_price, ask_price, imbalance, adjusted_mid = self._compute_quote_prices(
+            mid=mid,
+            spread_bps=spread_bps,
+            skew=skew,
+            buy_int=buy_int,
+            sell_int=sell_int,
+            adverse_selection=adverse_selection,
+        )
+        bid_size, ask_size = self._compute_quote_sizes(
+            intensity=intensity,
+            inventory=position.size,
+            adverse_selection=adverse_selection,
+            imbalance=imbalance,
+        )
 
         self.last_price = mid
 
