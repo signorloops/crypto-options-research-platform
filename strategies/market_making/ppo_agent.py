@@ -336,78 +336,82 @@ class MarketMakingEnv:
         size_scale = float(np.clip(arr[2], self.min_size_scale, self.max_size_scale))
         return bid_offset, ask_offset, size_scale
 
+    def _safe_column_value(self, current: pd.Series, column: str, default: float) -> float:
+        if column in self.market_data.columns:
+            value = float(current[column])
+            if np.isfinite(value):
+                return value
+        return float(default)
+
+    def _rolling_volatility(self, idx: int) -> float:
+        if idx < 20:
+            return 0.5
+        recent = self.market_data.iloc[idx - 20 : idx]
+        returns = recent["price"].pct_change().dropna()
+        return float(returns.std() * np.sqrt(365 * 24))
+
+    def _return_block(self, idx: int) -> Tuple[float, float, float, float, float, float]:
+        if idx < 10:
+            return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+        returns_10 = self.market_data.iloc[idx - 10 : idx]["price"].pct_change().dropna()
+        ret_1 = float(returns_10.iloc[-1]) if len(returns_10) > 0 else 0.0
+        ret_5 = float(self.market_data.iloc[idx]["price"] / self.market_data.iloc[idx - 5]["price"] - 1.0)
+        ret_10 = float(self.market_data.iloc[idx]["price"] / self.market_data.iloc[idx - 10]["price"] - 1.0)
+        momentum = float(returns_10.mean()) if len(returns_10) > 0 else 0.0
+        realized_skew = float(returns_10.skew()) if len(returns_10) > 2 else 0.0
+        realized_kurt = float(returns_10.kurt()) if len(returns_10) > 3 else 0.0
+        return ret_1, ret_5, ret_10, momentum, realized_skew, realized_kurt
+
+    def _volume_block(self, idx: int) -> Tuple[float, float, float]:
+        volume_series = self.market_data.get("volume", pd.Series(np.ones(len(self.market_data))))
+        vol_now = float(volume_series.iloc[idx]) if idx < len(volume_series) else 1.0
+        vol_win = volume_series.iloc[max(0, idx - 20) : idx + 1]
+        vol_mean = float(vol_win.mean()) if len(vol_win) > 0 else 1.0
+        vol_std = float(vol_win.std()) if len(vol_win) > 1 else 1.0
+        volume_z = (vol_now - vol_mean) / (vol_std + 1e-8)
+        return vol_now, vol_mean, float(volume_z)
+
+    def _normalized_bid_ask_depth(
+        self, current: pd.Series, imbalance: float
+    ) -> Tuple[float, float]:
+        bid_vol = self._safe_column_value(current, "bid_volume_5", np.nan)
+        ask_vol = self._safe_column_value(current, "ask_volume_5", np.nan)
+        if not np.isfinite(bid_vol):
+            bid_vol = self._safe_column_value(current, "bid_volume", np.nan)
+        if not np.isfinite(ask_vol):
+            ask_vol = self._safe_column_value(current, "ask_volume", np.nan)
+        if not (np.isfinite(bid_vol) and np.isfinite(ask_vol)):
+            bid_norm = float(np.clip(0.5 + 0.5 * imbalance, 0.0, 1.0))
+            return bid_norm, 1.0 - bid_norm
+
+        bid_total = max(float(bid_vol), 0.0)
+        ask_total = max(float(ask_vol), 0.0)
+        denom = bid_total + ask_total + 1e-8
+        return bid_total / denom, ask_total / denom
+
     def _get_state(self) -> np.ndarray:
         """Compute current state vector."""
         idx = self.episode_start + self.current_step
         current = self.market_data.iloc[idx]
 
-        def _safe_value(column: str, default: float) -> float:
-            if column in self.market_data.columns:
-                value = float(current[column])
-                if np.isfinite(value):
-                    return value
-            return float(default)
-
         # Normalized features
-        price_norm = (current['price'] - self.price_mean) / self.price_std
+        price_norm = (current["price"] - self.price_mean) / self.price_std
         inventory_norm = self.position / 10.0  # Normalize to [-1, 1] roughly
 
-        # Volatility (recent)
-        if idx >= 20:
-            recent = self.market_data.iloc[idx-20:idx]
-            returns = recent['price'].pct_change().dropna()
-            volatility = returns.std() * np.sqrt(365 * 24)
-        else:
-            volatility = 0.5
-
-        # Recent return
-        if idx >= 5:
-            recent_return = (current['price'] / self.market_data.iloc[idx-5]['price'] - 1) * 100
-        else:
-            recent_return = 0.0
+        volatility = self._rolling_volatility(idx)
+        ret_1, ret_5, ret_10, momentum, realized_skew, realized_kurt = self._return_block(idx)
 
         # Time to end (normalized)
         time_left = 1.0 - (self.current_step / self.episode_length)
 
-        # Build richer state space (22 features)
-        if idx >= 10:
-            returns_10 = self.market_data.iloc[idx-10:idx]['price'].pct_change().dropna()
-            ret_1 = returns_10.iloc[-1] if len(returns_10) > 0 else 0.0
-            ret_5 = self.market_data.iloc[idx]['price'] / self.market_data.iloc[idx-5]['price'] - 1.0
-            ret_10 = self.market_data.iloc[idx]['price'] / self.market_data.iloc[idx-10]['price'] - 1.0
-            momentum = returns_10.mean() if len(returns_10) > 0 else 0.0
-            realized_skew = returns_10.skew() if len(returns_10) > 2 else 0.0
-            realized_kurt = returns_10.kurt() if len(returns_10) > 3 else 0.0
-        else:
-            ret_1 = ret_5 = ret_10 = momentum = realized_skew = realized_kurt = 0.0
-
-        volume_series = self.market_data.get('volume', pd.Series(np.ones(len(self.market_data))))
-        vol_now = float(volume_series.iloc[idx]) if idx < len(volume_series) else 1.0
-        vol_win = volume_series.iloc[max(0, idx-20):idx+1]
-        vol_mean = float(vol_win.mean()) if len(vol_win) > 0 else 1.0
-        vol_std = float(vol_win.std()) if len(vol_win) > 1 else 1.0
-        volume_z = (vol_now - vol_mean) / (vol_std + 1e-8)
-        spread_bps = _safe_value("spread_bps", max(5.0, min(120.0, float(volatility * 25.0))))
-        imbalance = _safe_value("imbalance", np.clip(ret_1 * 50.0, -1.0, 1.0))
-
-        bid_vol = _safe_value("bid_volume_5", np.nan)
-        ask_vol = _safe_value("ask_volume_5", np.nan)
-        if not np.isfinite(bid_vol):
-            bid_vol = _safe_value("bid_volume", np.nan)
-        if not np.isfinite(ask_vol):
-            ask_vol = _safe_value("ask_volume", np.nan)
-        if not (np.isfinite(bid_vol) and np.isfinite(ask_vol)):
-            bid_norm = float(np.clip(0.5 + 0.5 * imbalance, 0.0, 1.0))
-            ask_norm = 1.0 - bid_norm
-        else:
-            bid_total = max(float(bid_vol), 0.0)
-            ask_total = max(float(ask_vol), 0.0)
-            denom = bid_total + ask_total + 1e-8
-            bid_norm = bid_total / denom
-            ask_norm = ask_total / denom
-
-        delta = _safe_value("delta", 0.0)
-        vega = _safe_value("vega", 0.0)
+        vol_now, vol_mean, volume_z = self._volume_block(idx)
+        spread_bps = self._safe_column_value(
+            current, "spread_bps", max(5.0, min(120.0, float(volatility * 25.0)))
+        )
+        imbalance = self._safe_column_value(current, "imbalance", np.clip(ret_1 * 50.0, -1.0, 1.0))
+        bid_norm, ask_norm = self._normalized_bid_ask_depth(current, float(imbalance))
+        delta = self._safe_column_value(current, "delta", 0.0)
+        vega = self._safe_column_value(current, "vega", 0.0)
 
         state = np.array([
             price_norm,                       # 1
