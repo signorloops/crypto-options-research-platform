@@ -385,18 +385,14 @@ class VaRCalculator:
         holding_period: int = 1,
         threshold_quantile: float = 0.9,
     ) -> VaRResult:
-        """
-        Peaks-over-threshold EVT VaR (GPD tail fit on losses).
-        """
+        """Peaks-over-threshold EVT VaR using a GPD fit on tail losses."""
         if holding_period <= 0:
             raise ValueError("holding_period must be positive")
 
         total_value, weights_arr, aligned_returns = self._prepare_portfolio_inputs(
             positions, returns
         )
-        portfolio_returns = self._portfolio_return_series(aligned_returns, weights_arr) * np.sqrt(
-            holding_period
-        )
+        portfolio_returns = self._portfolio_return_series(aligned_returns, weights_arr) * np.sqrt(holding_period)
         losses = -portfolio_returns
         if len(losses) < 50:
             return self.historical_var(positions, returns, holding_period)
@@ -424,7 +420,6 @@ class VaRCalculator:
         var_95 = q95 * total_value
         var_99 = q99 * total_value
 
-        # GPD ES formula when shape < 1
         def evt_es(q_alpha: float, alpha: float) -> float:
             if shape >= 1:
                 return float(q_alpha * total_value)

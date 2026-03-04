@@ -133,7 +133,6 @@ class WebSocketStream(ABC):
 
     async def _handle_messages(self, websocket: Any) -> None:
         """Handle incoming WebSocket messages with backpressure control."""
-        # Use a queue to implement backpressure
         message_queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
         queue_full_logged = False
 
@@ -146,19 +145,17 @@ class WebSocketStream(ABC):
                         message_queue.put_nowait(message)
                         queue_full_logged = False
                     except asyncio.QueueFull:
-                        # Drop oldest message and add new one
                         if not queue_full_logged:
                             logger.warning("Message queue full, dropping old messages")
                             queue_full_logged = True
                         try:
-                            message_queue.get_nowait()  # Remove oldest
-                            message_queue.put_nowait(message)  # Add new
+                            message_queue.get_nowait()
+                            message_queue.put_nowait(message)
                         except (asyncio.QueueEmpty, asyncio.QueueFull):
                             pass
             except ConnectionClosed:
                 logger.info("WebSocket connection closed in producer")
             finally:
-                # Signal consumer to stop
                 await message_queue.put(None)
 
         async def consumer():
@@ -166,7 +163,7 @@ class WebSocketStream(ABC):
             while True:
                 try:
                     message = await message_queue.get()
-                    if message is None:  # Shutdown signal
+                    if message is None:
                         break
 
                     try:
@@ -180,10 +177,8 @@ class WebSocketStream(ABC):
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
-                    # Keep consumer loop alive even if one payload processing step fails.
                     logger.error(f"Error processing message: {e}")
 
-        # Run producer and consumer concurrently
         producer_task = asyncio.create_task(producer())
         try:
             await consumer()

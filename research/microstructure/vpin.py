@@ -254,7 +254,7 @@ class VPINCalculator:
         sizes = df['size'].to_numpy(dtype=float)
         sides = df['side'].to_numpy()
         timestamps = df['timestamp'].to_numpy()
-        volumes = np.maximum(sizes * prices, 0.0)  # Volume in quote currency
+        volumes = np.maximum(sizes * prices, 0.0)
         if len(volumes) == 0:
             return _empty_bucket_arrays()
 
@@ -276,14 +276,7 @@ class VPINCalculator:
         sell_trade_vol = np.where(is_buy, 0.0, volumes)
         cum_buy = np.cumsum(buy_trade_vol)
         cum_sell = np.cumsum(sell_trade_vol)
-        (
-            full_buy,
-            full_sell,
-            full_timestamps,
-            full_totals,
-            cum_buy_at_boundaries,
-            cum_sell_at_boundaries,
-        ) = _full_bucket_components(
+        full_components = _full_bucket_components(
             cum_total=cum_total,
             volumes=volumes,
             is_buy=is_buy,
@@ -293,6 +286,7 @@ class VPINCalculator:
             bucket_size=bucket_size,
             n_full=n_full,
         )
+        full_buy, full_sell, full_timestamps, full_totals, cum_buy_at_boundaries, cum_sell_at_boundaries = full_components
         return _append_partial_bucket(
             include_partial=include_partial,
             n_full=n_full,

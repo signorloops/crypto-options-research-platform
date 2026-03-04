@@ -367,18 +367,7 @@ class DuckDBCache:
         start: Optional[datetime] = None,
         end: Optional[datetime] = None
     ) -> pd.DataFrame:
-        """
-        Resample tick/trade data to OHLCV format.
-
-        Args:
-            table_name: Source table with price data
-            timeframe: Resample frequency ('1min', '5min', '15min', '1H', '4H', '1D')
-            start: Optional start filter
-            end: Optional end filter
-
-        Returns:
-            OHLCV DataFrame
-        """
+        """Resample tick/trade data to OHLCV buckets."""
         safe_table = _sanitize_identifier(table_name)
         where_clause = ""
         params = {}
@@ -392,12 +381,7 @@ class DuckDBCache:
         elif end:
             where_clause = "WHERE timestamp <= $end"
             params = {"end": end}
-
-        # Validate timeframe to prevent SQL injection
         safe_timeframe = _validate_timeframe(timeframe)
-
-        # DuckDB time_bucket signature: time_bucket(interval, timestamp)
-        # Using window functions for OHLC to ensure correctness
         query = f"""
             WITH bucketed AS (
                 SELECT
@@ -420,7 +404,6 @@ class DuckDBCache:
             GROUP BY bucket
             ORDER BY bucket
         """
-
         return self.query(query, params if params else None)
 
     def export_to_parquet(
