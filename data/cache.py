@@ -293,25 +293,9 @@ class DataManager:
         downloader = None,
         use_cache: bool = True
     ) -> pd.DataFrame:
-        """
-        Get data with automatic caching.
-
-        Args:
-            exchange: Exchange name
-            data_type: Type of data (trades, orderbook, etc.)
-            instrument: Instrument name
-            start: Start time
-            end: End time
-            downloader: Async function to download missing data
-            use_cache: Whether to use cache
-
-        Returns:
-            DataFrame with requested data
-        """
+        """Get data for a time range with cache-first behavior and downloader fallback."""
         if start > end:
             raise ValueError("start must be <= end")
-
-        # Check cache. If read fails unexpectedly, fall back to downloader.
         if use_cache and self.cache.exists(exchange, data_type, instrument, start, end):
             cached = self.cache.get(exchange, data_type, instrument, start, end)
             if cached is not None:
@@ -326,15 +310,9 @@ class DataManager:
                     end=end.isoformat(),
                 ),
             )
-
-        # Download if needed
         if downloader is None:
             raise ValueError("Data not cached and no downloader provided")
-
         data = await downloader(instrument, start, end)
-
-        # Cache result
         if use_cache and data is not None and len(data) > 0:
             self.cache.put_range(data, exchange, data_type, instrument)
-
         return data
