@@ -186,6 +186,60 @@ def _load_results_dataframe(
     return df, selected
 
 
+def _build_file_options(files: List[Path], selected: Path) -> str:
+    return "\n".join(
+        f'<option value="{path.name}" {"selected" if path == selected else ""}>{path.name}</option>'
+        for path in files
+    )
+
+
+def _build_summary_rows(summary: Dict[str, Any]) -> str:
+    return "".join(
+        (
+            f"<tr><th>{key}</th><td>{value:.6f}</td></tr>"
+            if isinstance(value, float)
+            else f"<tr><th>{key}</th><td>{value}</td></tr>"
+        )
+        for key, value in summary.items()
+    )
+
+
+def _build_deviation_section(df: pd.DataFrame) -> str:
+    try:
+        deviation_report = build_cross_market_deviation_report(df, threshold_bps=300.0)
+    except HTTPException:
+        return ""
+
+    heatmap_df = pd.DataFrame(deviation_report["heatmap_records"])
+    if heatmap_df.empty:
+        return ""
+
+    heatmap_fig = px.density_heatmap(
+        heatmap_df,
+        x="delta_bucket",
+        y="expiry_bucket",
+        z="abs_deviation_bps",
+        histfunc="avg",
+        color_continuous_scale="RdBu_r",
+        title="Cross-Market Deviation Heatmap (abs bps)",
+    )
+    alerts = deviation_report["alerts"]
+    if alerts:
+        header = "".join(f"<th>{k}</th>" for k in alerts[0].keys())
+        rows = "".join(
+            "<tr>" + "".join(f"<td>{v}</td>" for v in row.values()) + "</tr>"
+            for row in alerts[:20]
+        )
+        alerts_table = f"<table><thead><tr>{header}</tr></thead><tbody>{rows}</tbody></table>"
+    else:
+        alerts_table = "<p>No alerts over 300 bps.</p>"
+
+    return (
+        f'<div class="card">{heatmap_fig.to_html(full_html=False, include_plotlyjs=False)}</div>'
+        f'<div class="card"><h2>Deviation Alerts</h2>{alerts_table}</div>'
+    )
+
+
 def _build_dashboard_html(df: pd.DataFrame, selected: Path, files: List[Path]) -> str:
     time_col = _find_time_column(df)
     value_col = _find_value_column(df)
@@ -223,53 +277,9 @@ def _build_dashboard_html(df: pd.DataFrame, selected: Path, files: List[Path]) -
         "max": float(df[value_col].max()),
     }
 
-    file_options = "\n".join(
-        f'<option value="{path.name}" {"selected" if path == selected else ""}>{path.name}</option>'
-        for path in files
-    )
-
-    summary_rows = "".join(
-        (
-            f"<tr><th>{key}</th><td>{value:.6f}</td></tr>"
-            if isinstance(value, float)
-            else f"<tr><th>{key}</th><td>{value}</td></tr>"
-        )
-        for key, value in summary.items()
-    )
-
-    deviation_section = ""
-    try:
-        deviation_report = build_cross_market_deviation_report(df, threshold_bps=300.0)
-        heatmap_df = pd.DataFrame(deviation_report["heatmap_records"])
-        if not heatmap_df.empty:
-            heatmap_fig = px.density_heatmap(
-                heatmap_df,
-                x="delta_bucket",
-                y="expiry_bucket",
-                z="abs_deviation_bps",
-                histfunc="avg",
-                color_continuous_scale="RdBu_r",
-                title="Cross-Market Deviation Heatmap (abs bps)",
-            )
-            alerts = deviation_report["alerts"]
-            if alerts:
-                header = "".join(f"<th>{k}</th>" for k in alerts[0].keys())
-                rows = "".join(
-                    "<tr>" + "".join(f"<td>{v}</td>" for v in row.values()) + "</tr>"
-                    for row in alerts[:20]
-                )
-                alerts_table = (
-                    f"<table><thead><tr>{header}</tr></thead><tbody>{rows}</tbody></table>"
-                )
-            else:
-                alerts_table = "<p>No alerts over 300 bps.</p>"
-
-            deviation_section = (
-                f'<div class="card">{heatmap_fig.to_html(full_html=False, include_plotlyjs=False)}</div>'
-                f'<div class="card"><h2>Deviation Alerts</h2>{alerts_table}</div>'
-            )
-    except HTTPException:
-        deviation_section = ""
+    file_options = _build_file_options(files, selected)
+    summary_rows = _build_summary_rows(summary)
+    deviation_section = _build_deviation_section(df)
 
     return f"""
 <!DOCTYPE html>
