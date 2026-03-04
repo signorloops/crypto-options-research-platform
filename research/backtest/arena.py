@@ -137,6 +137,70 @@ Market Making:
 """
 
 
+def _build_empty_scorecard(result: BacktestResult) -> StrategyScorecard:
+    return StrategyScorecard(
+        strategy_name=result.strategy_name,
+        total_pnl=0,
+        total_return_pct=0,
+        annualized_return=0,
+        sharpe_ratio=0,
+        deflated_sharpe_ratio=0,
+        sortino_ratio=0,
+        max_drawdown=0,
+        calmar_ratio=0,
+        total_trades=0,
+        win_rate=0,
+        avg_trade_pnl=0,
+        avg_win=0,
+        avg_loss=0,
+        profit_factor=0,
+        spread_capture=0,
+        adverse_selection_cost=0,
+        inventory_cost=0,
+        fill_rate=0,
+        daily_pnl_std=0,
+        worst_day=0,
+        best_day=0,
+    )
+
+
+def _compute_sortino_ratio(daily_returns: pd.Series, periods_per_year: float) -> float:
+    target_return = 0.0
+    downside_returns = daily_returns[daily_returns < target_return]
+    if len(downside_returns) == 0:
+        return 0.0
+
+    downside_deviation = np.sqrt(np.mean((downside_returns - target_return) ** 2))
+    if downside_deviation <= 0:
+        return 0.0
+
+    excess_return = daily_returns.mean() - target_return
+    return float((excess_return / downside_deviation) * np.sqrt(periods_per_year))
+
+
+def _compute_trade_stats(
+    trade_count: int, daily_returns: pd.Series
+) -> Tuple[float, float, float, float]:
+    if trade_count <= 0 or len(daily_returns) == 0:
+        return 0.0, 0.0, 0.0, 0.0
+
+    wins_pnl = daily_returns[daily_returns > 0]
+    losses_pnl = daily_returns[daily_returns < 0]
+    win_rate = float((daily_returns > 0).sum() / len(daily_returns))
+
+    avg_win = float(wins_pnl.mean()) if len(wins_pnl) > 0 else 0.0
+    avg_loss = float(abs(losses_pnl.mean())) if len(losses_pnl) > 0 else 0.0
+    total_gains = float(wins_pnl.sum()) if len(wins_pnl) > 0 else 0.0
+    total_losses = float(abs(losses_pnl.sum())) if len(losses_pnl) > 0 else 0.0
+    profit_factor = total_gains / total_losses if total_losses > 0 else float("inf")
+    return win_rate, avg_win, avg_loss, profit_factor
+
+
+def _compute_drawdown_series(pnl_series: pd.Series, initial_capital: float) -> pd.Series:
+    running_max = pnl_series.expanding().max()
+    return (pnl_series - running_max) / (running_max + initial_capital)
+
+
 class StrategyArena:
     """Fair comparison framework for market making strategies."""
 
@@ -225,30 +289,7 @@ class StrategyArena:
         pnl_series = result.pnl_series
 
         if len(pnl_series) == 0:
-            return StrategyScorecard(
-                strategy_name=result.strategy_name,
-                total_pnl=0,
-                total_return_pct=0,
-                annualized_return=0,
-                sharpe_ratio=0,
-                deflated_sharpe_ratio=0,
-                sortino_ratio=0,
-                max_drawdown=0,
-                calmar_ratio=0,
-                total_trades=0,
-                win_rate=0,
-                avg_trade_pnl=0,
-                avg_win=0,
-                avg_loss=0,
-                profit_factor=0,
-                spread_capture=0,
-                adverse_selection_cost=0,
-                inventory_cost=0,
-                fill_rate=0,
-                daily_pnl_std=0,
-                worst_day=0,
-                best_day=0,
-            )
+            return _build_empty_scorecard(result)
 
         total_pnl = result.total_pnl_usd
         total_return_pct = total_pnl / self.initial_capital
@@ -264,19 +305,7 @@ class StrategyArena:
         sharpe = result.sharpe_ratio
         deflated_sharpe = getattr(result, "deflated_sharpe_ratio", 0.0)
 
-        target_return = 0.0
-        downside_returns = daily_returns[daily_returns < target_return]
-        if len(downside_returns) > 0:
-            downside_deviation = np.sqrt(np.mean((downside_returns - target_return) ** 2))
-            if downside_deviation > 0:
-                excess_return = daily_returns.mean() - target_return
-                sortino = (excess_return / downside_deviation) * np.sqrt(
-                    self._periods_per_year(daily_returns)
-                )
-            else:
-                sortino = 0.0
-        else:
-            sortino = 0.0
+        sortino = _compute_sortino_ratio(daily_returns, self._periods_per_year(daily_returns))
 
         min_drawdown_threshold = 0.001
         if abs(result.max_drawdown) > min_drawdown_threshold:
@@ -284,32 +313,15 @@ class StrategyArena:
         else:
             calmar = 0.0
 
-        if result.trade_count > 0 and len(daily_returns) > 0:
-            wins = (daily_returns > 0).sum()
-            total_days = len(daily_returns)
-            win_rate = wins / total_days
-
-            wins_pnl = daily_returns[daily_returns > 0]
-            losses_pnl = daily_returns[daily_returns < 0]
-
-            avg_win = wins_pnl.mean() if len(wins_pnl) > 0 else 0
-            avg_loss = abs(losses_pnl.mean()) if len(losses_pnl) > 0 else 0
-
-            total_gains = wins_pnl.sum() if len(wins_pnl) > 0 else 0
-            total_losses = abs(losses_pnl.sum()) if len(losses_pnl) > 0 else 0
-            profit_factor = total_gains / total_losses if total_losses > 0 else float("inf")
-        else:
-            win_rate = 0.0
-            avg_win = 0.0
-            avg_loss = 0.0
-            profit_factor = 0.0
+        win_rate, avg_win, avg_loss, profit_factor = _compute_trade_stats(
+            result.trade_count, daily_returns
+        )
 
         daily_pnl_std = daily_returns.std()
         worst_day = daily_returns.min() if len(daily_returns) > 0 else 0
         best_day = daily_returns.max() if len(daily_returns) > 0 else 0
 
-        running_max = pnl_series.expanding().max()
-        drawdown_series = (pnl_series - running_max) / (running_max + self.initial_capital)
+        drawdown_series = _compute_drawdown_series(pnl_series, self.initial_capital)
 
         return StrategyScorecard(
             strategy_name=result.strategy_name,
