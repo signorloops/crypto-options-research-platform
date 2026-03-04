@@ -162,44 +162,29 @@ class OKXClient(ExchangeInterface):
         self,
         underlying: str = "BTC-USD"
     ) -> List[OptionContract]:
-        """
-        Get option instruments with detailed info (coin-margined only).
-
-        Args:
-            underlying: 'BTC-USD' or 'ETH-USD' (coin-margined only)
-        """
-        # Validate: only support coin-margined underlyings
+        """Get live coin-margined option instruments for the specified underlying."""
         if underlying not in self.VALID_UNDERLYINGS:
             raise ValueError(
                 f"Only coin-margined options supported {self.VALID_UNDERLYINGS}, got: {underlying}"
             )
         params = {"instType": "OPTION", "uly": underlying}
         result = await self._request("/api/v5/public/instruments", params)
-
         contracts = []
         for inst in result.get("data", []):
             if inst.get("state") != "live":
                 continue
-
-            # Parse instrument ID: e.g., "BTC-USD-240628-50000-C"
             parts = inst["instId"].split("-")
             if len(parts) != 5:
                 continue
-
             base, quote, expiry_str, strike_str, opt_type = parts
-
-            # Parse expiry
             try:
                 expiry = datetime.strptime(f"20{expiry_str}", "%Y%m%d")
             except ValueError:
                 continue
-
-            # Parse strike
             try:
                 strike = float(strike_str)
             except ValueError:
                 continue
-
             contract = OptionContract(
                 underlying=f"{base}-{quote}",
                 strike=strike,
@@ -207,12 +192,11 @@ class OKXClient(ExchangeInterface):
                 option_type=OptionType.CALL if opt_type == "C" else OptionType.PUT,
                 exchange="okx",
                 symbol=inst["instId"],
-                inverse=True,  # Coin-margined
+                inverse=True,
                 lot_size=float(inst.get("lotSz", 1)),
                 tick_size=float(inst.get("tickSz", 0.01))
             )
             contracts.append(contract)
-
         return contracts
 
     async def get_order_book(

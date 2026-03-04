@@ -76,6 +76,20 @@ class WebSocketStream(ABC):
             60.0,  # Max 60 second backoff
         )
 
+    @staticmethod
+    def _enqueue_with_drop_oldest(message_queue: asyncio.Queue, message: Any) -> bool:
+        """Push message to queue, dropping oldest on overflow. True when no drop was needed."""
+        try:
+            message_queue.put_nowait(message)
+            return True
+        except asyncio.QueueFull:
+            try:
+                message_queue.get_nowait()
+                message_queue.put_nowait(message)
+            except (asyncio.QueueEmpty, asyncio.QueueFull):
+                pass
+            return False
+
     async def _emit(self, event_type: str, data: Any) -> None:
         """Emit event to all registered callbacks."""
         for callback in self._callbacks.get(event_type, []):
@@ -137,43 +151,33 @@ class WebSocketStream(ABC):
         queue_full_logged = False
 
         async def producer():
-            """Produce messages from WebSocket to queue."""
             nonlocal queue_full_logged
             try:
                 async for message in websocket:
-                    try:
-                        message_queue.put_nowait(message)
+                    no_drop = self._enqueue_with_drop_oldest(message_queue, message)
+                    if no_drop:
                         queue_full_logged = False
-                    except asyncio.QueueFull:
+                    else:
                         if not queue_full_logged:
                             logger.warning("Message queue full, dropping old messages")
                             queue_full_logged = True
-                        try:
-                            message_queue.get_nowait()
-                            message_queue.put_nowait(message)
-                        except (asyncio.QueueEmpty, asyncio.QueueFull):
-                            pass
             except ConnectionClosed:
                 logger.info("WebSocket connection closed in producer")
             finally:
                 await message_queue.put(None)
 
         async def consumer():
-            """Consume messages from queue."""
             while True:
                 try:
                     message = await message_queue.get()
                     if message is None:
                         break
-
                     try:
                         parsed = self.parse_message(message)
                         if parsed:
                             await self._route_message(parsed)
                     except (json.JSONDecodeError, KeyError, TypeError) as e:
                         await self._emit('error', e)
-                    except asyncio.CancelledError:
-                        raise
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
