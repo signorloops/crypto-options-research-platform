@@ -71,54 +71,36 @@ class DataCache:
         end: datetime,
         processed: bool = False
     ) -> Optional[pd.DataFrame]:
-        """
-        Retrieve cached data for date range.
-
-        Returns:
-            DataFrame if all dates cached, None otherwise
-        """
+        """Retrieve cached data for a date range, returning None if any day is missing."""
         if start > end:
             raise ValueError("start must be <= end")
-
         frames = []
-
         current = start.replace(hour=0, minute=0, second=0, microsecond=0)
         end_date = end.replace(hour=0, minute=0, second=0, microsecond=0)
-
         while current <= end_date:
             cache_path = self._get_cache_path(
                 exchange, data_type, instrument, current, processed
             )
-
             if not cache_path.exists():
-                return None  # Missing data
-
+                return None
             try:
                 df = pd.read_parquet(cache_path)
                 frames.append(df)
             except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError) as e:
-                # Handle corrupted or unreadable cache files
                 logger.warning("Failed to read cache file", extra=log_extra(path=str(cache_path), error=str(e)))
                 return None
-
             current += timedelta(days=1)
-
         if not frames:
             return None
-
-        # Concatenate and filter to exact time range
         combined = pd.concat(frames, ignore_index=True)
-
         if 'timestamp' in combined.columns:
             combined['timestamp'] = pd.to_datetime(combined['timestamp'])
-            # If start and end are the same day (midnight), treat end as end of day
             if start == end and start.hour == 0 and start.minute == 0:
                 end = end + timedelta(days=1) - timedelta(microseconds=1)
             combined = combined[
                 (combined['timestamp'] >= start) &
                 (combined['timestamp'] <= end)
             ]
-
         return combined.reset_index(drop=True)
 
     def put(
