@@ -96,50 +96,54 @@ def _normalize_okx_option_summary(
     now = pd.Timestamp.now(tz="UTC")
     normalized_rows: list[dict[str, Any]] = []
     for row in rows:
-        if not isinstance(row, dict):
-            continue
-        price_raw = (
-            row.get("markPx")
-            or row.get("markPrice")
-            or row.get("last")
-            or row.get("lastPr")
-            or row.get("askPx")
-            or row.get("bidPx")
-        )
-        price = pd.to_numeric(price_raw, errors="coerce")
-        if pd.isna(price):
-            continue
-        symbol = str(row.get("instId") or row.get("instFamily") or underlying)
-        option_type = _normalize_option_type(row.get("optType"), symbol)
-        timestamp_numeric = pd.to_numeric(
-            row.get("ts") or row.get("uTime") or row.get("cTime"), errors="coerce"
-        )
-        timestamp = pd.to_datetime(timestamp_numeric, unit="ms", utc=True, errors="coerce")
-        if pd.isna(timestamp):
-            timestamp = now
-        expiry_years = 0.0
-        expiry_ts = pd.to_datetime(
-            pd.to_numeric(row.get("expTime"), errors="coerce"), unit="ms", utc=True, errors="coerce"
-        )
-        if not pd.isna(expiry_ts):
-            expiry_years = max((expiry_ts - now).total_seconds(), 0.0) / (365.0 * 24.0 * 3600.0)
-        delta = pd.to_numeric(row.get("delta"), errors="coerce")
-        if pd.isna(delta):
-            delta = 0.5
-        normalized_rows.append(
-            {
-                "timestamp": timestamp,
-                "price": float(price),
-                "symbol": symbol,
-                "option_type": option_type,
-                "expiry_years": float(expiry_years),
-                "delta": float(delta),
-                "venue": "okx",
-            }
-        )
+        normalized = _normalize_okx_option_row(row=row, now=now, underlying=underlying)
+        if normalized is not None:
+            normalized_rows.append(normalized)
     if not normalized_rows:
         raise ValueError("No valid rows in OKX option summary payload")
     return _normalize_quotes(pd.DataFrame(normalized_rows), fallback_venue="okx")
+
+
+def _normalize_okx_option_row(
+    *, row: dict[str, Any], now: pd.Timestamp, underlying: str
+) -> dict[str, Any] | None:
+    if not isinstance(row, dict):
+        return None
+    price_raw = (
+        row.get("markPx")
+        or row.get("markPrice")
+        or row.get("last")
+        or row.get("lastPr")
+        or row.get("askPx")
+        or row.get("bidPx")
+    )
+    price = pd.to_numeric(price_raw, errors="coerce")
+    if pd.isna(price):
+        return None
+    symbol = str(row.get("instId") or row.get("instFamily") or underlying)
+    option_type = _normalize_option_type(row.get("optType"), symbol)
+    timestamp_numeric = pd.to_numeric(row.get("ts") or row.get("uTime") or row.get("cTime"), errors="coerce")
+    timestamp = pd.to_datetime(timestamp_numeric, unit="ms", utc=True, errors="coerce")
+    if pd.isna(timestamp):
+        timestamp = now
+    expiry_years = 0.0
+    expiry_ts = pd.to_datetime(
+        pd.to_numeric(row.get("expTime"), errors="coerce"), unit="ms", utc=True, errors="coerce"
+    )
+    if not pd.isna(expiry_ts):
+        expiry_years = max((expiry_ts - now).total_seconds(), 0.0) / (365.0 * 24.0 * 3600.0)
+    delta = pd.to_numeric(row.get("delta"), errors="coerce")
+    if pd.isna(delta):
+        delta = 0.5
+    return {
+        "timestamp": timestamp,
+        "price": float(price),
+        "symbol": symbol,
+        "option_type": option_type,
+        "expiry_years": float(expiry_years),
+        "delta": float(delta),
+        "venue": "okx",
+    }
 
 
 def _align_cex_defi_quotes(

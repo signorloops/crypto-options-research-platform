@@ -392,36 +392,20 @@ class VaRCalculator:
         )
         portfolio_returns = self._portfolio_return_series(aligned_returns, weights_arr) * np.sqrt(holding_period)
         losses = -portfolio_returns
-        if len(losses) < 50:
+        tail_fit = self._fit_evt_tail(losses=losses, threshold_quantile=threshold_quantile)
+        if tail_fit is None:
             return self.historical_var(positions, returns, holding_period)
-        threshold = float(np.quantile(losses, threshold_quantile))
-        tail_losses = losses[losses > threshold]
-        if len(tail_losses) < 20:
-            return self.historical_var(positions, returns, holding_period)
-        excess = tail_losses - threshold
-        shape, loc, scale = stats.genpareto.fit(excess, floc=0.0)
-        pu = len(tail_losses) / len(losses)
-
-        def evt_quantile(alpha: float) -> float:
-            tail_prob = (1 - alpha) / max(pu, 1e-12)
-            tail_prob = max(tail_prob, 1e-12)
-            if abs(shape) < 1e-8:
-                q = threshold + scale * np.log(1.0 / tail_prob)
-            else:
-                q = threshold + scale / shape * (tail_prob ** (-shape) - 1.0)
-            return float(max(q, 0.0))
-        q95 = evt_quantile(0.95)
-        q99 = evt_quantile(0.99)
+        threshold, shape, scale, pu = tail_fit
+        q95 = self._evt_quantile(alpha=0.95, threshold=threshold, shape=shape, scale=scale, pu=pu)
+        q99 = self._evt_quantile(alpha=0.99, threshold=threshold, shape=shape, scale=scale, pu=pu)
         var_95 = q95 * total_value
         var_99 = q99 * total_value
-
-        def evt_es(q_alpha: float, alpha: float) -> float:
-            if shape >= 1:
-                return float(q_alpha * total_value)
-            es_loss = q_alpha + (scale - shape * threshold) / (1 - shape)
-            return float(max(es_loss, q_alpha) * total_value)
-        cvar_95 = evt_es(q95, 0.95)
-        cvar_99 = evt_es(q99, 0.99)
+        cvar_95 = self._evt_expected_shortfall(
+            q_alpha=q95, threshold=threshold, shape=shape, scale=scale, total_value=total_value
+        )
+        cvar_99 = self._evt_expected_shortfall(
+            q_alpha=q99, threshold=threshold, shape=shape, scale=scale, total_value=total_value
+        )
         return VaRResult(
             var_95=float(var_95),
             var_99=float(var_99),
@@ -429,6 +413,42 @@ class VaRCalculator:
             cvar_99=float(cvar_99),
             method="evt",
         )
+
+    @staticmethod
+    def _fit_evt_tail(
+        *, losses: np.ndarray, threshold_quantile: float
+    ) -> tuple[float, float, float, float] | None:
+        if len(losses) < 50:
+            return None
+        threshold = float(np.quantile(losses, threshold_quantile))
+        tail_losses = losses[losses > threshold]
+        if len(tail_losses) < 20:
+            return None
+        excess = tail_losses - threshold
+        shape, _loc, scale = stats.genpareto.fit(excess, floc=0.0)
+        pu = len(tail_losses) / len(losses)
+        return threshold, float(shape), float(scale), float(pu)
+
+    @staticmethod
+    def _evt_quantile(
+        *, alpha: float, threshold: float, shape: float, scale: float, pu: float
+    ) -> float:
+        tail_prob = (1 - alpha) / max(pu, 1e-12)
+        tail_prob = max(tail_prob, 1e-12)
+        if abs(shape) < 1e-8:
+            q = threshold + scale * np.log(1.0 / tail_prob)
+        else:
+            q = threshold + scale / shape * (tail_prob ** (-shape) - 1.0)
+        return float(max(q, 0.0))
+
+    @staticmethod
+    def _evt_expected_shortfall(
+        *, q_alpha: float, threshold: float, shape: float, scale: float, total_value: float
+    ) -> float:
+        if shape >= 1:
+            return float(q_alpha * total_value)
+        es_loss = q_alpha + (scale - shape * threshold) / (1 - shape)
+        return float(max(es_loss, q_alpha) * total_value)
 
     @staticmethod
     def _regularize_covariance(cov: np.ndarray) -> np.ndarray:

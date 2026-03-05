@@ -83,6 +83,25 @@ def _append_partial_bucket(
     return bucket_timestamps, buy_buckets, sell_buckets, total_buckets
 
 
+def _volume_inputs_from_df(
+    df: pd.DataFrame,
+) -> Tuple[np.ndarray, np.ndarray, float, np.ndarray, np.ndarray] | None:
+    if df.empty:
+        return None
+    prices = df["price"].to_numpy(dtype=float)
+    sizes = df["size"].to_numpy(dtype=float)
+    sides = df["side"].to_numpy()
+    timestamps = df["timestamp"].to_numpy()
+    volumes = np.maximum(sizes * prices, 0.0)
+    if len(volumes) == 0:
+        return None
+    cum_total = np.cumsum(volumes)
+    total_volume = float(cum_total[-1]) if len(cum_total) else 0.0
+    if total_volume <= 0:
+        return None
+    return volumes, cum_total, total_volume, sides, timestamps
+
+
 @dataclass
 class VPINResult:
     """Result of VPIN calculation."""
@@ -247,19 +266,10 @@ class VPINCalculator:
 
     def _create_volume_buckets(self, df: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Create volume-synchronized buckets via cumsum/searchsorted."""
-        if df.empty:
+        inputs = _volume_inputs_from_df(df)
+        if inputs is None:
             return _empty_bucket_arrays()
-        prices = df['price'].to_numpy(dtype=float)
-        sizes = df['size'].to_numpy(dtype=float)
-        sides = df['side'].to_numpy()
-        timestamps = df['timestamp'].to_numpy()
-        volumes = np.maximum(sizes * prices, 0.0)
-        if len(volumes) == 0:
-            return _empty_bucket_arrays()
-        cum_total = np.cumsum(volumes)
-        total_volume = float(cum_total[-1]) if len(cum_total) else 0.0
-        if total_volume <= 0:
-            return _empty_bucket_arrays()
+        volumes, cum_total, total_volume, sides, timestamps = inputs
         bucket_size = float(self.volume_bucket_size)
         n_full = int(total_volume // bucket_size)
         residual = total_volume - n_full * bucket_size

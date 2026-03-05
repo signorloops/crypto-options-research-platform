@@ -207,6 +207,44 @@ class GreeksRiskAnalyzer:
             )
         return total
 
+    def _contract_greeks(
+        self,
+        *,
+        contract: OptionContract,
+        spot: float,
+        implied_vol: float,
+        as_of: datetime,
+        option_type: str,
+    ) -> Greeks:
+        if contract.is_coin_margined:
+            from research.pricing.inverse_options import InverseOptionPricer
+
+            inv_greeks = InverseOptionPricer.calculate_greeks(
+                S=spot,
+                K=contract.strike,
+                T=contract.time_to_expiry(as_of),
+                r=self.risk_free_rate,
+                sigma=implied_vol,
+                option_type=option_type,
+            )
+            return Greeks(
+                delta=inv_greeks.delta,
+                gamma=inv_greeks.gamma,
+                theta=inv_greeks.theta,
+                vega=inv_greeks.vega,
+                rho=inv_greeks.rho,
+                vanna=inv_greeks.vanna,
+                charm=inv_greeks.charm,
+            )
+        return self.calculator.calculate(
+            S=spot,
+            K=contract.strike,
+            T=contract.time_to_expiry(as_of),
+            r=self.risk_free_rate,
+            sigma=implied_vol,
+            option_type=option_type,
+        )
+
     def analyze_position(
         self,
         position: Position,
@@ -216,38 +254,10 @@ class GreeksRiskAnalyzer:
         as_of: datetime
     ) -> Tuple[Greeks, Greeks]:
         """Calculate per-contract and position-scaled Greeks for a single option position."""
-        T = contract.time_to_expiry(as_of)
         option_type = 'call' if contract.option_type.value == 'C' else 'put'
-
-        if contract.is_coin_margined:
-            from research.pricing.inverse_options import InverseOptionPricer
-            inv_greeks = InverseOptionPricer.calculate_greeks(
-                S=spot,
-                K=contract.strike,
-                T=T,
-                r=self.risk_free_rate,
-                sigma=implied_vol,
-                option_type=option_type
-            )
-            greeks = Greeks(
-                delta=inv_greeks.delta,
-                gamma=inv_greeks.gamma,
-                theta=inv_greeks.theta,
-                vega=inv_greeks.vega,
-                rho=inv_greeks.rho,
-                vanna=inv_greeks.vanna,
-                charm=inv_greeks.charm
-            )
-        else:
-            greeks = self.calculator.calculate(
-                S=spot,
-                K=contract.strike,
-                T=T,
-                r=self.risk_free_rate,
-                sigma=implied_vol,
-                option_type=option_type
-            )
-
+        greeks = self._contract_greeks(
+            contract=contract, spot=spot, implied_vol=implied_vol, as_of=as_of, option_type=option_type
+        )
         position_greeks = Greeks(
             delta=greeks.delta * position.size,
             gamma=greeks.gamma * position.size,
