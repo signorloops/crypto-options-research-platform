@@ -322,43 +322,55 @@ class GreeksRiskAnalyzer:
         Returns:
             DataFrame with PnL for each scenario
         """
-        if spot_shocks is None:
-            spot_shocks = [0.9, 0.95, 0.98, 1.0, 1.02, 1.05, 1.1]
-        if vol_shocks is None:
-            vol_shocks = [-0.2, -0.1, 0, 0.1, 0.2]
-
+        spot_shocks = spot_shocks or self._default_spot_shocks()
+        vol_shocks = vol_shocks or self._default_vol_shocks()
         results = []
-
         for spot_mult in spot_shocks:
             for vol_change in vol_shocks:
-                pnl = 0
-
-                for position, contract, spot, iv in positions:
-                    base_greeks, _ = self.analyze_position(
-                        position, contract, spot, iv, as_of
+                pnl = sum(
+                    self._scenario_position_pnl(
+                        position=position,
+                        contract=contract,
+                        spot=spot,
+                        iv=iv,
+                        as_of=as_of,
+                        spot_mult=spot_mult,
+                        vol_change=vol_change,
                     )
-
-                    shocked_spot = spot * spot_mult
-                    shocked_iv = max(0.01, iv + vol_change)
-
-                    shocked_greeks, _ = self.analyze_position(
-                        position, contract, shocked_spot, shocked_iv, as_of
-                    )
-
-                    # Simplified PnL from Greeks
-                    delta_pnl = base_greeks.delta * (shocked_spot - spot) * position.size
-                    vega_pnl = base_greeks.vega * vol_change * 100 * position.size
-                    gamma_pnl = 0.5 * base_greeks.gamma * (shocked_spot - spot)**2 * position.size
-
-                    pnl += delta_pnl + vega_pnl + gamma_pnl
-
-                results.append({
-                    'spot_shock': f"{spot_mult:.0%}",
-                    'vol_shock': f"{vol_change:+.0%}",
-                    'pnl': pnl
-                })
-
+                    for position, contract, spot, iv in positions
+                )
+                results.append(
+                    {"spot_shock": f"{spot_mult:.0%}", "vol_shock": f"{vol_change:+.0%}", "pnl": pnl}
+                )
         return pd.DataFrame(results)
+
+    @staticmethod
+    def _default_spot_shocks() -> List[float]:
+        return [0.9, 0.95, 0.98, 1.0, 1.02, 1.05, 1.1]
+
+    @staticmethod
+    def _default_vol_shocks() -> List[float]:
+        return [-0.2, -0.1, 0, 0.1, 0.2]
+
+    def _scenario_position_pnl(
+        self,
+        *,
+        position: Position,
+        contract: OptionContract,
+        spot: float,
+        iv: float,
+        as_of: datetime,
+        spot_mult: float,
+        vol_change: float,
+    ) -> float:
+        base_greeks, _ = self.analyze_position(position, contract, spot, iv, as_of)
+        shocked_spot = spot * spot_mult
+        shocked_iv = max(0.01, iv + vol_change)
+        _shocked_greeks, _ = self.analyze_position(position, contract, shocked_spot, shocked_iv, as_of)
+        delta_pnl = base_greeks.delta * (shocked_spot - spot) * position.size
+        vega_pnl = base_greeks.vega * vol_change * 100 * position.size
+        gamma_pnl = 0.5 * base_greeks.gamma * (shocked_spot - spot) ** 2 * position.size
+        return float(delta_pnl + vega_pnl + gamma_pnl)
 
     def find_hedge_ratio(
         self,
