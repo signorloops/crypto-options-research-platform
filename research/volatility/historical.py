@@ -19,6 +19,15 @@ import numpy as np
 import pandas as pd
 
 
+def _demeaned_sample_variance(values: np.ndarray) -> float:
+    """Sample variance of a vector after demeaning; returns 0 for insufficient length."""
+    n = len(values)
+    if n < 2:
+        return 0.0
+    centered = values - np.mean(values)
+    return float(np.sum(centered**2) / (n - 1))
+
+
 def realized_variance(returns: np.ndarray) -> float:
     """
     计算已实现方差 (Realized Variance)。
@@ -219,29 +228,16 @@ def yang_zhang_volatility(open: np.ndarray, high: np.ndarray,
     if n < 2:
         return 0.0
 
-    # 隔夜波动率 (overnight)
     log_oc_prev = np.log(open[1:] / close[:-1])
-    # 使用 n-2 自由度进行无偏估计 (去均值消耗1个自由度)
-    var_o = np.sum((log_oc_prev - np.mean(log_oc_prev)) ** 2) / (n - 2) if n > 2 else 0.0
-
-    # 开盘-收盘波动率 (n-1 自由度无偏估计)
+    var_o = _demeaned_sample_variance(log_oc_prev)
     log_oc = np.log(close / open)
-    var_c = np.sum((log_oc - np.mean(log_oc)) ** 2) / (n - 1)
-
-    # Rogers-Satchell 分量
+    var_c = _demeaned_sample_variance(log_oc)
     var_rs = rogers_satchell_volatility(open, high, low, close, annualize=False, periods=periods) ** 2
 
-    # 权重 k
     k = 0.34 / (1.34 + (n + 1) / (n - 1))
-
     var_yz = var_o + k * var_c + (1 - k) * var_rs
-    var_yz = max(var_yz, 0)
-    vol = np.sqrt(var_yz)
-
-    if annualize:
-        vol *= np.sqrt(periods)
-
-    return float(vol)
+    vol = np.sqrt(max(var_yz, 0.0))
+    return float(vol * np.sqrt(periods)) if annualize else float(vol)
 
 
 def calculate_volatility_from_ohlc(df: pd.DataFrame, method: str = "yang_zhang",

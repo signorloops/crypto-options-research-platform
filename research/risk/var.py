@@ -325,23 +325,17 @@ class VaRCalculator:
         if len(portfolio_returns) < 30:
             return self.historical_var(positions, returns, holding_period)
 
-        eps = 1e-12
-        ewma_var = np.zeros_like(portfolio_returns, dtype=float)
-        ewma_var[0] = np.var(portfolio_returns)
-        for i in range(1, len(portfolio_returns)):
-            ewma_var[i] = (
-                lambda_param * ewma_var[i - 1] + (1 - lambda_param) * portfolio_returns[i - 1] ** 2
-            )
-
-        cond_vol = np.sqrt(np.maximum(ewma_var, eps))
+        cond_vol = self._ewma_conditional_volatility(
+            portfolio_returns=portfolio_returns, lambda_param=lambda_param
+        )
         standardized = portfolio_returns / cond_vol
-        latest_vol = cond_vol[-1]
-
-        rng = np.random.default_rng(random_seed)
-        n_sim = max(5000, len(portfolio_returns) * 20)
-        sampled_resid = rng.choice(standardized, size=n_sim, replace=True)
-        simulated_returns = sampled_resid * latest_vol * np.sqrt(holding_period)
-        pnl = simulated_returns * total_value
+        pnl = self._simulate_fhs_pnl(
+            standardized_returns=standardized,
+            latest_vol=float(cond_vol[-1]),
+            holding_period=holding_period,
+            total_value=total_value,
+            random_seed=random_seed,
+        )
 
         var_95 = -np.percentile(pnl, 5)
         var_99 = -np.percentile(pnl, 1)
@@ -355,6 +349,33 @@ class VaRCalculator:
             cvar_99=float(cvar_99),
             method="fhs",
         )
+
+    @staticmethod
+    def _ewma_conditional_volatility(
+        *, portfolio_returns: np.ndarray, lambda_param: float, eps: float = 1e-12
+    ) -> np.ndarray:
+        ewma_var = np.zeros_like(portfolio_returns, dtype=float)
+        ewma_var[0] = np.var(portfolio_returns)
+        for i in range(1, len(portfolio_returns)):
+            ewma_var[i] = (
+                lambda_param * ewma_var[i - 1] + (1 - lambda_param) * portfolio_returns[i - 1] ** 2
+            )
+        return np.sqrt(np.maximum(ewma_var, eps))
+
+    @staticmethod
+    def _simulate_fhs_pnl(
+        *,
+        standardized_returns: np.ndarray,
+        latest_vol: float,
+        holding_period: int,
+        total_value: float,
+        random_seed: int | None,
+    ) -> np.ndarray:
+        rng = np.random.default_rng(random_seed)
+        n_sim = max(5000, len(standardized_returns) * 20)
+        sampled_resid = rng.choice(standardized_returns, size=n_sim, replace=True)
+        simulated_returns = sampled_resid * latest_vol * np.sqrt(holding_period)
+        return simulated_returns * total_value
 
     def evt_var(
         self,
