@@ -70,6 +70,65 @@ class StandardFormatter(logging.Formatter):
         )
 
 
+def _resolve_logging_config(
+    level: Optional[str],
+    log_file: Optional[str],
+    log_format: Optional[str],
+) -> tuple[str, Optional[str], str]:
+    """Resolve logging config values from args/environment with defaults."""
+    resolved_level = level or os.getenv("LOG_LEVEL", "INFO")
+    default_log_file = str(Path(__file__).resolve().parent.parent / "logs" / "corp.log")
+    resolved_log_file = log_file or os.getenv("LOG_FILE", default_log_file)
+    resolved_log_format = log_format or os.getenv("LOG_FORMAT", "standard")
+    return resolved_level, resolved_log_file, resolved_log_format
+
+
+def _build_formatter(log_format: str) -> logging.Formatter:
+    return JSONFormatter() if log_format.lower() == "json" else StandardFormatter()
+
+
+def _add_console_handler(
+    root_logger: logging.Logger, numeric_level: int, formatter: logging.Formatter
+) -> None:
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(numeric_level)
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+
+
+def _add_rotating_file_handler(
+    *,
+    root_logger: logging.Logger,
+    numeric_level: int,
+    formatter: logging.Formatter,
+    log_file: str,
+    max_bytes: int,
+    backup_count: int,
+) -> None:
+    log_path = Path(log_file)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    os.chmod(log_path.parent, 0o750)
+
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_file,
+        maxBytes=max_bytes,
+        backupCount=backup_count,
+        encoding="utf-8",
+    )
+    file_handler.setLevel(numeric_level)
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
+
+    if os.path.exists(log_file):
+        os.chmod(log_file, 0o640)
+
+
+def _set_noisy_dependency_levels() -> None:
+    logging.getLogger("websockets").setLevel(logging.WARNING)
+    logging.getLogger("aiohttp").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+
 def setup_logging(
     level: Optional[str] = None,
     log_file: Optional[str] = None,
@@ -79,50 +138,26 @@ def setup_logging(
     force: bool = True,
 ) -> None:
     """配置全局日志系统。"""
-    level = level or os.getenv("LOG_LEVEL", "INFO")
-    default_log_file = str(Path(__file__).resolve().parent.parent / "logs" / "corp.log")
-    log_file = log_file or os.getenv("LOG_FILE", default_log_file)
-    log_format = log_format or os.getenv("LOG_FORMAT", "standard")
-
+    level, log_file, log_format = _resolve_logging_config(level, log_file, log_format)
     numeric_level = getattr(logging, level.upper(), logging.INFO)
-
     root_logger = logging.getLogger()
     root_logger.setLevel(numeric_level)
-
     if force:
         root_logger.handlers = []
 
-    if log_format.lower() == "json":
-        formatter: logging.Formatter = JSONFormatter()
-    else:
-        formatter = StandardFormatter()
-
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(numeric_level)
-    console_handler.setFormatter(formatter)
-    root_logger.addHandler(console_handler)
+    formatter = _build_formatter(log_format)
+    _add_console_handler(root_logger, numeric_level, formatter)
 
     if log_file:
-        log_path = Path(log_file)
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        os.chmod(log_path.parent, 0o750)
-
-        file_handler = logging.handlers.RotatingFileHandler(
-            log_file,
-            maxBytes=max_bytes,
-            backupCount=backup_count,
-            encoding="utf-8",
+        _add_rotating_file_handler(
+            root_logger=root_logger,
+            numeric_level=numeric_level,
+            formatter=formatter,
+            log_file=log_file,
+            max_bytes=max_bytes,
+            backup_count=backup_count,
         )
-        file_handler.setLevel(numeric_level)
-        file_handler.setFormatter(formatter)
-        root_logger.addHandler(file_handler)
-
-        if os.path.exists(log_file):
-            os.chmod(log_file, 0o640)
-
-    logging.getLogger("websockets").setLevel(logging.WARNING)
-    logging.getLogger("aiohttp").setLevel(logging.WARNING)
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    _set_noisy_dependency_levels()
 
     logging.info(f"Logging configured: level={level}, format={log_format}, file={log_file}")
 

@@ -262,28 +262,9 @@ class ScenarioGenerator:
             for path in sorted(data_path.rglob("*")):
                 if not path.is_file():
                     continue
-                suffix = "".join(path.suffixes).lower()
-                if suffix.endswith(".parquet"):
-                    try:
-                        raw = pd.read_parquet(path)
-                    except HISTORICAL_LOAD_EXCEPTIONS as exc:
-                        logger.warning(
-                            "Skipping unreadable historical file",
-                            extra=log_extra(path=str(path), error=str(exc)),
-                        )
-                        continue
-                elif suffix.endswith(".csv") or suffix.endswith(".csv.gz"):
-                    try:
-                        raw = pd.read_csv(path)
-                    except HISTORICAL_LOAD_EXCEPTIONS as exc:
-                        logger.warning(
-                            "Skipping unreadable historical file",
-                            extra=log_extra(path=str(path), error=str(exc)),
-                        )
-                        continue
-                else:
+                raw = self._read_historical_file(path)
+                if raw is None:
                     continue
-
                 normalized = self._normalize_historical_frame(raw, start_ts, end_ts)
                 if normalized is not None and not normalized.empty:
                     frames.append(normalized)
@@ -301,6 +282,24 @@ class ScenarioGenerator:
         synthetic = self._generate_single_hawkes_scenario(config, seed_offset=start.month)
         synthetic["scenario_source"] = "synthetic_proxy"
         return synthetic
+
+    @staticmethod
+    def _read_historical_file(path: Path) -> Optional[pd.DataFrame]:
+        suffix = "".join(path.suffixes).lower()
+        if suffix.endswith(".parquet"):
+            reader = pd.read_parquet
+        elif suffix.endswith(".csv") or suffix.endswith(".csv.gz"):
+            reader = pd.read_csv
+        else:
+            return None
+        try:
+            return reader(path)
+        except HISTORICAL_LOAD_EXCEPTIONS as exc:
+            logger.warning(
+                "Skipping unreadable historical file",
+                extra=log_extra(path=str(path), error=str(exc)),
+            )
+            return None
 
     @staticmethod
     def _to_utc_timestamp(value: datetime) -> pd.Timestamp:

@@ -424,6 +424,25 @@ class PPOMarketMaker(MarketMakingStrategy):
                 lr=self.config.learning_rate
             )
 
+    def _build_policy_state_tensor(self, state_vec: np.ndarray) -> torch.Tensor:
+        """Build network input tensor, including sequence padding for LSTM mode."""
+        if not self.config.use_lstm:
+            return torch.FloatTensor(state_vec)
+        seq = list(self._state_sequence)
+        if len(seq) < self.config.sequence_length:
+            pad_count = self.config.sequence_length - len(seq)
+            seq = [np.zeros_like(state_vec) for _ in range(pad_count)] + seq
+        return torch.FloatTensor(np.array(seq, dtype=np.float32)).unsqueeze(0)
+
+    @staticmethod
+    def _depth_norms_from_order_book(state: MarketState) -> Tuple[float, float]:
+        if state.order_book is None:
+            return 0.5, 0.5
+        bid_vol = sum(lvl.size for lvl in state.order_book.bids[:5])
+        ask_vol = sum(lvl.size for lvl in state.order_book.asks[:5])
+        denom = bid_vol + ask_vol + 1e-8
+        return bid_vol / denom, ask_vol / denom
+
     def quote(self, state: MarketState, position: Position) -> QuoteAction:
         """Generate quote using PPO policy."""
         mid = state.order_book.mid_price
@@ -433,16 +452,8 @@ class PPOMarketMaker(MarketMakingStrategy):
         state_vec = self._market_state_to_vector(state, position)
         self.current_state = state_vec
         self._state_sequence.append(state_vec)
-
-        if self.config.use_lstm:
-            seq = list(self._state_sequence)
-            if len(seq) < self.config.sequence_length:
-                pad = [np.zeros_like(state_vec) for _ in range(self.config.sequence_length - len(seq))]
-                seq = pad + seq
-            state_tensor = torch.FloatTensor(np.array(seq, dtype=np.float32)).unsqueeze(0)
-        else:
-            state_tensor = torch.FloatTensor(state_vec)
         self._init_network(len(state_vec))
+        state_tensor = self._build_policy_state_tensor(state_vec)
 
         action, value, log_prob = self.network.get_action(state_tensor)
 
@@ -497,11 +508,7 @@ class PPOMarketMaker(MarketMakingStrategy):
         momentum = state.features.get('momentum', 0.0)
         volume_ratio = state.features.get('volume_ratio', 1.0)
         volume_z = state.features.get('volume_zscore', 0.0)
-
-        bid_vol = sum(lvl.size for lvl in state.order_book.bids[:5]) if state.order_book else 1.0
-        ask_vol = sum(lvl.size for lvl in state.order_book.asks[:5]) if state.order_book else 1.0
-        bid_norm = bid_vol / (bid_vol + ask_vol + 1e-8)
-        ask_norm = ask_vol / (bid_vol + ask_vol + 1e-8)
+        bid_norm, ask_norm = self._depth_norms_from_order_book(state)
 
         inventory_abs = abs(position.size) / max(self.config.inventory_limit, 1e-8)
         inv_util = min(1.0, inventory_abs)

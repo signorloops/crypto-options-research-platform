@@ -152,13 +152,7 @@ def validate_datetime_range(
         )
 
     if not allow_future:
-        now = datetime.now(timezone.utc)
-        if start > now:
-            raise DataValidationError(
-                f"Start date ({start}) is in the future", field="start", value=start
-            )
-        if end > now:
-            raise DataValidationError(f"End date ({end}) is in the future", field="end", value=end)
+        _validate_not_future(start=start, end=end)
 
     if max_range_days is not None:
         range_days = (end - start).days
@@ -170,6 +164,16 @@ def validate_datetime_range(
             )
 
     return start, end
+
+
+def _validate_not_future(*, start: datetime, end: datetime) -> None:
+    now = datetime.now(timezone.utc)
+    if start > now:
+        raise DataValidationError(
+            f"Start date ({start}) is in the future", field="start", value=start
+        )
+    if end > now:
+        raise DataValidationError(f"End date ({end}) is in the future", field="end", value=end)
 
 
 def validate_exchange_name(exchange: str) -> str:

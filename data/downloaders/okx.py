@@ -421,42 +421,26 @@ class OKXClient(ExchangeInterface):
         self,
         underlying: str = "BTC-USD"
     ) -> pd.DataFrame:
-        """
-        Get current implied volatility term structure by expiry.
-
-        Uses option market data to extract ATM IV for each expiry.
-
-        Returns:
-            DataFrame with columns: expiry, days_to_expiry, atm_iv
-        """
+        """Get current ATM-implied-volatility term structure across expiries."""
         from datetime import datetime
-
         market_data = await self.get_option_market_data(underlying)
-
         if not market_data:
             return pd.DataFrame()
-
-        # Group by expiry and find ATM options
         expiry_data = {}
         for opt in market_data:
             expiry_ts = opt.get("expTime")
             strike = float(opt.get("stk", 0))
             mark_vol = float(opt.get("markVol", 0))
-            uly_px = float(opt.get("ulyPx", 0))  # Current underlying price
-
+            uly_px = float(opt.get("ulyPx", 0))
             if not expiry_ts or not mark_vol:
                 continue
-
             expiry = datetime.fromtimestamp(int(expiry_ts) / 1000, tz=timezone.utc)
             days_to_exp = (expiry - datetime.now(timezone.utc)).total_seconds() / (24 * 3600)
-
             if days_to_exp <= 0:
                 continue
-
-            # Find options near ATM (within 5%)
             if strike > 0 and uly_px > 0:
                 moneyness = abs(strike - uly_px) / uly_px
-                if moneyness < 0.05:  # Within 5% of ATM
+                if moneyness < 0.05:
                     key = expiry_ts
                     if key not in expiry_data or moneyness < expiry_data[key]["moneyness"]:
                         expiry_data[key] = {
@@ -466,10 +450,8 @@ class OKXClient(ExchangeInterface):
                             "moneyness": moneyness,
                             "strike": strike
                         }
-
         if not expiry_data:
             return pd.DataFrame()
-
         df = pd.DataFrame(list(expiry_data.values()))
         return df.sort_values("days_to_expiry").drop(columns=["moneyness"]).reset_index(drop=True)
 

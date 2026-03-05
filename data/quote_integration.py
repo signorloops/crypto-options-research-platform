@@ -111,21 +111,18 @@ def _normalize_okx_option_summary(
             continue
         symbol = str(row.get("instId") or row.get("instFamily") or underlying)
         option_type = _normalize_option_type(row.get("optType"), symbol)
-        timestamp_raw = row.get("ts") or row.get("uTime") or row.get("cTime")
-        if timestamp_raw is not None:
-            timestamp_numeric = pd.to_numeric(timestamp_raw, errors="coerce")
-            timestamp = pd.to_datetime(timestamp_numeric, unit="ms", utc=True, errors="coerce")
-        else:
-            timestamp = pd.NaT
+        timestamp_numeric = pd.to_numeric(
+            row.get("ts") or row.get("uTime") or row.get("cTime"), errors="coerce"
+        )
+        timestamp = pd.to_datetime(timestamp_numeric, unit="ms", utc=True, errors="coerce")
         if pd.isna(timestamp):
             timestamp = now
         expiry_years = 0.0
-        expiry_raw = row.get("expTime")
-        if expiry_raw is not None:
-            expiry_numeric = pd.to_numeric(expiry_raw, errors="coerce")
-            expiry_ts = pd.to_datetime(expiry_numeric, unit="ms", utc=True, errors="coerce")
-            if not pd.isna(expiry_ts):
-                expiry_years = max((expiry_ts - now).total_seconds(), 0.0) / (365.0 * 24.0 * 3600.0)
+        expiry_ts = pd.to_datetime(
+            pd.to_numeric(row.get("expTime"), errors="coerce"), unit="ms", utc=True, errors="coerce"
+        )
+        if not pd.isna(expiry_ts):
+            expiry_years = max((expiry_ts - now).total_seconds(), 0.0) / (365.0 * 24.0 * 3600.0)
         delta = pd.to_numeric(row.get("delta"), errors="coerce")
         if pd.isna(delta):
             delta = 0.5

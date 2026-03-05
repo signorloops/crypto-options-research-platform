@@ -500,6 +500,45 @@ class VaRCalculator:
         leverage_correlation: float,
         rng: Any,
     ) -> tuple[float, np.ndarray] | None:
+        shocked_spot, shocked_vol, shocked_tte = VaRCalculator._build_revaluation_shocks(
+            inputs=inputs,
+            underlying_returns=underlying_returns,
+            n_simulations=n_simulations,
+            holding_period=holding_period,
+            leverage_correlation=leverage_correlation,
+            rng=rng,
+        )
+        priced = VaRCalculator._price_revalued_inverse_option_series(
+            inputs=inputs,
+            shocked_spot=shocked_spot,
+            shocked_vol=shocked_vol,
+            shocked_tte=shocked_tte,
+        )
+        if priced is None:
+            return None
+        base_price_btc, revalued_price_btc = priced
+
+        if not np.isfinite(base_price_btc):
+            return None
+        base_price_usd = base_price_btc * inputs.spot_0
+        if base_price_usd <= 1e-12:
+            return None
+
+        revalued_price_usd = revalued_price_btc * shocked_spot
+        if not np.isfinite(revalued_price_usd).all():
+            return None
+        return base_price_usd, revalued_price_usd
+
+    @staticmethod
+    def _build_revaluation_shocks(
+        *,
+        inputs: _OptionRevaluationInputs,
+        underlying_returns: np.ndarray,
+        n_simulations: int,
+        holding_period: int,
+        leverage_correlation: float,
+        rng: Any,
+    ) -> tuple[np.ndarray, np.ndarray, float]:
         shocked_spot = np.clip(inputs.spot_0 * np.exp(underlying_returns), 1e-8, None)
         vol_shock_scale = max(inputs.vol_of_vol, 1e-6) * np.sqrt(holding_period / 365.25)
         vol_shock = rng.normal(0.0, vol_shock_scale, n_simulations)
@@ -507,7 +546,16 @@ class VaRCalculator:
             vol_shock += -leverage_correlation * underlying_returns
         shocked_vol = np.clip(inputs.implied_vol * (1.0 + vol_shock), 0.01, 5.0)
         shocked_tte = max(1e-8, inputs.time_to_expiry - holding_period / 365.25)
+        return shocked_spot, shocked_vol, shocked_tte
 
+    @staticmethod
+    def _price_revalued_inverse_option_series(
+        *,
+        inputs: _OptionRevaluationInputs,
+        shocked_spot: np.ndarray,
+        shocked_vol: np.ndarray,
+        shocked_tte: float,
+    ) -> tuple[float, np.ndarray] | None:
         from research.pricing.inverse_options import InverseOptionPricer
 
         try:
@@ -535,17 +583,50 @@ class VaRCalculator:
             )
         except OPTION_PRICING_EXCEPTIONS:
             return None
+        return base_price_btc, revalued_price_btc
 
-        if not np.isfinite(base_price_btc):
-            return None
-        base_price_usd = base_price_btc * inputs.spot_0
-        if base_price_usd <= 1e-12:
-            return None
+    def _non_option_position_pnl(
+        self,
+        *,
+        idx: object,
+        position_value: float,
+        linear_component: np.ndarray,
+        shocks: np.ndarray,
+        greeks: pd.DataFrame | None,
+        n_simulations: int,
+        rng: Any,
+    ) -> np.ndarray:
+        if greeks is not None and idx in greeks.index:
+            return self._greeks_component_pnl(
+                greek_row=greeks.loc[idx],
+                position_value=position_value,
+                shocks=shocks,
+                n_simulations=n_simulations,
+                rng=rng,
+            )
+        return linear_component
 
-        revalued_price_usd = revalued_price_btc * shocked_spot
-        if not np.isfinite(revalued_price_usd).all():
+    @staticmethod
+    def _position_quantity_from_value(position_value: float, base_price_usd: float) -> float | None:
+        quantity = position_value / base_price_usd
+        if not np.isfinite(quantity):
             return None
-        return base_price_usd, revalued_price_usd
+        return float(quantity)
+
+    def _position_revaluation_pnl_or_linear(
+        self,
+        *,
+        position_value: float,
+        linear_component: np.ndarray,
+        revalued: tuple[float, np.ndarray] | None,
+    ) -> np.ndarray:
+        if revalued is None:
+            return linear_component
+        base_price_usd, revalued_price_usd = revalued
+        quantity = self._position_quantity_from_value(position_value, base_price_usd)
+        if quantity is None:
+            return linear_component
+        return quantity * (revalued_price_usd - base_price_usd)
 
     def _single_position_full_revaluation_pnl(
         self,
@@ -566,15 +647,15 @@ class VaRCalculator:
 
         option_type = self._normalize_option_type(row.get("option_type"))
         if option_type is None:
-            if greeks is not None and idx in greeks.index:
-                return self._greeks_component_pnl(
-                    greek_row=greeks.loc[idx],
-                    position_value=position_value,
-                    shocks=simulated_returns[:, default_asset_idx],
-                    n_simulations=n_simulations,
-                    rng=rng,
-                )
-            return linear_component
+            return self._non_option_position_pnl(
+                idx=idx,
+                position_value=position_value,
+                linear_component=linear_component,
+                shocks=simulated_returns[:, default_asset_idx],
+                greeks=greeks,
+                n_simulations=n_simulations,
+                rng=rng,
+            )
 
         inputs = self._parse_option_revaluation_inputs(
             row=row,
@@ -582,8 +663,7 @@ class VaRCalculator:
             default_asset_idx=default_asset_idx,
             column_index=column_index,
         )
-        if inputs is None:
-            return linear_component
+        if inputs is None: return linear_component
 
         underlying_returns = simulated_returns[:, inputs.underlying_idx]
         revalued = self._simulate_revaluation_price_paths(
@@ -594,14 +674,11 @@ class VaRCalculator:
             leverage_correlation=leverage_correlation,
             rng=rng,
         )
-        if revalued is None:
-            return linear_component
-
-        base_price_usd, revalued_price_usd = revalued
-        quantity = position_value / base_price_usd
-        if not np.isfinite(quantity):
-            return linear_component
-        return quantity * (revalued_price_usd - base_price_usd)
+        return self._position_revaluation_pnl_or_linear(
+            position_value=position_value,
+            linear_component=linear_component,
+            revalued=revalued,
+        )
 
     def _option_schema_pnl(
         self,
