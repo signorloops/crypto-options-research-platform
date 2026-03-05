@@ -281,21 +281,16 @@ class RealisticFillSimulator:
         """Estimate fill probability from microstructure features."""
         order_book = market_state.order_book
         if our_side == OrderSide.BUY:
-            our_price = quote.bid_price
-            our_size = max(quote.bid_size, 1e-8)
+            our_price, our_size = quote.bid_price, max(quote.bid_size, 1e-8)
             competitiveness = max(0.0, our_price - trade.price) / max(abs(our_price), 1e-8)
             imbalance_term = float(order_book.imbalance(levels=5))
         else:
-            our_price = quote.ask_price
-            our_size = max(quote.ask_size, 1e-8)
+            our_price, our_size = quote.ask_price, max(quote.ask_size, 1e-8)
             competitiveness = max(0.0, trade.price - our_price) / max(abs(our_price), 1e-8)
             imbalance_term = float(-order_book.imbalance(levels=5))
-        queue_ahead = self._queue_depth_ahead(quote, our_side, order_book)
-        queue_ratio = queue_ahead / our_size; size_ratio = max(float(trade.size), 0.0) / our_size
-        vol = self._short_horizon_volatility(market_state)
-        latency_scale = max(self.config.base_latency_ms + self.config.latency_std_ms + 1.0, 1.0)
+        queue_ratio = (queue_ahead := self._queue_depth_ahead(quote, our_side, order_book)) / our_size; size_ratio = max(float(trade.size), 0.0) / our_size
+        vol = self._short_horizon_volatility(market_state); latency_scale = max(self.config.base_latency_ms + self.config.latency_std_ms + 1.0, 1.0)
         latency_penalty = max(latency_ms, 0.0) / latency_scale
-        # Logistic score calibrated to preserve old baseline behavior while using features.
         score = (
             1.8
             + 45.0 * competitiveness
@@ -306,8 +301,7 @@ class RealisticFillSimulator:
             - 0.25 * max(imbalance_term, 0.0)
             - 0.3 * abs(inventory_pressure)
         )
-        prob = self._sigmoid(score)
-        return float(np.clip(prob, 0.02, 0.98))
+        prob = self._sigmoid(score); return float(np.clip(prob, 0.02, 0.98))
 
     def _check_adverse_selection(self, trade: Trade, market_state: MarketState) -> bool:
         """Check if this trade represents informed flow."""
@@ -340,21 +334,15 @@ class RealisticFillSimulator:
         levels = order_book.bids if side == OrderSide.BUY else order_book.asks
         if not levels or trade_size <= 0:
             return quote_price
-
-        remaining = trade_size
-        notional = 0.0
-
+        remaining = trade_size; notional = 0.0
         for level in levels:
-            if remaining <= 0:
-                break
+            if remaining <= 0: break
             take = min(remaining, level.size)
             notional += take * level.price
             remaining -= take
-
         if remaining > 0:
             penalty = quote_price * (1.0005 if side == OrderSide.BUY else 0.9995)
             notional += remaining * penalty
-
         vwap = notional / trade_size
         random_slip = abs(float(self.rng.normal(0.0, quote_price * 0.0001)))
         if side == OrderSide.BUY:

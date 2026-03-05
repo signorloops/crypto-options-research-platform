@@ -71,7 +71,6 @@ class QuantoInversePowerOptionPricer:
     ) -> float:
         """Calculate quanto-inverse-power option price in settlement currency."""
         QuantoInversePowerOptionPricer._validate_quanto_inputs(fx_rate, sigma_fx, rho)
-
         base_price = InversePowerOptionPricer.calculate_price(
             S=S,
             K=K,
@@ -151,14 +150,12 @@ class QuantoInversePowerOptionPricer:
         delta = float(base_greeks.delta * factor)
         gamma = float(base_greeks.gamma * factor)
         rho_rate = float(base_greeks.rho * factor)
-
         d_factor_dT = -rho * sigma * sigma_fx * factor
         theta = float(base_greeks.theta * factor + base_price * d_factor_dT)
         d_factor_d_sigma = -rho * sigma_fx * t_eff * factor
         vega = float(base_greeks.vega * factor + base_price * d_factor_d_sigma)
         fx_delta = float(-price / fx_rate)
         corr_sensitivity = float(-base_price * factor * sigma * sigma_fx * t_eff)
-
         greeks = QuantoInversePowerGreeks(
             delta=delta,
             gamma=gamma,
@@ -179,8 +176,7 @@ class QuantoInversePowerOptionPricer:
         r: float,
         sigma: float,
         option_type: Literal["call", "put"],
-        fx_rate: float,
-        sigma_fx: float, rho: float,
+        fx_rate: float, sigma_fx: float, rho: float,
         power: float = 1.0,
         pricer_kwargs: Optional[Dict[str, Any]] = None,
         **legacy_pricer_kwargs: Any,
@@ -200,14 +196,4 @@ class QuantoInversePowerOptionPricer:
             bump_rel=bump_rel_value,
         )
         t_eff, quanto_adjustment, factor = QuantoInversePowerOptionPricer._compute_quanto_scalars(T=T, sigma=sigma, sigma_fx=sigma_fx, rho=rho, fx_rate=fx_rate)
-        return QuantoInversePowerOptionPricer._compose_quanto_price_and_greeks(
-            base_price=base_price,
-            base_greeks=base_greeks,
-            factor=factor,
-            t_eff=t_eff,
-            sigma=sigma,
-            sigma_fx=sigma_fx,
-            rho=rho,
-            fx_rate=fx_rate,
-            quanto_adjustment=quanto_adjustment,
-        )
+        return QuantoInversePowerOptionPricer._compose_quanto_price_and_greeks(base_price=base_price, base_greeks=base_greeks, factor=factor, t_eff=t_eff, sigma=sigma, sigma_fx=sigma_fx, rho=rho, fx_rate=fx_rate, quanto_adjustment=quanto_adjustment)

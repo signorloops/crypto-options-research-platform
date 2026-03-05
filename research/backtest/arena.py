@@ -292,11 +292,8 @@ class StrategyArena:
         """Run all strategies and return a comparison DataFrame."""
         self.results = {}
         self.scorecards = {}
-
         for strategy in strategies:
-            if verbose:
-                logger.info("Running strategy", extra=log_extra(strategy=strategy.name))
-
+            if verbose: logger.info("Running strategy", extra=log_extra(strategy=strategy.name))
             strategy.reset()
             engine = BacktestEngine(
                 strategy=strategy,
@@ -304,12 +301,9 @@ class StrategyArena:
                 transaction_cost_bps=self.transaction_cost_bps,
             )
             result = engine.run(self.market_data)
-
             self.results[strategy.name] = result
-
             scorecard = self._calculate_scorecard(result)
             self.scorecards[strategy.name] = scorecard
-
             if verbose:
                 logger.info(
                     "Strategy results",
@@ -320,7 +314,6 @@ class StrategyArena:
                         sharpe=result.sharpe_ratio,
                     ),
                 )
-
         self._apply_deflated_sharpe()
         return self._create_comparison_df()
 
@@ -340,18 +333,13 @@ class StrategyArena:
     def _calculate_scorecard(self, result: BacktestResult) -> StrategyScorecard:
         """Calculate comprehensive metrics from backtest result."""
         pnl_series = result.pnl_series
-        if len(pnl_series) == 0:
-            return _build_empty_scorecard(result)
-        total_pnl = result.total_pnl_usd
-        total_return_pct = total_pnl / self.initial_capital
-        periods_per_year = self._periods_per_year(pnl_series)
-        periods_observed = max(len(pnl_series) - 1, 1)
+        if len(pnl_series) == 0: return _build_empty_scorecard(result)
+        total_pnl = result.total_pnl_usd; total_return_pct = total_pnl / self.initial_capital
+        periods_per_year = self._periods_per_year(pnl_series); periods_observed = max(len(pnl_series) - 1, 1)
         annualized_return = _annualized_return_from_total(total_return_pct=total_return_pct, periods_per_year=periods_per_year, periods_observed=periods_observed)
         daily_returns = pnl_series.diff().dropna()
-        sharpe = result.sharpe_ratio
-        deflated_sharpe = getattr(result, "deflated_sharpe_ratio", 0.0)
-        sortino = _compute_sortino_ratio(daily_returns, self._periods_per_year(daily_returns))
-        calmar = _calmar_ratio(annualized_return=annualized_return, max_drawdown=result.max_drawdown)
+        sharpe = result.sharpe_ratio; deflated_sharpe = getattr(result, "deflated_sharpe_ratio", 0.0)
+        sortino = _compute_sortino_ratio(daily_returns, self._periods_per_year(daily_returns)); calmar = _calmar_ratio(annualized_return=annualized_return, max_drawdown=result.max_drawdown)
         win_rate, avg_win, avg_loss, profit_factor = _compute_trade_stats(result.trade_count, daily_returns)
         daily_pnl_std, worst_day, best_day = _daily_pnl_stats(daily_returns)
         drawdown_series = _compute_drawdown_series(pnl_series, self.initial_capital)
@@ -566,26 +554,17 @@ class StrategyArena:
 
     def statistical_comparison(self, correction: str = "bonferroni") -> pd.DataFrame:
         """Perform pairwise statistical tests between strategies."""
-
-        names = list(self.scorecards.keys())
-        n = len(names)
-
+        names = list(self.scorecards.keys()); n = len(names)
         if n < 2:
             return pd.DataFrame()
-
-        p_values = np.ones((n, n))
-        raw_p_values = []
-        indices = []
-
+        p_values = np.ones((n, n)); raw_p_values = []; indices = []
         for i in range(n):
             for j in range(i + 1, n):
                 sc1 = self.scorecards[names[i]]
                 sc2 = self.scorecards[names[j]]
-
                 if len(sc1.pnl_series) > 10 and len(sc2.pnl_series) > 10:
                     returns1 = sc1.pnl_series.diff().dropna()
                     returns2 = sc2.pnl_series.diff().dropna()
-
                     p_value = _pairwise_p_value(returns1, returns2)
                     p_values[i, j] = p_value
                     p_values[j, i] = p_value

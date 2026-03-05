@@ -112,19 +112,12 @@ def garman_klass_volatility(open: np.ndarray, high: np.ndarray,
     log_hl = np.log(high / low)
     log_oc = np.log(close / open)
     n = len(log_hl)
-
-    if n == 0:
-        return 0.0
-
+    if n == 0: return 0.0
     var = np.sum(0.5 * log_hl ** 2 - (2 * np.log(2) - 1) * log_oc ** 2) / n
-
     # 处理可能的数值误差
     var = max(var, 0)
     vol = np.sqrt(var)
-
-    if annualize:
-        vol *= np.sqrt(periods)
-
+    if annualize: vol *= np.sqrt(periods)
     return float(vol)
 
 
@@ -153,18 +146,12 @@ def rogers_satchell_volatility(open: np.ndarray, high: np.ndarray,
     log_ho = np.log(high / open)
     log_lc = np.log(low / close)
     log_lo = np.log(low / open)
-
     n = len(log_hc)
-    if n == 0:
-        return 0.0
-
+    if n == 0: return 0.0
     var = np.sum(log_hc * log_ho + log_lc * log_lo) / n
     var = max(var, 0)
     vol = np.sqrt(var)
-
-    if annualize:
-        vol *= np.sqrt(periods)
-
+    if annualize: vol *= np.sqrt(periods)
     return float(vol)
 
 
@@ -193,35 +180,17 @@ def calculate_volatility_from_ohlc(df: pd.DataFrame, method: str = "yang_zhang",
             raise ValueError("realized method requires 'close' column")
         returns = np.log(df['close'] / df['close'].shift(1)).dropna()
         return realized_volatility(returns.values, annualize, periods)
-    elif method == "parkinson":
+    if method == "parkinson":
         if 'high' not in df.columns or 'low' not in df.columns:
             raise ValueError("parkinson method requires 'high' and 'low' columns")
-        return parkinson_volatility(
-            df['high'].values, df['low'].values, annualize, periods
-        )
-    elif method == "garman_klass":
-        required = ['open', 'high', 'low', 'close']
-        if not all(c in df.columns for c in required):
-            raise ValueError(f"garman_klass method requires {required}")
-        return garman_klass_volatility(
-            df['open'].values, df['high'].values,
-            df['low'].values, df['close'].values, annualize, periods
-        )
-    elif method == "rogers_satchell":
-        required = ['open', 'high', 'low', 'close']
-        if not all(c in df.columns for c in required):
-            raise ValueError(f"rogers_satchell method requires {required}")
-        return rogers_satchell_volatility(
-            df['open'].values, df['high'].values,
-            df['low'].values, df['close'].values, annualize, periods
-        )
-    elif method == "yang_zhang":
-        required = ['open', 'high', 'low', 'close']
-        if not all(c in df.columns for c in required):
-            raise ValueError(f"yang_zhang method requires {required}")
-        return yang_zhang_volatility(
-            df['open'].values, df['high'].values,
-            df['low'].values, df['close'].values, annualize, periods
-        )
-    else:
-        raise ValueError(f"Unknown method: {method}")
+        return parkinson_volatility(df['high'].values, df['low'].values, annualize, periods)
+    required = ['open', 'high', 'low', 'close']
+    if method in {"garman_klass", "rogers_satchell", "yang_zhang"} and not all(c in df.columns for c in required):
+        raise ValueError(f"{method} method requires {required}")
+    if method == "garman_klass":
+        return garman_klass_volatility(df['open'].values, df['high'].values, df['low'].values, df['close'].values, annualize, periods)
+    if method == "rogers_satchell":
+        return rogers_satchell_volatility(df['open'].values, df['high'].values, df['low'].values, df['close'].values, annualize, periods)
+    if method == "yang_zhang":
+        return yang_zhang_volatility(df['open'].values, df['high'].values, df['low'].values, df['close'].values, annualize, periods)
+    raise ValueError(f"Unknown method: {method}")

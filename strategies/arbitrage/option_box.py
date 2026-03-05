@@ -190,13 +190,10 @@ class OptionBoxArbitrage:
         if selected is None:
             return None
         box_type, profit, net_cost, capital_base = selected
-        T = _time_to_expiry_years(box.expiry)
-        if T <= 0:
-            return None
+        if (T := _time_to_expiry_years(box.expiry)) <= 0: return None
         annualized_return = _annualized_box_return(
             profit=profit, net_cost=net_cost, capital_base=capital_base, time_to_expiry=T
         )
-
         if annualized_return < self.min_annualized_return:
             return None
 

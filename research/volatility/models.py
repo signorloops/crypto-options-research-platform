@@ -164,10 +164,8 @@ def ewma_series(returns: np.ndarray, lambda_param: float = 0.94,
     """
     if len(returns) == 0:
         return np.array([])
-
     alpha = 1 - lambda_param
     r2 = returns ** 2
-
     try:
         from scipy.signal import lfilter
         init_var = np.var(returns) if len(returns) > 1 else r2[0]
@@ -179,12 +177,8 @@ def ewma_series(returns: np.ndarray, lambda_param: float = 0.94,
         for i in range(len(returns)):
             variance = lambda_param * variance + alpha * r2[i]
             variances[i] = variance
-
     vols = np.sqrt(np.maximum(variances, 0))
-
-    if annualize:
-        vols *= np.sqrt(periods)
-
+    if annualize: vols *= np.sqrt(periods)
     return vols
 
 
@@ -213,14 +207,9 @@ def garch_volatility(returns: np.ndarray, omega: float = 0.000001,
 def estimate_garch_params(returns: np.ndarray) -> Tuple[float, float, float]:
     """Estimate GARCH(1,1) parameters with constrained maximum likelihood."""
     values = np.asarray(returns, dtype=np.float64)
-    if len(values) < 30:
-        return (float(np.var(values) * 0.01), 0.1, 0.85)
-    if not HAS_SCIPY:
-        return (float(np.var(values) * 0.01), 0.1, 0.85)
+    if len(values) < 30 or not HAS_SCIPY: return (float(np.var(values) * 0.01), 0.1, 0.85)
     var_returns = float(np.var(values))
-    omega_init = var_returns * 0.01
-    alpha_init = 0.1
-    beta_init = 0.85
+    omega_init, alpha_init, beta_init = var_returns * 0.01, 0.1, 0.85
     def neg_log_likelihood(params):
         """Negative log-likelihood for minimization."""
         omega, alpha, beta = params
@@ -358,17 +347,13 @@ def rough_volatility_signature(log_prices: np.ndarray, sampling: str = "daily") 
     Reference:
         Gatheral, J., Jaisson, T., & Rosenbaum, M. (2018). "Volatility is rough"
     """
-    if len(log_prices) < 100:
-        return 0.1  # 数据不足时返回典型值
-
+    if len(log_prices) < 100: return 0.1  # 数据不足时返回典型值
     # 计算对数收益率
     returns = np.diff(log_prices)
     scales = np.array([1, 2, 4, 8, 16])
     mq_values = np.array([_mqd_non_overlapping(returns, int(s)) for s in scales])
     valid = mq_values > 0
-    if np.sum(valid) < 2:
-        return 0.1
-
+    if np.sum(valid) < 2: return 0.1
     log_scales = np.log(scales[valid])
     log_mq = np.log(mq_values[valid])
     slope = np.polyfit(log_scales, log_mq, 1)[0]
@@ -705,18 +690,7 @@ def _hamilton_result_payload(
 
 
 def volatility_regime_switching(returns: np.ndarray, n_states: int = 2, method: str = "hamilton") -> dict:
-    """
-    简单的波动率状态转换模型 (Hamilton Filter 简化版)。
-
-    识别高波动率和低波动率两种状态。
-
-    Args:
-        returns: 收益率序列
-        n_states: 状态数 (2=高低波动率)
-
-    Returns:
-        包含状态概率和参数的字典
-    """
+    """简单两状态波动率切换：优先 Hamilton filter，否则使用阈值分割近似。"""
     if n_states != 2:
         raise NotImplementedError("Only 2-state model implemented")
     if method == "hamilton":

@@ -172,26 +172,20 @@ class ScenarioGenerator:
         """Convert Hawkes events to market DataFrame with price and volume."""
         if not events:
             return pd.DataFrame()
-        if rng is None:
-            rng = np.random.default_rng()
+        if rng is None: rng = np.random.default_rng()
         base_time = datetime(2024, 1, 1)
         timestamps = [base_time + timedelta(seconds=t) for t in events]
-        prices = []
-        volumes = []
+        prices = []; volumes = []
         current_price = self.base_price
         for i, t in enumerate(events):
-            if i > 0:
-                dt = t - events[i-1]
-                intensity = config.mu + config.alpha * np.exp(-config.beta * dt)
-            else:
-                intensity = config.mu
+            intensity = config.mu + config.alpha * np.exp(-config.beta * (t - events[i-1])) if i > 0 else config.mu
             local_vol = self.price_volatility * (1 + intensity)
             price_change = float(rng.normal(0, local_vol * current_price / 100))
             current_price += price_change
             prices.append(current_price)
             volume = max(0.1, float(rng.exponential(intensity * 10)))
             volumes.append(volume)
-        df = pd.DataFrame({
+        return pd.DataFrame({
             'timestamp': timestamps,
             'price': prices,
             'volume': volumes,
@@ -199,9 +193,7 @@ class ScenarioGenerator:
                 config.mu + config.alpha * np.exp(-config.beta * (events[i] - events[i-1]))
                 for i in range(1, len(events))
             ]
-        })
-        df.set_index('timestamp', inplace=True)
-        return df
+        }).set_index('timestamp')
 
     def load_real_scenarios(
         self,
@@ -242,8 +234,7 @@ class ScenarioGenerator:
     ) -> pd.DataFrame:
         """Load data for a specific period with explicit synthetic fallback labeling."""
         logger.info(f"Loading historical data for {start} to {end} from {data_dir}")
-        start_ts = self._to_utc_timestamp(start)
-        end_ts = self._to_utc_timestamp(end)
+        start_ts = self._to_utc_timestamp(start); end_ts = self._to_utc_timestamp(end)
         data_path = Path(data_dir)
         frames: List[pd.DataFrame] = []
         if data_path.exists() and data_path.is_dir():
@@ -254,17 +245,14 @@ class ScenarioGenerator:
                 if raw is None:
                     continue
                 normalized = self._normalize_historical_frame(raw, start_ts, end_ts)
-                if normalized is not None and not normalized.empty:
-                    frames.append(normalized)
+                if normalized is not None and not normalized.empty: frames.append(normalized)
         if frames:
             merged = pd.concat(frames, axis=0).sort_index()
             merged = merged.groupby(level=0).agg({"price": "mean", "volume": "sum"})
             merged["intensity"] = merged["volume"].ewm(span=20, adjust=False, min_periods=1).mean()
             merged["scenario_source"] = "historical"
             return merged
-        logger.warning(
-            "No usable historical files found in period range; falling back to synthetic proxy"
-        )
+        logger.warning("No usable historical files found in period range; falling back to synthetic proxy")
         days = (end - start).days
         config = HawkesScenarioConfig(name="real_proxy", mu=0.1, alpha=0.4, beta=0.8, T=max(days, 1) * 86400.0)
         synthetic = self._generate_single_hawkes_scenario(config, seed_offset=start.month)
@@ -305,24 +293,20 @@ class ScenarioGenerator:
         if frame is None or frame.empty:
             return None
         columns = {str(col).lower(): col for col in frame.columns}
-
         def _pick(candidates: List[str]) -> Optional[str]:
             for candidate in candidates:
                 if candidate in columns:
                     return columns[candidate]
             return None
-
         timestamp_col = _pick(["timestamp", "ts", "time", "datetime", "date"])
         price_col = _pick(["price", "mid_price", "close", "last", "mark_price"])
         volume_col = _pick(["volume", "size", "qty", "trade_size"])
-        if price_col is None:
-            return None
+        if price_col is None: return None
         if timestamp_col is not None:
             timestamps = pd.to_datetime(frame[timestamp_col], utc=True, errors="coerce")
         elif isinstance(frame.index, pd.DatetimeIndex):
             timestamps = pd.to_datetime(frame.index, utc=True, errors="coerce")
-        else:
-            return None
+        else: return None
         prices = pd.to_numeric(frame[price_col], errors="coerce").to_numpy()
         if volume_col is not None:
             volumes = pd.to_numeric(frame[volume_col], errors="coerce").to_numpy()
@@ -333,8 +317,7 @@ class ScenarioGenerator:
         out = out[out["price"] > 0]
         out["volume"] = out["volume"].fillna(0.0).clip(lower=0.0)
         out = out[(out.index >= start_ts) & (out.index <= end_ts)]
-        if out.empty:
-            return None
+        if out.empty: return None
         return out
 
     def generate_stress_scenarios(self) -> Dict[str, pd.DataFrame]:

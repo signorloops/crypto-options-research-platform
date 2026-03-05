@@ -377,7 +377,6 @@ class DeribitDataDownloader:
     ) -> pd.DataFrame:
         """Download order book snapshots at specific times."""
         snapshots = []
-        # Check cache for existing data
         if use_cache and len(timestamps) > 0:
             start, end = min(timestamps), max(timestamps)
             if self.cache.exists("deribit", "orderbook", instrument, start, end):

@@ -103,22 +103,14 @@ def _normalize_okx_option_row(
 ) -> dict[str, Any] | None:
     if not isinstance(row, dict):
         return None
-    price_raw = (
-        row.get("markPx")
-        or row.get("markPrice")
-        or row.get("last")
-        or row.get("lastPr")
-        or row.get("askPx")
-        or row.get("bidPx")
-    )
+    price_raw = row.get("markPx") or row.get("markPrice") or row.get("last") or row.get("lastPr") or row.get("askPx") or row.get("bidPx")
     price = pd.to_numeric(price_raw, errors="coerce")
     if pd.isna(price):
         return None
     symbol = str(row.get("instId") or row.get("instFamily") or underlying)
     option_type = _normalize_option_type(row.get("optType"), symbol)
     timestamp_numeric = pd.to_numeric(row.get("ts") or row.get("uTime") or row.get("cTime"), errors="coerce"); timestamp = pd.to_datetime(timestamp_numeric, unit="ms", utc=True, errors="coerce")
-    if pd.isna(timestamp):
-        timestamp = now
+    if pd.isna(timestamp): timestamp = now
     expiry_years = 0.0
     expiry_ts = pd.to_datetime(
         pd.to_numeric(row.get("expTime"), errors="coerce"), unit="ms", utc=True, errors="coerce"
@@ -126,8 +118,7 @@ def _normalize_okx_option_row(
     if not pd.isna(expiry_ts):
         expiry_years = max((expiry_ts - now).total_seconds(), 0.0) / (365.0 * 24.0 * 3600.0)
     delta = pd.to_numeric(row.get("delta"), errors="coerce")
-    if pd.isna(delta):
-        delta = 0.5
+    if pd.isna(delta): delta = 0.5
     return {
         "timestamp": timestamp,
         "price": float(price),
@@ -144,8 +135,7 @@ def _align_cex_defi_quotes(cex: pd.DataFrame, defi: pd.DataFrame, *, align_toler
     merged = cex.merge(defi, on=join_cols, suffixes=("_cex", "_defi"))
     if merged.empty:
         key_cols = ["symbol", "option_type", "expiry_bucket", "delta_bucket"]; tolerance = pd.Timedelta(seconds=max(float(align_tolerance_seconds), 0.0))
-        cex_asof = cex.sort_values([*key_cols, "timestamp"])
-        defi_asof = defi.sort_values([*key_cols, "timestamp"])
+        cex_asof = cex.sort_values([*key_cols, "timestamp"]); defi_asof = defi.sort_values([*key_cols, "timestamp"])
         merged = pd.merge_asof(
             cex_asof,
             defi_asof,
@@ -158,8 +148,7 @@ def _align_cex_defi_quotes(cex: pd.DataFrame, defi: pd.DataFrame, *, align_toler
         merged = merged.dropna(subset=["price_defi"])
         if not merged.empty:
             merged["ts_bucket"] = merged["timestamp"].dt.floor("min")
-    if merged.empty:
-        raise ValueError("No aligned CEX/DeFi rows after key-based merge")
+    if merged.empty: raise ValueError("No aligned CEX/DeFi rows after key-based merge")
     out = pd.DataFrame(
         {
             "timestamp": (merged["ts_bucket"] if "ts_bucket" in merged.columns else merged["timestamp"]),

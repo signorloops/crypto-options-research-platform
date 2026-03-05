@@ -144,17 +144,7 @@ class VolatilitySurface:
         r: float = None,
         is_calls: Optional[List[bool]] = None,
     ) -> None:
-        """
-        从市场数据构建波动率曲面。
-
-        Args:
-            strikes: 执行价格列表
-            expiries: 到期时间列表 (年化)
-            market_prices: 市场价格列表
-            underlying: 标的资产价格
-            r: 无风险利率
-            is_calls: 期权类型列表 (默认全部为看涨)
-        """
+        """从市场数据批量反推隐含波动率并填充曲面点。"""
         if r is None:
             r = float(os.getenv("RISK_FREE_RATE", "0.05"))
         if is_calls is None:
@@ -266,19 +256,15 @@ def plot_volatility_surface(
             V_grid[j, i] = surface.get_volatility(strikes[i], expiries[j])
     fig = plt.figure(figsize=(12, 5)); ax1 = fig.add_subplot(121, projection="3d")
     ax1.plot_surface(K_grid / S, T_grid, V_grid, cmap="viridis")
-    ax1.set_xlabel("Moneyness (K/S)")
-    ax1.set_ylabel("Time to Expiry")
+    ax1.set_xlabel("Moneyness (K/S)"); ax1.set_ylabel("Time to Expiry")
     ax1.set_zlabel("Implied Volatility")
     ax1.set_title("Volatility Surface")
     ax2 = fig.add_subplot(122)
     for T in np.linspace(0.1, 1.0, 5):
         skew = surface.get_skew(T)
-        if skew:
-            moneyness, vols = zip(*skew)
-            ax2.plot(moneyness, vols, label=f"T={T:.2f}")
+        if skew: moneyness, vols = zip(*skew); ax2.plot(moneyness, vols, label=f"T={T:.2f}")
     ax2.set_xlabel("Moneyness")
-    ax2.set_ylabel("Implied Volatility")
-    ax2.set_title("Volatility Skew by Maturity")
+    ax2.set_ylabel("Implied Volatility"); ax2.set_title("Volatility Skew by Maturity")
     ax2.legend()
     plt.tight_layout()
     plt.show()

@@ -164,31 +164,21 @@ def implied_volatility_newton(
     max_iter: int = 100,
 ) -> float:
     """Solve implied volatility with Newton-Raphson and bisection fallback."""
-    if r is None:
-        r = float(os.getenv("RISK_FREE_RATE", "0.05"))
+    if r is None: r = float(os.getenv("RISK_FREE_RATE", "0.05"))
     sigma = initial_sigma
-
     for _ in range(max_iter):
         price = black_scholes_price(S, K, T, r, sigma, is_call)
         diff = market_price - price
-
         if abs(diff) < tol:
             return float(sigma)
-
         vega = black_scholes_vega(S, K, T, r, sigma)
-
         if vega < 1e-10:
             return implied_volatility_bisection(market_price, S, K, T, r, is_call, tol, max_iter)
-
         sigma_new = sigma + diff / vega
-
         sigma_new = max(0.001, min(5.0, sigma_new))
-
         if abs(sigma_new - sigma) < tol:
             return float(sigma_new)
-
         sigma = sigma_new
-
     return float(sigma)
 
 
@@ -202,8 +192,7 @@ def _implied_volatility_lbr_fallback(
     tol: float = 1e-8, max_iter: int = 20,
 ) -> float:
     """近似 Let's-Be-Rational 风格 IV 回退求解器。"""
-    if r is None:
-        r = float(os.getenv("RISK_FREE_RATE", "0.05"))
+    if r is None: r = float(os.getenv("RISK_FREE_RATE", "0.05"))
     if market_price <= 0 or T <= 0:
         return 0.0
     lower_bound, upper_bound = _option_price_bounds(S, K, T, r, is_call)
@@ -221,16 +210,7 @@ def _implied_volatility_lbr_fallback(
         if abs(sigma_new - sigma) < tol:
             return sigma_new
         sigma = sigma_new
-    return implied_volatility_bisection(
-        market_price=market_price,
-        S=S,
-        K=K,
-        T=T,
-        r=r,
-        is_call=is_call,
-        tol=1e-8,
-        max_iter=200,
-    )
+    return implied_volatility_bisection(market_price=market_price, S=S, K=K, T=T, r=r, is_call=is_call, tol=1e-8, max_iter=200)
 
 
 def implied_volatility_jaeckel(
@@ -243,8 +223,7 @@ def implied_volatility_jaeckel(
     tol: float = 1e-8, max_iter: int = 20,
 ) -> float:
     """Prefer Jaeckel LBR solver when available, otherwise use local fallback."""
-    if r is None:
-        r = float(os.getenv("RISK_FREE_RATE", "0.05"))
+    if r is None: r = float(os.getenv("RISK_FREE_RATE", "0.05"))
     if market_price <= 0 or T <= 0:
         return 0.0
     lower_bound, upper_bound = _option_price_bounds(S, K, T, r, is_call)
@@ -261,16 +240,7 @@ def implied_volatility_jaeckel(
                 "Jaeckel solver failed, fallback to local LBR",
                 extra=log_extra(error=str(exc), strike=K, expiry=T),
             )
-    return _implied_volatility_lbr_fallback(
-        market_price=market_price,
-        S=S,
-        K=K,
-        T=T,
-        r=r,
-        is_call=is_call,
-        tol=tol,
-        max_iter=max_iter,
-    )
+    return _implied_volatility_lbr_fallback(market_price=market_price, S=S, K=K, T=T, r=r, is_call=is_call, tol=tol, max_iter=max_iter)
 
 
 def implied_volatility_lbr(

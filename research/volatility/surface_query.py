@@ -102,9 +102,7 @@ def get_skew(
     max_adjacent_jump: float = 0.20,
 ) -> List[Tuple[float, float]]:
     points = [p for p in surface.points if abs(p.expiry - expiry) < 0.01]
-    if not points:
-        return []
-
+    if not points: return []
     ordered_points = sorted(points, key=lambda x: x.strike)
     skew = [(p.moneyness, p.volatility) for p in ordered_points]
     if not stabilize_short_maturity or expiry > short_maturity_threshold or len(skew) < 3:
@@ -121,14 +119,9 @@ def get_skew(
 
     jump_cap = max(max_adjacent_jump, 1e-6)
     for i in range(1, len(smoothed)):
-        smoothed[i] = float(
-            np.clip(smoothed[i], smoothed[i - 1] - jump_cap, smoothed[i - 1] + jump_cap)
-        )
+        smoothed[i] = float(np.clip(smoothed[i], smoothed[i - 1] - jump_cap, smoothed[i - 1] + jump_cap))
     for i in range(len(smoothed) - 2, -1, -1):
-        smoothed[i] = float(
-            np.clip(smoothed[i], smoothed[i + 1] - jump_cap, smoothed[i + 1] + jump_cap)
-        )
-
+        smoothed[i] = float(np.clip(smoothed[i], smoothed[i + 1] - jump_cap, smoothed[i + 1] + jump_cap))
     return [(float(m), float(v)) for m, v in zip(moneyness, smoothed)]
 
 
@@ -224,8 +217,7 @@ def validate_no_arbitrage(surface) -> Dict[str, object]:
 
 
 def detect_arbitrage_opportunities(surface) -> Dict[str, object]:
-    checks = surface.validate_no_arbitrage()
-    findings = []
+    checks = surface.validate_no_arbitrage(); findings = []
 
     for expiry, detail in checks.get("butterfly", {}).items():
         if not detail.get("has_arbitrage", False):
@@ -255,9 +247,4 @@ def detect_arbitrage_opportunities(surface) -> Dict[str, object]:
             )
 
     findings_sorted = sorted(findings, key=lambda x: float(x.get("severity", 0.0)), reverse=True)
-    return {
-        "has_arbitrage": len(findings_sorted) > 0,
-        "n_findings": len(findings_sorted),
-        "findings": findings_sorted,
-        "summary": checks,
-    }
+    return {"has_arbitrage": len(findings_sorted) > 0, "n_findings": len(findings_sorted), "findings": findings_sorted, "summary": checks}

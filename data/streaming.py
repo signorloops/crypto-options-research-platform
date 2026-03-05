@@ -143,11 +143,9 @@ class WebSocketStream(ABC):
             try:
                 async for message in websocket:
                     no_drop = self._enqueue_with_drop_oldest(message_queue, message)
-                    if no_drop:
-                        queue_full_logged = False
+                    if no_drop: queue_full_logged = False
                     elif not queue_full_logged:
-                        logger.warning("Message queue full, dropping old messages")
-                        queue_full_logged = True
+                        logger.warning("Message queue full, dropping old messages"); queue_full_logged = True
             except ConnectionClosed:
                 logger.info("WebSocket connection closed in producer")
             finally:
@@ -155,13 +153,10 @@ class WebSocketStream(ABC):
         async def consumer():
             while True:
                 try:
-                    message = await message_queue.get()
-                    if message is None:
-                        break
+                    if (message := await message_queue.get()) is None: break
                     try:
                         parsed = self.parse_message(message)
-                        if parsed:
-                            await self._route_message(parsed)
+                        if parsed: await self._route_message(parsed)
                     except (json.JSONDecodeError, KeyError, TypeError) as e:
                         await self._emit('error', e)
                 except asyncio.CancelledError: raise

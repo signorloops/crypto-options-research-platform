@@ -89,7 +89,6 @@ class AvellanedaStoikov(MarketMakingStrategy):
             if np.isfinite(sigma_raw):
                 self.config.sigma = float(np.clip(sigma_raw, self.config.min_sigma, self.config.max_sigma))
         if len(self._trade_intensity_window) >= 3:
-            # k proxies fill decay against observed trade activity and inventory pressure.
             avg_intensity = float(np.mean(self._trade_intensity_window))
             inventory_util = abs(float(inventory)) / max(self.config.inventory_limit, 1e-12)
             k_raw = avg_intensity / (1.0 + 0.5 * inventory_util)
@@ -165,22 +164,12 @@ class AvellanedaStoikov(MarketMakingStrategy):
     def quote(self, state: MarketState, position: Position) -> QuoteAction:
         """Generate quotes using the Avellaneda-Stoikov model."""
         mid = state.order_book.mid_price
-        if mid is None:
-            raise ValueError("Cannot quote without valid order book")
+        if mid is None: raise ValueError("Cannot quote without valid order book")
         q = position.size; calibration_meta = self._update_online_calibration(state, q)  # Current inventory
         gamma, sigma, k = self.config.gamma, self.config.sigma, self.config.k
-        time_remaining = self._compute_time_remaining(state)
-        inventory_ratio, effective_q = self._compute_effective_inventory(q)
+        time_remaining = self._compute_time_remaining(state); inventory_ratio, effective_q = self._compute_effective_inventory(q)
         reservation_price = mid - effective_q * gamma * sigma**2 * time_remaining
-        spread_component, execution_component, inventory_premium, half_spread = (
-            self._compute_spread_components(
-                gamma=gamma,
-                sigma=sigma,
-                k=k,
-                time_remaining=time_remaining,
-                inventory_ratio=inventory_ratio,
-            )
-        )
+        spread_component, execution_component, inventory_premium, half_spread = self._compute_spread_components(gamma=gamma, sigma=sigma, k=k, time_remaining=time_remaining, inventory_ratio=inventory_ratio)
         bid_price, ask_price = reservation_price - half_spread, reservation_price + half_spread
         bid_size, ask_size = self._compute_quote_sizes(q, inventory_ratio)
         return QuoteAction(

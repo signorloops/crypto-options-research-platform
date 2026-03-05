@@ -88,8 +88,7 @@ class JumpRiskPremiaEstimator:
 
     def estimate_from_returns(self, returns: np.ndarray) -> JumpRiskPremiaSignal:
         """Estimate jump premia from a return array."""
-        arr = np.asarray(returns, dtype=float)
-        arr = arr[np.isfinite(arr)]
+        arr = np.asarray(returns, dtype=float); arr = arr[np.isfinite(arr)]
         if arr.size < self.min_obs:
             return JumpRiskPremiaSignal(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         if arr.size > self.window:

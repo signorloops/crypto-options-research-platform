@@ -69,10 +69,7 @@ def _compute_monte_carlo_pnl(
     weights: np.ndarray,
     total_value: float,
     greeks: pd.DataFrame | None,
-    n_simulations: int,
-    holding_period: int,
-    leverage_correlation: float,
-    rng: Any,
+    n_simulations: int, holding_period: int, leverage_correlation: float, rng: Any,
 ) -> np.ndarray:
     """Dispatch to option-schema, Greeks approximation, or linear PnL path."""
     if _option_schema_available(aligned_positions):
@@ -219,13 +216,7 @@ class VaRCalculator:
         var_99 = total_value * max(0.0, -mu + z99 * sigma)
         cvar_95 = total_value * max(0.0, -mu + sigma * stats.norm.pdf(z95) / 0.05)
         cvar_99 = total_value * max(0.0, -mu + sigma * stats.norm.pdf(z99) / 0.01)
-        return VaRResult(
-            var_95=float(var_95),
-            var_99=float(var_99),
-            cvar_95=float(cvar_95),
-            cvar_99=float(cvar_99),
-            method="cornish_fisher",
-        )
+        return VaRResult(var_95=float(var_95), var_99=float(var_99), cvar_95=float(cvar_95), cvar_99=float(cvar_99), method="cornish_fisher")
 
     def historical_var(
         self, positions: pd.DataFrame, returns: pd.DataFrame, holding_period: int = 1
@@ -294,13 +285,7 @@ class VaRCalculator:
         var_99 = -np.percentile(pnl, 1)
         cvar_95 = -pnl[pnl <= np.percentile(pnl, 5)].mean()
         cvar_99 = -pnl[pnl <= np.percentile(pnl, 1)].mean()
-        return VaRResult(
-            var_95=float(var_95),
-            var_99=float(var_99),
-            cvar_95=float(cvar_95),
-            cvar_99=float(cvar_99),
-            method="fhs",
-        )
+        return VaRResult(var_95=float(var_95), var_99=float(var_99), cvar_95=float(cvar_95), cvar_99=float(cvar_99), method="fhs")
 
     @staticmethod
     def _ewma_conditional_volatility(
@@ -348,10 +333,8 @@ class VaRCalculator:
         if tail_fit is None:
             return self.historical_var(positions, returns, holding_period)
         threshold, shape, scale, pu = tail_fit
-        q95 = self._evt_quantile(alpha=0.95, threshold=threshold, shape=shape, scale=scale, pu=pu)
-        q99 = self._evt_quantile(alpha=0.99, threshold=threshold, shape=shape, scale=scale, pu=pu)
-        var_95 = q95 * total_value
-        var_99 = q99 * total_value
+        q95 = self._evt_quantile(alpha=0.95, threshold=threshold, shape=shape, scale=scale, pu=pu); q99 = self._evt_quantile(alpha=0.99, threshold=threshold, shape=shape, scale=scale, pu=pu)
+        var_95 = q95 * total_value; var_99 = q99 * total_value
         cvar_95 = self._evt_expected_shortfall(
             q_alpha=q95, threshold=threshold, shape=shape, scale=scale, total_value=total_value
         )
@@ -507,19 +490,13 @@ class VaRCalculator:
             shocked_vol=shocked_vol,
             shocked_tte=shocked_tte,
         )
-        if priced is None:
-            return None
+        if priced is None: return None
         base_price_btc, revalued_price_btc = priced
-
-        if not np.isfinite(base_price_btc):
-            return None
+        if not np.isfinite(base_price_btc): return None
         base_price_usd = base_price_btc * inputs.spot_0
-        if base_price_usd <= 1e-12:
-            return None
-
+        if base_price_usd <= 1e-12: return None
         revalued_price_usd = revalued_price_btc * shocked_spot
-        if not np.isfinite(revalued_price_usd).all():
-            return None
+        if not np.isfinite(revalued_price_usd).all(): return None
         return base_price_usd, revalued_price_usd
 
     @staticmethod
@@ -550,7 +527,6 @@ class VaRCalculator:
         shocked_tte: float,
     ) -> tuple[float, np.ndarray] | None:
         from research.pricing.inverse_options import InverseOptionPricer
-
         try:
             base_price_btc = InverseOptionPricer.calculate_price(
                 S=inputs.spot_0,
@@ -644,8 +620,7 @@ class VaRCalculator:
                 n_simulations=n_simulations,
                 rng=rng,
             )
-        inputs = self._parse_option_revaluation_inputs(row=row, option_type=option_type, default_asset_idx=default_asset_idx, column_index=column_index)
-        if inputs is None: return linear_component
+        if (inputs := self._parse_option_revaluation_inputs(row=row, option_type=option_type, default_asset_idx=default_asset_idx, column_index=column_index)) is None: return linear_component
         underlying_returns = simulated_returns[:, inputs.underlying_idx]
         revalued = self._simulate_revaluation_price_paths(
             inputs=inputs,
@@ -655,11 +630,7 @@ class VaRCalculator:
             leverage_correlation=leverage_correlation,
             rng=rng,
         )
-        return self._position_revaluation_pnl_or_linear(
-            position_value=position_value,
-            linear_component=linear_component,
-            revalued=revalued,
-        )
+        return self._position_revaluation_pnl_or_linear(position_value=position_value, linear_component=linear_component, revalued=revalued)
 
     def _option_schema_pnl(
         self,

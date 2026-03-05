@@ -53,20 +53,16 @@ def _extract_ssvi_atm_curve(surface, expiry_tol: float) -> tuple[np.ndarray, np.
 
 
 def fit_ssvi(surface, ssvi_params_cls: Type, expiry_tol: float = 0.01):
-    if len(surface.points) < 8:
-        return None
-    atm_curve = _extract_ssvi_atm_curve(surface, expiry_tol)
-    if atm_curve is None:
-        return None
+    if len(surface.points) < 8: return None
+    if (atm_curve := _extract_ssvi_atm_curve(surface, expiry_tol)) is None: return None
     x_exp, y_theta = atm_curve
     def theta_of_t(t: np.ndarray) -> np.ndarray:
         return np.interp(t, x_exp, y_theta, left=y_theta[0], right=y_theta[-1])
 
     if HAS_SCIPY_OPT:
-        k_obs = np.array([p.log_moneyness for p in surface.points], dtype=float)
-        t_obs = np.array([float(p.expiry) for p in surface.points], dtype=float)
-        w_obs = np.array([p.volatility**2 * p.expiry for p in surface.points], dtype=float)
-        w_obs = np.maximum(w_obs, 1e-10)
+        k_obs = np.array([p.log_moneyness for p in surface.points], dtype=float); t_obs = np.array([float(p.expiry) for p in surface.points], dtype=float)
+        w_obs = np.maximum(np.array([p.volatility**2 * p.expiry for p in surface.points], dtype=float), 1e-10)
+
         def objective(x: np.ndarray) -> float:
             params = ssvi_params_cls(rho=float(x[0]), eta=float(x[1]), lam=float(x[2]))
             theta = theta_of_t(t_obs)
@@ -88,17 +84,14 @@ def fit_ssvi(surface, ssvi_params_cls: Type, expiry_tol: float = 0.01):
     eta_upper = 2.0 / (np.sqrt(np.max(y_theta)) * (1.0 + abs(rho) + 1e-8))
     eta = float(np.clip(eta, 1e-4, eta_upper))
     surface._ssvi_params = ssvi_params_cls(rho=rho, eta=eta, lam=lam)
-    surface._ssvi_atm_expiries = x_exp
-    surface._ssvi_atm_total_vars = y_theta
+    surface._ssvi_atm_expiries = x_exp; surface._ssvi_atm_total_vars = y_theta
     return surface._ssvi_params
 
 
 def fit_svi(surface, expiry: float, svi_params_cls: Type, expiry_tol: float = 0.01):
     expiry_points = [p for p in surface.points if abs(p.expiry - expiry) <= expiry_tol]
-    if len(expiry_points) < 5:
-        return None
-    k = np.array([p.log_moneyness for p in expiry_points], dtype=float); w = np.array([p.volatility**2 * p.expiry for p in expiry_points], dtype=float)
-    w = np.maximum(w, 1e-8)
+    if len(expiry_points) < 5: return None
+    k = np.array([p.log_moneyness for p in expiry_points], dtype=float); w = np.maximum(np.array([p.volatility**2 * p.expiry for p in expiry_points], dtype=float), 1e-8)
     if not HAS_SCIPY_OPT:
         params = svi_params_cls(
             a=float(np.min(w) * 0.8),
@@ -112,12 +105,9 @@ def fit_svi(surface, expiry: float, svi_params_cls: Type, expiry_tol: float = 0.
     def objective(x: np.ndarray) -> float:
         p = svi_params_cls(a=x[0], b=x[1], rho=x[2], m=x[3], sigma=x[4])
         model_w = svi_total_variance(k, p)
-        if np.any(model_w <= 0):
-            return 1e9
+        if np.any(model_w <= 0): return 1e9
         return float(np.mean((model_w - w) ** 2))
-    init = np.array(
-        [float(np.min(w) * 0.8), float(max(1e-4, np.std(w))), 0.0, float(np.median(k)), 0.1]
-    )
+    init = np.array([float(np.min(w) * 0.8), float(max(1e-4, np.std(w))), 0.0, float(np.median(k)), 0.1])
     bounds = [
         (-5.0, 5.0),
         (1e-8, 10.0),

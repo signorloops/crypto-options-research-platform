@@ -195,25 +195,17 @@ class XGBoostSpreadStrategy(MarketMakingStrategy):
         Cost = adverse_selection_loss + inventory_holding_cost
         """
         logger.info("Training XGBoost model", extra=log_extra(samples=len(historical_data)))
-
         # Generate training samples by simulation
         training_data = self._generate_training_data(historical_data)
-
-        if len(training_data) < 100:
-            logger.warning("Insufficient training data", extra=log_extra(samples=len(training_data)))
-            return
-
+        if len(training_data) < 100: logger.warning("Insufficient training data", extra=log_extra(samples=len(training_data))); return
         df = pd.DataFrame(training_data)
-
         # Features and target
         feature_cols = [c for c in df.columns if c not in ['target_spread_bps', 'timestamp']]
         X = df[feature_cols]
         y = df['target_spread_bps']
-
         # Scale features
         X_scaled = self.scaler.fit_transform(X)
         self._feature_columns = list(feature_cols)
-
         # Train model
         self.model = xgb.XGBRegressor(
             n_estimators=self.config.n_estimators,

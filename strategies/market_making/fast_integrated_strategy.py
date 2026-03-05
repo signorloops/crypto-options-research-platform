@@ -372,15 +372,8 @@ class FastIntegratedMarketMakingStrategy(MarketMakingStrategy):
         )
 
     def _build_active_quote(
-        self,
-        *,
-        state: MarketState,
-        position: Position,
-        mid: float,
-        circuit_state: object,
-        current_regime: RegimeState,
-        start_time: float,
-        hedge_decision: object,
+        self, *, state: MarketState, position: Position, mid: float, circuit_state: object,
+        current_regime: RegimeState, start_time: float, hedge_decision: object,
     ) -> QuoteAction:
         """Build active quote path after passing trading gate."""
         spread_multiplier = self._get_spread_multiplier(); spread_bps = self.config.base_spread_bps * spread_multiplier

@@ -93,15 +93,12 @@ class FastVolatilityRegimeDetector:
 
     def __init__(self, config: Optional[FastRegimeConfig] = None):
         self.config = config or FastRegimeConfig()
-
         # 当前状态
         self.current_regime: RegimeState = RegimeState.MEDIUM
         self.regime_probabilities: np.ndarray = np.array([1 / 3, 1 / 3, 1 / 3])
-
         # 数据缓冲区
         self._returns_buffer: Deque[float] = deque(maxlen=self.config.lookback_window)
         self._volatility_estimate: float = 0.5  # 当前波动率估计
-
         # HMM状态
         self._hmm_model: Optional[object] = None
         self._hmm_fitted: bool = False
@@ -110,20 +107,16 @@ class FastVolatilityRegimeDetector:
         self._hmm_last_train: int = 0
         self._hmm_thread: Optional[threading.Thread] = None
         self._inference_executor: Optional[concurrent.futures.ThreadPoolExecutor] = None
-
         # 线程同步锁
         self._hmm_lock = threading.Lock()  # 保护 _hmm_training
         self._buffer_lock = threading.RLock()  # 保护 _returns_buffer
-
         # HMM state mapping (sorted by volatility after training)
         self._state_map: dict = {i: i for i in range(self.config.n_regimes)}
-
         # 统计信息
         self._inference_count: int = 0
         self._hmm_inference_count: int = 0
         self._threshold_inference_count: int = 0
         self._fallback_count: int = 0
-
         # 初始化HMM (如果启用)
         if self.config.use_hmm:
             self._inference_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -255,9 +248,7 @@ class FastVolatilityRegimeDetector:
             finally:
                 with self._hmm_lock:
                     self._hmm_training = False
-        thread = threading.Thread(target=train, daemon=True)
-        thread.start()
-        self._hmm_thread = thread
+        self._hmm_thread = threading.Thread(target=train, daemon=True); self._hmm_thread.start()
 
     def update(self, returns: float) -> RegimeState:
         """更新检测器并返回当前状态。"""

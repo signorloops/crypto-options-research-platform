@@ -259,12 +259,7 @@ class IntegratedMarketMakingStrategy(MarketMakingStrategy):
         )
 
     def _build_active_quote(
-        self,
-        *,
-        state: MarketState,
-        position: Position,
-        mid: float,
-        circuit_state: object,
+        self, *, state: MarketState, position: Position, mid: float, circuit_state: object,
         current_regime: RegimeState, calibration_meta: Dict[str, float],
     ) -> QuoteAction:
         """Build normal market-making quote after risk gate passes."""

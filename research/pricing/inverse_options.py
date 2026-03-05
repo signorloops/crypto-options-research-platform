@@ -199,8 +199,7 @@ class InverseOptionPricer:
                 price = max(0.0, 1.0/S - 1.0/K) if K > S else 0.0
             return price, InverseGreeks(delta=0.0, gamma=0.0, theta=0.0, vega=0.0, rho=0.0)
         d1, d2 = InverseOptionPricer._calculate_d1_d2(S, K, T, r, sigma)
-        inv_S = 1.0 / S
-        inv_K = 1.0 / K
+        inv_S, inv_K = 1.0 / S, 1.0 / K
         discount = np.exp(-r * T)
         sqrt_T = np.sqrt(T)
         n_d1 = norm.pdf(d1)
@@ -209,16 +208,8 @@ class InverseOptionPricer:
         else:
             price = inv_S * norm.cdf(d1) - discount * inv_K * norm.cdf(d2)
         price = max(0.0, price)
-        context = _GreeksComputationContext(
-            inv_S=inv_S,
-            inv_K=inv_K,
-            discount=discount,
-            sqrt_T=sqrt_T,
-            n_d1=n_d1,
-        )
-        greeks = InverseOptionPricer._calculate_greeks_from_d(
-            d1, d2, S, K, T, r, sigma, option_type, context
-        )
+        context = _GreeksComputationContext(inv_S=inv_S, inv_K=inv_K, discount=discount, sqrt_T=sqrt_T, n_d1=n_d1)
+        greeks = InverseOptionPricer._calculate_greeks_from_d(d1, d2, S, K, T, r, sigma, option_type, context)
         return price, greeks
 
     @staticmethod
@@ -533,10 +524,8 @@ class InverseOptionPricer:
     ) -> float:
         """通过牛顿迭代（失败回退二分法）计算隐含波动率。"""
         InverseOptionPricer._validate_option_type(option_type)
-        if price <= 0:
-            return 0.0
-        if price >= InverseOptionPricer._iv_price_upper_bound(S=S, K=K, T=T, r=r, option_type=option_type):
-            return 0.0
+        if price <= 0: return 0.0
+        if price >= InverseOptionPricer._iv_price_upper_bound(S=S, K=K, T=T, r=r, option_type=option_type): return 0.0
         if (raw_sigma := InverseOptionPricer._solve_iv_newton(
             price=price,
             S=S,
@@ -548,14 +537,7 @@ class InverseOptionPricer:
             max_iter=max_iter,
         )) is None:
             raw_sigma = InverseOptionPricer._iv_bisection(price, S, K, T, r, option_type, tol, max_iter)
-        return InverseOptionPricer._stabilize_iv_estimate(
-            raw_sigma,
-            T,
-            stabilize_short_maturity=stabilize_short_maturity,
-            short_maturity_threshold=short_maturity_threshold,
-            anchor_sigma=anchor_sigma,
-            max_anchor_deviation=max_anchor_deviation,
-        )
+        return InverseOptionPricer._stabilize_iv_estimate(raw_sigma, T, stabilize_short_maturity=stabilize_short_maturity, short_maturity_threshold=short_maturity_threshold, anchor_sigma=anchor_sigma, max_anchor_deviation=max_anchor_deviation)
 
     @staticmethod
     def _iv_bisection(
@@ -666,10 +648,7 @@ def calculate_position_value(
     else:
         from scipy.stats import norm
         if T <= InverseOptionPricer.EPSILON:
-            if option_type == "call":
-                current_option_value = max(0.0, S - K)
-            else:
-                current_option_value = max(0.0, K - S)
+            current_option_value = max(0.0, S - K) if option_type == "call" else max(0.0, K - S)
         else:
             d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
             d2 = d1 - sigma * np.sqrt(T)

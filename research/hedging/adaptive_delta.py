@@ -130,14 +130,7 @@ class AdaptiveDeltaHedger:
             calculate_hedge_size=self._calculate_hedge_size,
         )
         reason = self._build_reason(time_trigger, delta_trigger, urgency, time_since_last, delta_deviation)
-        return HedgeDecision(
-            should_hedge=should_hedge,
-            reason=reason,
-            target_delta=target_delta,
-            current_delta=current_delta,
-            hedge_size=hedge_size,
-            urgency=urgency
-        )
+        return HedgeDecision(should_hedge=should_hedge, reason=reason, target_delta=target_delta, current_delta=current_delta, hedge_size=hedge_size, urgency=urgency)
 
     def _get_time_since_last_hedge(self, current_time: datetime) -> timedelta:
         """Get time elapsed since last hedge."""
@@ -214,25 +207,20 @@ class AdaptiveDeltaHedger:
         - High gamma accelerates hedging
         """
         multiplier = 1.0
-
         # Price drop acceleration
         if price_drop_pct >= self.config.price_drop_threshold_pct:
             drop_factor = price_drop_pct / self.config.price_drop_threshold_pct
             multiplier /= (1 + (self.config.hedge_frequency_multiplier - 1) * min(drop_factor, 2))
-
         # Price rise acceleration (less aggressive)
         if price_rise_pct >= self.config.price_rise_threshold_pct:
             rise_factor = price_rise_pct / self.config.price_rise_threshold_pct
             multiplier /= (1 + 0.5 * min(rise_factor, 2))  # 0.5x less aggressive than drops
-
         # Gamma acceleration
         if abs(gamma) > self.config.gamma_threshold:
             gamma_factor = min(abs(gamma) / self.config.gamma_threshold, 3)
             multiplier /= (1 + (self.config.high_gamma_multiplier - 1) * (gamma_factor - 1) / 2)
-
         # Clamp multiplier
         multiplier = max(1.0 / self.config.max_frequency_multiplier, min(multiplier, 2.0))
-
         adjusted_seconds = base_interval.total_seconds() * multiplier
         return timedelta(seconds=adjusted_seconds)
 

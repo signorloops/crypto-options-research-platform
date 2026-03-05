@@ -141,11 +141,9 @@ class OrderBookSimulator:
         rng = np.random.default_rng() if rng is None else rng
         effective_spread = self.base_spread_bps * volatility_regime * spread_multiplier
         half_spread = mid_price * effective_spread / 10000 / 2
-        bids = []
-        asks = []
+        bids, asks = [], []
         for i in range(self.depth_levels):
-            bid_price = mid_price - half_spread - i * self.tick_size
-            ask_price = mid_price + half_spread + i * self.tick_size
+            bid_price = mid_price - half_spread - i * self.tick_size; ask_price = mid_price + half_spread + i * self.tick_size
             decay_rate = 0.3 * volatility_regime
             base_size = 10 * np.exp(-decay_rate * i)
             bid_size = max(0.1, base_size * rng.lognormal(0, 0.5))
@@ -351,17 +349,14 @@ class OptionMarketSimulator:
         sigma = volatility
         d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
         d2 = d1 - sigma * np.sqrt(T)
-        if contract.option_type == OptionType.CALL:
-            delta = norm.cdf(d1)
-        else:
-            delta = -norm.cdf(-d1)
+        is_call = contract.option_type == OptionType.CALL
+        delta = norm.cdf(d1) if is_call else -norm.cdf(-d1)
         gamma = norm.pdf(d1) / (S * sigma * np.sqrt(T))
-        if contract.option_type == OptionType.CALL:
-            theta = (-S * norm.pdf(d1) * sigma / (2 * np.sqrt(T))
-                     - r * K * np.exp(-r * T) * norm.cdf(d2))
-        else:
-            theta = (-S * norm.pdf(d1) * sigma / (2 * np.sqrt(T))
-                     + r * K * np.exp(-r * T) * norm.cdf(-d2))
+        theta = (
+            -S * norm.pdf(d1) * sigma / (2 * np.sqrt(T)) - r * K * np.exp(-r * T) * norm.cdf(d2)
+            if is_call
+            else -S * norm.pdf(d1) * sigma / (2 * np.sqrt(T)) + r * K * np.exp(-r * T) * norm.cdf(-d2)
+        )
         vega = S * norm.pdf(d1) * np.sqrt(T) / 100
         return Greeks(
             delta=delta,
@@ -423,22 +418,17 @@ class CompleteMarketSimulator:
     def _generate_options_dataset(self, spot: pd.DataFrame) -> pd.DataFrame:
         """Generate option surface records for each spot timestamp."""
         option_data = []
-        for _, row in spot.iloc[::1].iterrows():  # Hourly
+        for _, row in spot.iloc[::1].iterrows():
             expiries = [row["timestamp"] + timedelta(days=d) for d in [7, 14, 30, 60, 90]]
             chain = self.option_sim.generate_option_chain(
                 spot=row["price"],
                 expiry_dates=expiries,
             )
-
             for contract in chain:
-                time_to_expiry = contract.time_to_expiry(row["timestamp"])
-                if time_to_expiry <= 0:
+                if (time_to_expiry := contract.time_to_expiry(row["timestamp"])) <= 0:
                     continue
                 moneyness = contract.strike / row["price"]
-                iv = self.option_sim.implied_volatility_smile(moneyness, time_to_expiry)
-                greeks = self.option_sim.calculate_greeks(
-                    contract, row["price"], iv, row["timestamp"]
-                )
+                iv = self.option_sim.implied_volatility_smile(moneyness, time_to_expiry); greeks = self.option_sim.calculate_greeks(contract, row["price"], iv, row["timestamp"])
                 spread_bps = 50 + 100 * iv  # Higher vol = wider spread
                 option_data.append({
                     "timestamp": row["timestamp"],

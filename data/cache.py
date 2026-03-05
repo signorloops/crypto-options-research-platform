@@ -72,10 +72,8 @@ class DataCache:
         processed: bool = False
     ) -> Optional[pd.DataFrame]:
         """Retrieve cached data for a date range, returning None if any day is missing."""
-        if start > end:
-            raise ValueError("start must be <= end")
-        frames = []; current = start.replace(hour=0, minute=0, second=0, microsecond=0)
-        end_date = end.replace(hour=0, minute=0, second=0, microsecond=0)
+        if start > end: raise ValueError("start must be <= end")
+        frames = []; current = start.replace(hour=0, minute=0, second=0, microsecond=0); end_date = end.replace(hour=0, minute=0, second=0, microsecond=0)
         while current <= end_date:
             cache_path = self._get_cache_path(
                 exchange, data_type, instrument, current, processed
@@ -96,10 +94,7 @@ class DataCache:
             combined['timestamp'] = pd.to_datetime(combined['timestamp'])
             if start == end and start.hour == 0 and start.minute == 0:
                 end = end + timedelta(days=1) - timedelta(microseconds=1)
-            combined = combined[
-                (combined['timestamp'] >= start) &
-                (combined['timestamp'] <= end)
-            ]
+            combined = combined[(combined['timestamp'] >= start) & (combined['timestamp'] <= end)]
         return combined.reset_index(drop=True)
 
     def put(
@@ -238,14 +233,11 @@ class DataCache:
     def clear_cache(self, exchange: Optional[str] = None, older_than_days: Optional[int] = None) -> None:
         """Clear cached data."""
         import shutil
-
         if exchange:
-            # Clear specific exchange
             for base in [self.raw_dir, self.processed_dir]:
                 exchange_dir = base / exchange
                 if exchange_dir.exists():
                     if older_than_days:
-                        # Selective deletion
                         cutoff = datetime.now() - timedelta(days=older_than_days)
                         for f in exchange_dir.rglob("*.parquet"):
                             try:
@@ -255,10 +247,8 @@ class DataCache:
                             except ValueError:
                                 pass
                     else:
-                        # Delete all
                         shutil.rmtree(exchange_dir)
         else:
-            # Clear all
             if older_than_days:
                 cutoff = datetime.now() - timedelta(days=older_than_days)
                 for base in [self.raw_dir, self.processed_dir]:

@@ -126,7 +126,7 @@ class CrossExchangeArbitrage:
         for ex, entry in price_entries.items():
             if hasattr(entry, 'received_at'):
                 age_ms = (now - entry.received_at).total_seconds() * 1000
-                if age_ms > 200:  # 超过200ms视为过期
+                if age_ms > 200:
                     continue
                 prices[ex] = entry.price
             else:
@@ -145,17 +145,12 @@ class CrossExchangeArbitrage:
                     buy_price=buy_price,
                     sell_price=sell_price,
                 )
-                if opportunity is None:
-                    continue
-                if opportunity.spread_bps < self.min_spread_bps:
-                    continue
-                if opportunity.profit_pct / 100 < self.min_profit_pct:
+                if opportunity is None or opportunity.spread_bps < self.min_spread_bps or opportunity.profit_pct / 100 < self.min_profit_pct:
                     continue
                 if best_opportunity is None or opportunity.profit_pct > best_opportunity.profit_pct:
                     best_opportunity = opportunity
-        if best_opportunity is not None:
-            if self.opportunity_callback:
-                self.opportunity_callback(best_opportunity)
+        if best_opportunity is not None and self.opportunity_callback:
+            self.opportunity_callback(best_opportunity)
 
     def get_best_opportunities(self, top_n: int = 10) -> List[ArbitrageOpportunity]:
         """获取当前最佳套利机会（简化版，不维护历史队列）。"""
@@ -227,17 +222,7 @@ class CrossExchangeArbitrage:
         opportunity: ArbitrageOpportunity,
         position_size: float
     ) -> Dict[str, float]:
-        """
-        计算执行套利所需资本。
-
-        Returns:
-            {
-                'buy_capital': 买入所需资金,
-                'sell_collateral': 卖出保证金,
-                'total_required': 总需求,
-                'expected_profit': 预期利润
-            }
-        """
+        """计算执行套利所需资金、保证金、总占用与预期收益。"""
         buy_capital = position_size * opportunity.buy_price
         sell_collateral = position_size * opportunity.sell_price * 0.5  # 假设 50% 保证金
 
@@ -324,12 +309,7 @@ class CrossExchangeArbitrage:
         min_profit_pct: float = 0.001
     ) -> Optional[TriangularOpportunity]:
         """检查简化三角套利（3条边）: A/B -> B/C -> C/A。"""
-        currencies = set()
-        for pair in pair_prices:
-            base, quote = pair.split("/")
-            currencies.add(base)
-            currencies.add(quote)
-        currencies = sorted(currencies)
+        currencies = sorted({currency for pair in pair_prices for currency in pair.split("/")})
         for b in currencies:
             for c in currencies:
                 if b == c or b == start_currency or c == start_currency:

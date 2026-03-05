@@ -290,26 +290,10 @@ class InversePowerOptionPricer:
 
     @staticmethod
     def _fd_price_context(
-        *,
-        normals: np.ndarray,
-        S: float,
-        K: float,
-        T: float, r: float,
-        sigma: float, option_type: Literal["call", "put"],
-        power: float,
-        n_paths: int, bump_rel: float,
+        *, normals: np.ndarray, S: float, K: float, T: float, r: float, sigma: float,
+        option_type: Literal["call", "put"], power: float, n_paths: int, bump_rel: float,
     ) -> tuple[float, _InversePowerFDBase, _InversePowerFDBumps]:
-        price = InversePowerOptionPricer._price_with_normals(
-            normals=normals,
-            S=S,
-            K=K,
-            T=T,
-            r=r,
-            sigma=sigma,
-            option_type=option_type,
-            power=power,
-            n_paths=n_paths,
-        )
+        price = InversePowerOptionPricer._price_with_normals(normals=normals, S=S, K=K, T=T, r=r, sigma=sigma, option_type=option_type, power=power, n_paths=n_paths)
         bumps = InversePowerOptionPricer._finite_difference_bumps(
             S=S,
             T=T,

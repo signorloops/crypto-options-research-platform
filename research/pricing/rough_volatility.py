@@ -42,10 +42,8 @@ class RoughVolatilityPricer:
 
     def __init__(self, config: Optional[RoughVolConfig] = None):
         config = config or RoughVolConfig()
-        if config.spot <= 0:
-            raise ValueError("spot must be positive")
-        if config.maturity <= 0:
-            raise ValueError("maturity must be positive")
+        if config.spot <= 0: raise ValueError("spot must be positive")
+        if config.maturity <= 0: raise ValueError("maturity must be positive")
         if config.n_steps <= 1:
             raise ValueError("n_steps must be > 1")
         if config.n_paths <= 0:
@@ -114,13 +112,7 @@ class RoughVolatilityPricer:
         dW2 = (cfg.correlation * z1 + np.sqrt(1.0 - cfg.correlation ** 2) * z2) * sqrt_dt
         return dW1, dW2
 
-    def _simulate_jump_components(
-        self,
-        n_paths: int,
-        n_steps: int,
-        dt: float,
-        rng: np.random.Generator,
-    ) -> Tuple[np.ndarray, np.ndarray, Dict[str, float]]:
+    def _simulate_jump_components(self, n_paths: int, n_steps: int, dt: float, rng: np.random.Generator) -> Tuple[np.ndarray, np.ndarray, Dict[str, float]]:
         """Simulate jump returns and co-jump variance multipliers."""
         cfg = self.config
         jump_returns = np.zeros((n_paths, n_steps), dtype=float)
@@ -154,16 +146,11 @@ class RoughVolatilityPricer:
         avg_events = float(np.mean(np.sum(counts, axis=1)))
         return jump_returns, var_multipliers, {"avg_jump_events_per_path": avg_events, "total_jump_events": total_events, "avg_jump_intensity": float(np.mean(intensity_history)), "jump_intensity_std": float(np.std(intensity_history))}
 
-    def simulate_paths(
-        self,
-        n_paths: Optional[int] = None,
-        rng: Optional[np.random.Generator] = None,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    def simulate_paths(self, n_paths: Optional[int] = None, rng: Optional[np.random.Generator] = None) -> Tuple[np.ndarray, np.ndarray]:
         """Simulate spot and variance paths."""
         t0 = time.perf_counter()
         cfg = self.config
-        dt = cfg.maturity / cfg.n_steps
-        sqrt_dt = np.sqrt(dt)
+        dt = cfg.maturity / cfg.n_steps; sqrt_dt = np.sqrt(dt)
         n_paths = int(n_paths if n_paths is not None else cfg.n_paths)
         n_steps = cfg.n_steps
         gen = rng or self._rng
@@ -218,12 +205,7 @@ class RoughVolatilityPricer:
         discount = np.exp(-self.config.rate * self.config.maturity)
         return float(discount * np.mean(payoff))
 
-    def price_with_confidence_interval(
-        self,
-        strike: float,
-        option_type: Literal["call", "put"] = "call",
-        confidence: float = 0.95,
-    ) -> Dict[str, object]:
+    def price_with_confidence_interval(self, strike: float, option_type: Literal["call", "put"] = "call", confidence: float = 0.95) -> Dict[str, object]:
         """Price option and report Monte Carlo confidence interval."""
         if not (0.5 < confidence < 1.0):
             raise ValueError("confidence must be in (0.5, 1.0)")

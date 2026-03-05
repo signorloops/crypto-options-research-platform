@@ -73,9 +73,7 @@ def _benchmark_row(
     sigma: float,
     model_params: Optional[Dict[str, float]],
 ) -> Dict[str, float]:
-    abs_err = []
-    sq_err = []
-    iv_abs_err = []
+    abs_err, sq_err, iv_abs_err = [], [], []
     for quote in quotes:
         predicted = zoo.price_option(
             model=model,

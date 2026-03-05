@@ -549,19 +549,15 @@ class GreeksCacheManager:
         lock = await self._get_fetch_lock(instrument)
         async with lock:
             greeks = await self.redis.get_greeks(instrument)
-            if greeks is not None:
-                return greeks
-            if instrument in self._fetch_cache:
-                return self._fetch_cache[instrument]
+            if greeks is not None: return greeks
+            if instrument in self._fetch_cache: return self._fetch_cache[instrument]
             logger.debug("Greeks cache miss", extra=log_extra(instrument=instrument))
             try:
                 greeks = await fetch_func(instrument)
                 if greeks:
                     await self.redis.set_greeks(instrument, greeks)
                     self._fetch_cache[instrument] = greeks
-                    asyncio.get_event_loop().call_later(
-                        5.0, self._fetch_cache.pop, instrument, None
-                    )
+                    asyncio.get_event_loop().call_later(5.0, self._fetch_cache.pop, instrument, None)
             except Exception as e:
                 logger.error(
                     "Failed to fetch Greeks",

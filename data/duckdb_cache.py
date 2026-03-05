@@ -297,8 +297,7 @@ class DuckDBCache:
             where_clause = "WHERE timestamp >= $start"
             params = {"start": start}
         elif end:
-            where_clause = "WHERE timestamp <= $end"
-            params = {"end": end}
+            where_clause = "WHERE timestamp <= $end"; params = {"end": end}
         query = f"""
             SELECT
                 COUNT(*) as count,
@@ -318,16 +317,14 @@ class DuckDBCache:
         """Resample tick/trade data to OHLCV buckets."""
         safe_table = _sanitize_identifier(table_name); where_clause, params = "", {}
         if start and end:
-            where_clause = "WHERE timestamp >= $start AND timestamp <= $end"
-            params = {"start": start, "end": end}
+            where_clause = "WHERE timestamp >= $start AND timestamp <= $end"; params = {"start": start, "end": end}
         elif start:
             where_clause = "WHERE timestamp >= $start"
             params = {"start": start}
         elif end:
             where_clause = "WHERE timestamp <= $end"
             params = {"end": end}
-        safe_timeframe = _validate_timeframe(timeframe)
-        query = f"""
+        safe_timeframe = _validate_timeframe(timeframe); query = f"""
             WITH bucketed AS (
                 SELECT
                     time_bucket(INTERVAL '{safe_timeframe}', timestamp) as bucket,

@@ -174,20 +174,15 @@ class ConversionArbitrage:
     ) -> Optional[ConversionOpportunity]:
         """检查是否存在转换/反转套利机会。"""
         resolved = _resolve_opportunity_inputs(strategy=self, underlying=underlying, call_price=call_price, put_price=put_price, spot_price=spot_price, strike=strike, expiry=expiry)
-        if resolved is None:
-            return None
+        if resolved is None: return None
         call_price, put_price, spot_price, strike, expiry = resolved
         parity = self.calculate_parity_deviation(call_price, put_price, spot_price, strike, expiry)
         deviation, T = parity['deviation'], parity['time_to_expiry']
-        if spot_price <= 0 or T <= 0:
-            return None
+        if spot_price <= 0 or T <= 0: return None
         total_cost = 3 * self.transaction_cost * spot_price
-        strategy_profit = _strategy_and_profit_from_deviation(deviation=deviation, total_cost=total_cost)
-        if strategy_profit is None:
-            return None
+        if (strategy_profit := _strategy_and_profit_from_deviation(deviation=deviation, total_cost=total_cost)) is None: return None
         strategy, profit = strategy_profit
-        if profit / spot_price < self.min_profit:
-            return None
+        if profit / spot_price < self.min_profit: return None
         annualized_return = (profit / spot_price) / T
         return _build_conversion_opportunity(
             underlying=underlying,
@@ -257,33 +252,17 @@ class ConversionArbitrage:
         opp: ConversionOpportunity,
         spot_at_expiry: float
     ) -> float:
-        """
-        计算到期时在不同现货价格下的 P&L。
-
-        Args:
-            spot_at_expiry: 到期现货价格
-
-        Returns:
-            净利润/亏损
-        """
+        """计算转换/反转策略在到期现货价下的净 P&L。"""
         if opp.strategy == "conversion":
-            # 卖出看涨 (义务): -max(S-K, 0)
             call_pnl = -max(spot_at_expiry - opp.strike, 0) + opp.call_price
-            # 买入看跌 (权利): max(K-S, 0)
             put_pnl = max(opp.strike - spot_at_expiry, 0) - opp.put_price
-            # 买入标的
             underlying_pnl = spot_at_expiry - opp.spot_price
         else:
-            # 买入看涨
             call_pnl = max(spot_at_expiry - opp.strike, 0) - opp.call_price
-            # 卖出看跌
             put_pnl = -max(opp.strike - spot_at_expiry, 0) + opp.put_price
-            # 卖出标的
             underlying_pnl = opp.spot_price - spot_at_expiry
 
         total_pnl = call_pnl + put_pnl + underlying_pnl
-
-        # 扣除交易成本
         total_pnl -= 3 * self.transaction_cost * opp.spot_price
 
         return total_pnl
@@ -306,19 +285,13 @@ class ConversionArbitrage:
         """
         T = _time_to_expiry_years(expiry)
         pv_strike = strike * np.exp(-self.risk_free_rate * T)
-
         # 看涨期权下界
-        call_lower_bound = max(spot_price - pv_strike, 0)
-        call_bound_ok = call_price >= call_lower_bound
-
+        call_lower_bound = max(spot_price - pv_strike, 0); call_bound_ok = call_price >= call_lower_bound
         # 看跌期权下界
-        put_lower_bound = max(pv_strike - spot_price, 0)
-        put_bound_ok = put_price >= put_lower_bound
-
+        put_lower_bound = max(pv_strike - spot_price, 0); put_bound_ok = put_price >= put_lower_bound
         # 平价偏离
         parity_deviation = abs(call_price - put_price - spot_price + pv_strike)
         parity_ok = parity_deviation < 3 * self.transaction_cost * spot_price
-
         return {
             'call_lower_bound_satisfied': call_bound_ok,
             'put_lower_bound_satisfied': put_bound_ok,

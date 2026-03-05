@@ -217,14 +217,9 @@ class AlmgrenChrissExecutor:
             schedule = self.optimal_trading_schedule()
         else:
             schedule = np.asarray(schedule, dtype=float)
-            if len(schedule) != self.config.n_steps:
-                raise ValueError("schedule length must equal n_steps")
+            if len(schedule) != self.config.n_steps: raise ValueError("schedule length must equal n_steps")
         costs = np.zeros(n_paths, dtype=float)
-        sigma = self.config.volatility
-        eta = self.config.temporary_impact_eta
-        gamma = self.config.permanent_impact_gamma
-        s0 = self.config.initial_price
-        tau = self._tau
+        sigma, eta, gamma, s0, tau = self.config.volatility, self.config.temporary_impact_eta, self.config.permanent_impact_gamma, self.config.initial_price, self._tau
 
         for i in range(n_paths):
             mid = s0

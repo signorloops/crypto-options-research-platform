@@ -280,34 +280,19 @@ class PortfolioState:
         Returns:
             Tuple of (instrument, concentration_pct)
         """
-        if not self.positions:
-            return "", 0.0
-
-        # Concentration risk is a relative cross-position metric.
-        # For single-instrument portfolios, this metric is not informative.
-        non_zero_positions = [
-            pos for pos in self.positions.values()
-            if abs(pos.size) > 1e-12 and pos.avg_entry_price > 0
-        ]
-        if len(non_zero_positions) <= 1:
-            return "", 0.0
-
+        if not self.positions: return "", 0.0
+        non_zero_positions = [pos for pos in self.positions.values() if abs(pos.size) > 1e-12 and pos.avg_entry_price > 0]
+        if len(non_zero_positions) <= 1: return "", 0.0
         total_value = self.total_value
-        if abs(total_value) <= 1e-12:
-            return "", 0.0
+        if abs(total_value) <= 1e-12: return "", 0.0
         total_value = abs(total_value)
-
-        max_concentration = 0.0
-        max_instrument = ""
-
+        max_concentration, max_instrument = 0.0, ""
         for instrument, position in self.positions.items():
             position_value = abs(position.size) * position.avg_entry_price
             concentration = position_value / total_value
-
             if concentration > max_concentration:
                 max_concentration = concentration
                 max_instrument = instrument
-
         return max_instrument, max_concentration
 
 
@@ -398,25 +383,17 @@ class CircuitBreaker:
             return False
 
     async def load_state(self) -> bool:
-        """
-        Load state from Redis.
-
-        Returns:
-            True if state was loaded, False otherwise
-        """
+        """Load state snapshot from Redis if available."""
         if self._redis_client is None:
             return False
 
         try:
-            key = f"{self._redis_key_prefix}:state"
-            data = await self._redis_client.get(key)
+            key = f"{self._redis_key_prefix}:state"; data = await self._redis_client.get(key)
 
             if data is None:
                 return False
 
             state_data = json.loads(data)
-
-            # Restore state
             self.state = CircuitState(state_data["state"])
 
             if state_data.get("last_state_change"):
@@ -493,12 +470,10 @@ class CircuitBreaker:
                 now=now,
                 violation_type="daily_loss",
                 value=abs(daily_pnl_pct),
-                critical_limit=self.config.daily_loss_limit_pct,
-                warning_limit=self.config.daily_loss_warning_pct,
+                critical_limit=self.config.daily_loss_limit_pct, warning_limit=self.config.daily_loss_warning_pct,
                 label="Daily loss",
             )
-            if daily_loss_violation is not None:
-                violations.append(daily_loss_violation)
+            if daily_loss_violation is not None: violations.append(daily_loss_violation)
         if (max_dd := portfolio.max_drawdown) < 0:
             drawdown_violation = _build_threshold_violation(
                 now=now,
@@ -508,10 +483,8 @@ class CircuitBreaker:
                 warning_limit=self.config.drawdown_warning_pct,
                 label="Drawdown",
             )
-            if drawdown_violation is not None:
-                violations.append(drawdown_violation)
-        instrument, concentration = portfolio.get_position_concentration()
-        concentration_violation = _build_threshold_violation(
+            if drawdown_violation is not None: violations.append(drawdown_violation)
+        instrument, concentration = portfolio.get_position_concentration(); concentration_violation = _build_threshold_violation(
             now=now,
             violation_type="concentration",
             value=concentration,
@@ -519,8 +492,7 @@ class CircuitBreaker:
             warning_limit=self.config.concentration_warning_pct,
             label=f"Position {instrument} concentration",
         )
-        if concentration_violation is not None:
-            violations.append(concentration_violation)
+        if concentration_violation is not None: violations.append(concentration_violation)
         if (var_violation := self._check_var_limit_from_portfolio(portfolio)) is not None: violations.append(var_violation)
         if self.config.enable_per_instrument_limits: violations.extend(self._check_per_instrument_limits(portfolio))
         return violations
@@ -533,22 +505,17 @@ class CircuitBreaker:
                 continue
             signed_notional = float(position.size) * float(position.avg_entry_price)
             positions_data.append((instrument, signed_notional))
-
-        if not positions_data:
-            return None
-
+        if not positions_data: return None
         returns_df = portfolio.asset_returns.copy()
         if returns_df.empty:
             # Fallback proxy: use a single synthetic portfolio factor rather than
             # duplicating identical returns across instruments.
             pnl_returns = portfolio.pnl_series.diff().dropna()
-            if len(pnl_returns) < 30:
-                return None
+            if len(pnl_returns) < 30: return None
             base = max(abs(portfolio.initial_capital), 1e-12)
             norm_returns = pnl_returns / base
             proxy_value = float(sum(v for _, v in positions_data))
-            if abs(proxy_value) <= 1e-12:
-                return None
+            if abs(proxy_value) <= 1e-12: return None
             positions_df = pd.DataFrame(
                 {"value": [proxy_value]},
                 index=["_portfolio_proxy"],
@@ -559,7 +526,6 @@ class CircuitBreaker:
                 {"value": [v for _, v in positions_data]},
                 index=[k for k, _ in positions_data],
             )
-
         portfolio_value = max(abs(portfolio.total_value), 1e-12)
         return self.check_var_limit(positions_df, returns_df, portfolio_value)
 
@@ -567,12 +533,10 @@ class CircuitBreaker:
         now = datetime.now(timezone.utc); violations: List[Violation] = []
         for instrument, position in portfolio.positions.items():
             if (notional := abs(position.size) * max(position.avg_entry_price, 0.0)) <= 0:
-                self._instrument_states[instrument] = CircuitState.NORMAL
-                continue
+                self._instrument_states[instrument] = CircuitState.NORMAL; continue
             critical_limit = self.config.per_instrument_notional_limits.get(instrument, self.config.per_instrument_notional_limit); warning_limit = min(self.config.per_instrument_warning_notional, critical_limit)
             if not np.isfinite(critical_limit):
-                self._instrument_states[instrument] = CircuitState.NORMAL
-                continue
+                self._instrument_states[instrument] = CircuitState.NORMAL; continue
             if notional >= critical_limit:
                 self._instrument_states[instrument] = CircuitState.RESTRICTED
                 violations.append(Violation(
@@ -581,10 +545,7 @@ class CircuitBreaker:
                     severity="critical",
                     current_value=notional,
                     limit_value=critical_limit,
-                    message=(
-                        f"Instrument {instrument} notional {notional:.2f} "
-                        f"exceeds limit {critical_limit:.2f}"
-                    )
+                    message=f"Instrument {instrument} notional {notional:.2f} exceeds limit {critical_limit:.2f}",
                 ))
             elif np.isfinite(warning_limit) and notional >= warning_limit:
                 self._instrument_states[instrument] = CircuitState.WARNING
@@ -594,13 +555,9 @@ class CircuitBreaker:
                     severity="warning",
                     current_value=notional,
                     limit_value=warning_limit,
-                    message=(
-                        f"Instrument {instrument} notional {notional:.2f} "
-                        f"exceeds warning {warning_limit:.2f}"
-                    )
+                    message=f"Instrument {instrument} notional {notional:.2f} exceeds warning {warning_limit:.2f}",
                 ))
-            else:
-                self._instrument_states[instrument] = CircuitState.NORMAL
+            else: self._instrument_states[instrument] = CircuitState.NORMAL
         return violations
 
     def _determine_state(self, violations: List[Violation]) -> CircuitState:
@@ -916,8 +873,7 @@ class CircuitBreaker:
         elif method == "fhs":
             var_result = self._var_calculator.filtered_historical_var(positions, returns)
         else:
-            candidates = [self._var_calculator.parametric_var(positions, returns), self._var_calculator.cornish_fisher_var(positions, returns), self._var_calculator.evt_var(positions, returns), self._var_calculator.filtered_historical_var(positions, returns)]
-            var_result = max(candidates, key=lambda x: x.var_95)
+            var_result = max([self._var_calculator.parametric_var(positions, returns), self._var_calculator.cornish_fisher_var(positions, returns), self._var_calculator.evt_var(positions, returns), self._var_calculator.filtered_historical_var(positions, returns)], key=lambda x: x.var_95)
         var_95_pct, var_99_pct = (var_result.var_95 / portfolio_value, var_result.var_99 / portfolio_value) if portfolio_value > 0 else (0.0, 0.0)
         if var_99_pct > self.config.var_99_limit_pct:
             return Violation(

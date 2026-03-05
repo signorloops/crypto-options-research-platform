@@ -202,7 +202,6 @@ class BacktestEngine:
         """Try to fill previous quote against synthetic trades and update position."""
         if previous_quote is None or self.fill_simulator is None:
             return position
-
         synthetic_trades = self._generate_synthetic_trades(
             market_state,
             volume=event_volume,
@@ -210,7 +209,6 @@ class BacktestEngine:
         )
         if not synthetic_trades:
             return position
-
         fill = self.fill_simulator.simulate_fill(
             previous_quote,
             market_state,
@@ -220,7 +218,6 @@ class BacktestEngine:
         )
         if fill is None:
             return position
-
         self._process_fill(fill, position, current_price)
         updated_position = self.positions.get("SYNTHETIC", position)
         self.strategy.on_fill(fill, updated_position)
@@ -241,19 +238,14 @@ class BacktestEngine:
         """Run backtest on historical market data."""
         self._reset_run_state()
         prices = market_data[price_column].to_numpy(dtype=np.float64); timestamps_arr = market_data[timestamp_column].to_numpy()
-        n_events = len(prices)
-        if n_events == 0:
-            return self._compute_result(current_price=0.0)
+        if (n_events := len(prices)) == 0: return self._compute_result(current_price=0.0)
         event_volumes = self._prepare_event_volumes(market_data)
         current_ob = self._create_dummy_order_book(prices[0])
         previous_quote: Optional[QuoteAction] = None; previous_quote_timestamp = None; previous_market_state: Optional[MarketState] = None
         for i in range(n_events):
-            price = float(prices[i])
-            timestamp = timestamps_arr[i]
+            price = float(prices[i]); timestamp = timestamps_arr[i]
             current_ob = self._update_order_book(current_ob, price)
-            market_state = _build_market_state_snapshot(
-                timestamp=timestamp, price=price, order_book=current_ob
-            )
+            market_state = _build_market_state_snapshot(timestamp=timestamp, price=price, order_book=current_ob)
             position = self.positions.get("SYNTHETIC", Position("SYNTHETIC", 0, 0))
             position = self._maybe_process_previous_quote(
                 previous_quote=previous_quote,
@@ -432,14 +424,11 @@ class BacktestEngine:
         self, returns: pd.Series, n_bootstrap: int = 500, alpha: float = 0.05
     ) -> Tuple[Tuple[float, float], Tuple[float, float]]:
         """Bootstrap confidence intervals for Sharpe and drawdown."""
-        if len(returns) < 10:
-            return (0.0, 0.0), (0.0, 0.0)
-
+        if len(returns) < 10: return (0.0, 0.0), (0.0, 0.0)
         sharpe_samples: List[float] = []
         dd_samples: List[float] = []
         annualization = np.sqrt(self._periods_per_year(returns.index, len(returns)))
         values = returns.to_numpy()
-
         for _ in range(n_bootstrap):
             sample = self.rng.choice(values, size=len(values), replace=True)
             std = np.std(sample, ddof=1)
@@ -447,7 +436,6 @@ class BacktestEngine:
                 sharpe_samples.append(float(np.mean(sample) / std * annualization))
             else:
                 sharpe_samples.append(0.0)
-
             cum = np.cumsum(sample)
             running_max = np.maximum.accumulate(cum)
             denom = np.where(np.abs(running_max) > 1e-12, np.abs(running_max), 1.0)
@@ -511,13 +499,8 @@ class BacktestEngine:
         sharpe = self._calculate_sharpe_ratio(pnl_series); max_dd = _calculate_max_drawdown(pnl_series); buys, sells = _trade_side_counts(self.trades)
         returns_for_ci = pnl_series.diff().dropna() / max(self.initial_crypto_balance, 1e-12) if len(pnl_series) > 1 else pd.Series(dtype=float)
         sharpe_ci, drawdown_ci = self._bootstrap_risk_ci(returns_for_ci); deflated_trials = max(2, int(getattr(self.strategy, "multiple_testing_trials", 2)))
-        deflated_sharpe = self._deflated_sharpe_ratio(
-            float(sharpe), n_obs=len(returns_for_ci), n_trials=deflated_trials
-        )
-        execution_cost, adverse_selection_cost = self._execution_costs()
-        return BacktestResult(
-            strategy_name=self.strategy.name,
-            total_pnl_crypto=total_pnl_crypto,
+        deflated_sharpe = self._deflated_sharpe_ratio(float(sharpe), n_obs=len(returns_for_ci), n_trials=deflated_trials); execution_cost, adverse_selection_cost = self._execution_costs()
+        return BacktestResult(strategy_name=self.strategy.name, total_pnl_crypto=total_pnl_crypto,
             total_pnl_usd=total_pnl_usd,
             realized_pnl=realized_pnl,
             unrealized_pnl=unrealized_pnl,

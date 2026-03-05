@@ -27,8 +27,7 @@ def _full_bucket_components(
         empty_ts = np.array([], dtype=timestamps.dtype)
         return empty_float, empty_float, empty_ts, empty_float, empty_float, empty_float
     boundaries = (np.arange(1, n_full + 1, dtype=float) * bucket_size)
-    boundary_idx = np.searchsorted(cum_total, boundaries, side="left")
-    boundary_idx = np.clip(boundary_idx, 0, len(cum_total) - 1)
+    boundary_idx = np.clip(np.searchsorted(cum_total, boundaries, side="left"), 0, len(cum_total) - 1)
     trade_starts = cum_total[boundary_idx] - volumes[boundary_idx]
     partial_to_boundary = boundaries - trade_starts
     buy_prefix = np.where(boundary_idx > 0, cum_buy[boundary_idx - 1], 0.0)
@@ -41,14 +40,7 @@ def _full_bucket_components(
     full_sell = np.diff(np.concatenate(([0.0], cum_sell_at_boundaries)))
     full_totals = np.full(n_full, bucket_size, dtype=float)
     full_timestamps = timestamps[boundary_idx]
-    return (
-        full_buy,
-        full_sell,
-        full_timestamps,
-        full_totals,
-        cum_buy_at_boundaries,
-        cum_sell_at_boundaries,
-    )
+    return full_buy, full_sell, full_timestamps, full_totals, cum_buy_at_boundaries, cum_sell_at_boundaries
 
 
 def _append_partial_bucket(
@@ -243,17 +235,12 @@ class VPINCalculator:
 
     def _create_volume_buckets(self, df: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Create volume-synchronized buckets via cumsum/searchsorted."""
-        inputs = _volume_inputs_from_df(df)
-        if inputs is None:
-            return _empty_bucket_arrays()
+        if (inputs := _volume_inputs_from_df(df)) is None: return _empty_bucket_arrays()
         volumes, cum_total, total_volume, sides, timestamps = inputs
-        bucket_size = float(self.volume_bucket_size)
-        n_full = int(total_volume // bucket_size); residual = total_volume - n_full * bucket_size
+        bucket_size = float(self.volume_bucket_size); n_full = int(total_volume // bucket_size); residual = total_volume - n_full * bucket_size
         n_buckets = n_full + (1 if (include_partial := residual >= bucket_size * 0.5) else 0)
-        if n_buckets == 0:
-            return _empty_bucket_arrays()
-        is_buy = sides == 'buy'
-        buy_trade_vol, sell_trade_vol = np.where(is_buy, volumes, 0.0), np.where(is_buy, 0.0, volumes)
+        if n_buckets == 0: return _empty_bucket_arrays()
+        is_buy = sides == 'buy'; buy_trade_vol, sell_trade_vol = np.where(is_buy, volumes, 0.0), np.where(is_buy, 0.0, volumes)
         cum_buy, cum_sell = np.cumsum(buy_trade_vol), np.cumsum(sell_trade_vol)
         full_components = _full_bucket_components(
             cum_total=cum_total,

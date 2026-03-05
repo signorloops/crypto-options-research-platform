@@ -222,23 +222,18 @@ class VolatilityRegimeDetector:
     def _train_model(self) -> bool:
         """Train HMM model on buffered data."""
         X = self._prepare_training_data()
-
-        if len(X) < self.config.min_samples_for_training:
-            return False
-
+        if len(X) < self.config.min_samples_for_training: return False
         # Degenerate samples frequently cause unstable covariance estimates.
         # Skip training until we have enough distinct observations.
         if np.unique(X, axis=0).shape[0] < self.config.n_regimes:
             self._training_failures += 1
             self._last_training_error = "insufficient_distinct_samples"
             return False
-
         try:
             feature_mean = np.mean(X, axis=0)
             feature_scale = np.std(X, axis=0)
             feature_scale = np.where(feature_scale < 1e-8, 1.0, feature_scale)
             X_norm = (X - feature_mean) / feature_scale
-
             self._fit_hmm_model(X_norm)
             self._normalize_transition_matrix()
             self._mark_training_success(feature_mean=feature_mean, feature_scale=feature_scale)
@@ -314,36 +309,24 @@ class VolatilityRegimeDetector:
         """Predict current regime using HMM."""
         if not self._is_fitted or len(self._features_buffer) == 0:
             return RegimeState.MEDIUM, np.array([1 / 3, 1 / 3, 1 / 3])
-
         try:
-            # Get latest features
-            latest = self._features_buffer[-1]
-            feature_vector = [latest.log_return]
+            latest = self._features_buffer[-1]; feature_vector = [latest.log_return]
             if self.config.use_realized_vol:
                 feature_vector.extend(
                     [latest.realized_vol_5min, latest.realized_vol_15min, latest.realized_vol_30min]
                 )
-
             X = np.array([feature_vector], dtype=float)
             X = self._normalize_features(X)
-
-            # Predict regime
             hidden_state = self.model.predict(X)[0]
             _, posteriors = self.model.score_samples(X)
-
-            # Get regime probabilities and remap to sorted state order
             raw_probs = posteriors[0]
             mapped_state = self._state_map.get(int(hidden_state), int(hidden_state))
             regime_probs = np.zeros_like(raw_probs)
             for old_idx, new_idx in self._state_map.items():
                 regime_probs[new_idx] = raw_probs[old_idx]
-
             regime = RegimeState(mapped_state)
-
             return regime, regime_probs
         except (ValueError, np.linalg.LinAlgError):
-            # HMM prediction failed (e.g., covariance not positive definite)
-            # Fall back to current regime or MEDIUM
             return self.current_regime, self.regime_probabilities
 
     def update(self, returns: float) -> RegimeState:

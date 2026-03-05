@@ -158,18 +158,14 @@ class OKXClient(ExchangeInterface):
             if inst.get("state") != "live":
                 continue
             parts = inst["instId"].split("-")
-            if len(parts) != 5:
-                continue
+            if len(parts) != 5: continue
             base, quote, expiry_str, strike_str, opt_type = parts
             try:
                 expiry = datetime.strptime(f"20{expiry_str}", "%Y%m%d")
-            except ValueError:
-                continue
-            try:
                 strike = float(strike_str)
             except ValueError:
                 continue
-            contract = OptionContract(
+            contracts.append(OptionContract(
                 underlying=f"{base}-{quote}",
                 strike=strike,
                 expiry=expiry,
@@ -179,8 +175,7 @@ class OKXClient(ExchangeInterface):
                 inverse=True,
                 lot_size=float(inst.get("lotSz", 1)),
                 tick_size=float(inst.get("tickSz", 0.01))
-            )
-            contracts.append(contract)
+            ))
         return contracts
 
     async def get_order_book(
@@ -397,8 +392,7 @@ class OKXClient(ExchangeInterface):
         """Get current ATM-implied-volatility term structure across expiries."""
         from datetime import datetime
         market_data = await self.get_option_market_data(underlying)
-        if not market_data:
-            return pd.DataFrame()
+        if not market_data: return pd.DataFrame()
         expiry_data = {}
         for opt in market_data:
             expiry_ts = opt.get("expTime")
@@ -407,8 +401,7 @@ class OKXClient(ExchangeInterface):
             uly_px = float(opt.get("ulyPx", 0))
             if not expiry_ts or not mark_vol:
                 continue
-            expiry = datetime.fromtimestamp(int(expiry_ts) / 1000, tz=timezone.utc)
-            days_to_exp = (expiry - datetime.now(timezone.utc)).total_seconds() / (24 * 3600)
+            expiry = datetime.fromtimestamp(int(expiry_ts) / 1000, tz=timezone.utc); days_to_exp = (expiry - datetime.now(timezone.utc)).total_seconds() / (24 * 3600)
             if days_to_exp <= 0:
                 continue
             if strike > 0 and uly_px > 0:
@@ -423,8 +416,7 @@ class OKXClient(ExchangeInterface):
                             "moneyness": moneyness,
                             "strike": strike
                         }
-        if not expiry_data:
-            return pd.DataFrame()
+        if not expiry_data: return pd.DataFrame()
         df = pd.DataFrame(list(expiry_data.values()))
         return df.sort_values("days_to_expiry").drop(columns=["moneyness"]).reset_index(drop=True)
 

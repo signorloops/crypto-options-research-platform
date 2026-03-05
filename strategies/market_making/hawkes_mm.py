@@ -209,10 +209,8 @@ class HawkesIntensityMonitor:
         """Marked Hawkes MLE using log-likelihood minimization."""
         if not HAS_SCIPY_OPT or len(self.trade_times) < 30:
             return None
-        times = np.array(self.trade_times, dtype=float)
-        marks = np.maximum(np.array(self.trade_sizes, dtype=float), 1e-8) ** self.mark_power
-        T = max(times[-1] - times[0], 1e-8)
-        shifted_times = times - times[0]
+        times = np.array(self.trade_times, dtype=float); marks = np.maximum(np.array(self.trade_sizes, dtype=float), 1e-8) ** self.mark_power
+        T = max(times[-1] - times[0], 1e-8); shifted_times = times - times[0]
         def neg_log_likelihood(x: np.ndarray) -> float:
             mu, alpha, beta = float(x[0]), float(x[1]), float(x[2])
             if mu <= 0 or alpha < 0 or beta <= 0 or alpha >= beta:
@@ -231,19 +229,15 @@ class HawkesIntensityMonitor:
                 last_t = float(t_i)
             integral = mu * T + (alpha / beta) * np.sum(marks * (1.0 - np.exp(-beta * (T - shifted_times))))
             nll = integral - log_like
-            if not np.isfinite(nll):
-                return 1e12
+            if not np.isfinite(nll): return 1e12
             return float(nll)
         x0 = np.array([init.mu, init.alpha, init.beta], dtype=float); bounds = [(1e-5, 20.0), (1e-5, 10.0), (1e-4, 20.0)]
         result = minimize(neg_log_likelihood, x0, method="L-BFGS-B", bounds=bounds)
-        if not result.success:
-            return None
+        if not result.success: return None
         mu, alpha, beta = map(float, result.x)
         alpha = min(alpha, beta * 0.95)
-        try:
-            return HawkesParameters(mu=mu, alpha=alpha, beta=beta)
-        except ValueError:
-            return None
+        try: return HawkesParameters(mu=mu, alpha=alpha, beta=beta)
+        except ValueError: return None
 
     def estimate_parameters_online(self, use_mle: bool = False) -> Optional[HawkesParameters]:
         """Update Hawkes parameters using recent trade history."""
@@ -389,12 +383,10 @@ class HawkesMarketMaker(MarketMakingStrategy):
         skew_bps = skew * max_skew_bps
         adjusted_mid = mid * (1 + skew_bps / 10000)
         half_spread = mid * spread_bps / 10000 / 2
-
         imbalance = 0.0
         total_int = buy_int + sell_int
         if total_int > 0:
             imbalance = (buy_int - sell_int) / total_int
-
         asym_factor = np.clip(abs(imbalance), 0.0, 1.0) * 0.5
         bid_half = half_spread
         ask_half = half_spread

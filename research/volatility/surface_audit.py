@@ -81,12 +81,8 @@ def _audit_expiry_row(
         "stabilized_mean_adjacent_jump": float(stabilized["mean_abs_adjacent_jump"]),
         "raw_curvature_l1": float(raw["curvature_l1"]),
         "stabilized_curvature_l1": float(stabilized["curvature_l1"]),
-        "max_jump_reduction": float(
-            raw["max_adjacent_jump"] - stabilized["max_adjacent_jump"]
-        ),
-        "mean_jump_reduction": float(
-            raw["mean_abs_adjacent_jump"] - stabilized["mean_abs_adjacent_jump"]
-        ),
+        "max_jump_reduction": float(raw["max_adjacent_jump"] - stabilized["max_adjacent_jump"]),
+        "mean_jump_reduction": float(raw["mean_abs_adjacent_jump"] - stabilized["mean_abs_adjacent_jump"]),
     }
 
 

@@ -230,13 +230,7 @@ class MarketMakingEnv:
         bid_price, ask_price = mid_price * (1 - bid_offset / 10000), mid_price * (1 + ask_offset / 10000)
         quote_size = size_scale
         done = (next_step := self.current_step + 1) >= self.episode_length
-        reward, info = 0.0, {
-            'fills': 0,
-            'pnl': 0.0,
-            'applied_bid_offset_bps': bid_offset,
-            'applied_ask_offset_bps': ask_offset,
-            'applied_size_scale': size_scale,
-        }
+        reward, info = 0.0, {'fills': 0, 'pnl': 0.0, 'applied_bid_offset_bps': bid_offset, 'applied_ask_offset_bps': ask_offset, 'applied_size_scale': size_scale}
         if not done:
             recent_volatility, recent_volume = self._estimate_recent_market_conditions()
             fill_prob_bid, fill_prob_ask = self._compute_fill_probabilities(
@@ -328,41 +322,21 @@ class MarketMakingEnv:
 
     def _get_state(self) -> np.ndarray:
         """Compute current state vector."""
-        idx = self.episode_start + self.current_step
-        current = self.market_data.iloc[idx]
-        price_norm = (current["price"] - self.price_mean) / self.price_std
-        inventory_norm = self.position / 10.0
+        idx = self.episode_start + self.current_step; current = self.market_data.iloc[idx]
+        price_norm = (current["price"] - self.price_mean) / self.price_std; inventory_norm = self.position / 10.0
         volatility = self._rolling_volatility(idx)
         ret_1, ret_5, ret_10, momentum, realized_skew, realized_kurt = self._return_block(idx)
         time_left = 1.0 - (self.current_step / self.episode_length); vol_now, vol_mean, volume_z = self._volume_block(idx)
-        spread_bps = self._safe_column_value(
-            current, "spread_bps", max(5.0, min(120.0, float(volatility * 25.0)))
-        )
+        spread_bps = self._safe_column_value(current, "spread_bps", max(5.0, min(120.0, float(volatility * 25.0))))
         imbalance = self._safe_column_value(current, "imbalance", np.clip(ret_1 * 50.0, -1.0, 1.0))
         bid_norm, ask_norm = self._normalized_bid_ask_depth(current, float(imbalance))
         delta, vega = self._safe_column_value(current, "delta", 0.0), self._safe_column_value(current, "vega", 0.0)
         return np.array([
-            price_norm,
-            inventory_norm,
-            volatility,
-            float(volatility),
-            float(imbalance),
-            spread_bps / 100.0,
-            float(ret_1),
-            float(ret_5),
-            float(ret_10),
-            float(momentum),
-            vol_now / (vol_mean + 1e-8),
-            float(volume_z),
-            float(bid_norm),
-            float(ask_norm),
-            np.sign(self.position),
-            abs(self.position) / 10.0,
-            min(1.0, abs(self.position) / 10.0),
-            time_left,
-            float(realized_skew),
-            float(realized_kurt),
-            float(delta),
+            price_norm, inventory_norm, volatility, float(volatility),
+            float(imbalance), spread_bps / 100.0, float(ret_1), float(ret_5),
+            float(ret_10), float(momentum), vol_now / (vol_mean + 1e-8), float(volume_z),
+            float(bid_norm), float(ask_norm), np.sign(self.position), abs(self.position) / 10.0,
+            min(1.0, abs(self.position) / 10.0), time_left, float(realized_skew), float(realized_kurt), float(delta),
             float(vega),
         ], dtype=np.float32)
 
@@ -425,8 +399,7 @@ class PPOMarketMaker(MarketMakingStrategy):
     def quote(self, state: MarketState, position: Position) -> QuoteAction:
         """Generate quote using PPO policy."""
         mid = state.order_book.mid_price
-        if mid is None:
-            raise ValueError("Cannot quote without valid order book")
+        if mid is None: raise ValueError("Cannot quote without valid order book")
         state_vec = self._market_state_to_vector(state, position)
         self.current_state = state_vec
         self._state_sequence.append(state_vec)
@@ -436,11 +409,7 @@ class PPOMarketMaker(MarketMakingStrategy):
         bid_offset_bps = np.clip(action[0], self.config.min_spread_bps/2, self.config.max_spread_bps/2)
         ask_offset_bps = np.clip(action[1], self.config.min_spread_bps/2, self.config.max_spread_bps/2)
         size_scale = np.clip(action[2], 0.1, 2.0)
-        inventory_skew = np.clip(
-            -position.size * self.config.max_skew_bps / self.config.inventory_limit,
-            -self.config.max_skew_bps,
-            self.config.max_skew_bps
-        )
+        inventory_skew = np.clip(-position.size * self.config.max_skew_bps / self.config.inventory_limit, -self.config.max_skew_bps, self.config.max_skew_bps)
         bid_price = mid * (1 - bid_offset_bps / 10000 + inventory_skew / 10000)
         ask_price = mid * (1 + ask_offset_bps / 10000 + inventory_skew / 10000)
         quote_size = self.config.quote_size * size_scale
@@ -464,63 +433,38 @@ class PPOMarketMaker(MarketMakingStrategy):
 
     def _market_state_to_vector(self, state: MarketState, position: Position) -> np.ndarray:
         """Convert MarketState to numpy vector for network."""
-        mid = state.order_book.mid_price or 1.0
-        price_norm = np.log(mid) / 10.0 - 1.0 if mid > 0 else 0.0
-        inventory_norm = position.size / self.config.inventory_limit
-        volatility_5 = state.features.get('volatility_5', 0.5)
-        volatility_20 = state.features.get('volatility_20', volatility_5)
+        mid = state.order_book.mid_price or 1.0; price_norm = np.log(mid) / 10.0 - 1.0 if mid > 0 else 0.0
+        inventory_norm = position.size / self.config.inventory_limit; volatility_5 = state.features.get('volatility_5', 0.5); volatility_20 = state.features.get('volatility_20', volatility_5)
         imbalance = state.order_book.imbalance() if state.order_book else 0.0
-        spread_bps = (state.order_book.spread / mid * 10000) if state.order_book and state.order_book.spread and mid > 0 else 20.0
+        spread_bps = state.order_book.spread / mid * 10000 if state.order_book and state.order_book.spread and mid > 0 else 20.0
         ret_1, ret_5, ret_10 = state.features.get('return_1', 0.0), state.features.get('return_5', 0.0), state.features.get('return_10', 0.0)
         momentum, volume_ratio, volume_z = state.features.get('momentum', 0.0), state.features.get('volume_ratio', 1.0), state.features.get('volume_zscore', 0.0)
         bid_norm, ask_norm = self._depth_norms_from_order_book(state)
         inventory_abs = abs(position.size) / max(self.config.inventory_limit, 1e-8); inv_util = min(1.0, inventory_abs); time_left = state.features.get('time_left', 0.5)
-        realized_skew, realized_kurt = state.features.get('realized_skew', 0.0), state.features.get('realized_kurt', 0.0)
-        delta, vega = (state.greeks.delta, state.greeks.vega) if state.greeks is not None else (0.0, 0.0)
+        realized_skew, realized_kurt = state.features.get('realized_skew', 0.0), state.features.get('realized_kurt', 0.0); delta, vega = (state.greeks.delta, state.greeks.vega) if state.greeks is not None else (0.0, 0.0)
         return np.array([
-            price_norm,
-            inventory_norm,
-            volatility_5,
-            volatility_20,
-            imbalance,
-            spread_bps / 100.0,
-            ret_1,
-            ret_5,
-            ret_10,
-            momentum,
-            volume_ratio,
-            volume_z,
-            bid_norm,
-            ask_norm,
-            np.sign(position.size),
-            inventory_abs,
-            inv_util,
-            time_left,
-            realized_skew,
-            realized_kurt,
-            delta,
+            price_norm, inventory_norm, volatility_5, volatility_20,
+            imbalance, spread_bps / 100.0, ret_1, ret_5,
+            ret_10, momentum, volume_ratio, volume_z,
+            bid_norm, ask_norm, np.sign(position.size), inventory_abs,
+            inv_util, time_left, realized_skew, realized_kurt, delta,
             vega,
         ], dtype=np.float32)
 
     def train(self, historical_data: pd.DataFrame) -> None:
         """Train PPO agent on historical data."""
         logger.info("Training PPO agent", extra=log_extra(samples=len(historical_data)))
-        if self.config.random_seed is not None:
-            torch.manual_seed(self.config.random_seed)
+        if self.config.random_seed is not None: torch.manual_seed(self.config.random_seed)
         self.env = MarketMakingEnv(
             historical_data,
             episode_length=1000,
             random_seed=self.config.random_seed,
         )
-        sample_state = self.env.reset()
-        self._init_network(len(sample_state))
+        sample_state = self.env.reset(); self._init_network(len(sample_state))
         total_timesteps = self.config.total_timesteps
-        timestep = 0
-        episodes = 0
+        timestep = 0; episodes = 0
         while timestep < total_timesteps:
-            state = self.env.reset()
-            episode_reward = 0
-            done = False
+            state = self.env.reset(); episode_reward = 0; done = False
             while not done and timestep < total_timesteps:
                 state_tensor = torch.FloatTensor(state)
                 action, value, log_prob = self.network.get_action(state_tensor)
@@ -543,14 +487,9 @@ class PPOMarketMaker(MarketMakingStrategy):
 
     def _update(self) -> None:
         """Perform PPO update on collected experiences."""
-        if len(self.states) < self.config.batch_size:
-            return
-        states = torch.FloatTensor(np.array(self.states))
-        actions = torch.FloatTensor(np.array(self.actions))
-        old_log_probs = torch.FloatTensor(self.log_probs)
-        rewards = torch.FloatTensor(self.rewards)
-        values = torch.FloatTensor(self.values)
-        dones = torch.FloatTensor(self.dones)
+        if len(self.states) < self.config.batch_size: return
+        states = torch.FloatTensor(np.array(self.states)); actions = torch.FloatTensor(np.array(self.actions))
+        old_log_probs, rewards, values, dones = torch.FloatTensor(self.log_probs), torch.FloatTensor(self.rewards), torch.FloatTensor(self.values), torch.FloatTensor(self.dones)
         last_state = self.states[-1] if self.states else None; next_value = None
         if last_state is not None and self.dones[-1] == 0:
             with torch.no_grad():

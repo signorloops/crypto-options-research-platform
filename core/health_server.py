@@ -231,12 +231,7 @@ def create_health_app(service_name: str = "trading-engine") -> FastAPI:
     async def readiness() -> Dict:
         """Readiness probe - check if ready to serve traffic."""
         failed = await _collect_failed_readiness_checks(service_name)
-        if failed:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={"status": "not_ready", "failed_checks": failed},
-            )
-
+        if failed: raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail={"status": "not_ready", "failed_checks": failed})
         return {
             "status": "ready",
             "service": service_name,

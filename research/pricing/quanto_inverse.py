@@ -103,16 +103,7 @@ class QuantoInverseOptionPricer:
         vega = float(base_greeks.vega * factor + base_price * d_factor_d_sigma * 0.01)
         fx_delta = float(-price / fx_rate)
         corr_sensitivity = float(-base_price * factor * sigma * sigma_fx * t_eff)
-        greeks = QuantoInverseGreeks(
-            delta=delta,
-            gamma=gamma,
-            theta=theta,
-            vega=vega,
-            rho=rho_rate,
-            fx_delta=fx_delta,
-            corr_sensitivity=corr_sensitivity,
-            quanto_adjustment=quanto_adjustment,
-        )
+        greeks = QuantoInverseGreeks(delta=delta, gamma=gamma, theta=theta, vega=vega, rho=rho_rate, fx_delta=fx_delta, corr_sensitivity=corr_sensitivity, quanto_adjustment=quanto_adjustment)
         return price, greeks
 
     @staticmethod

@@ -281,13 +281,11 @@ def _render_dashboard_html(*, file_options: str, primary_fig_html: str, returns_
 <!DOCTYPE html>
 <html>
   <head>
-    <meta charset=\"utf-8\" /><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
-    <title>CORP Research Dashboard</title>
+    <meta charset=\"utf-8\" /><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" /><title>CORP Research Dashboard</title>
     <style>body {{ font-family: 'Helvetica Neue', Arial, sans-serif; margin: 0; color: #1f2937; background: #f4f6f8; }}
       .container {{ max-width: 1200px; margin: 0 auto; padding: 24px; }}
       .card {{ background: white; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.06); padding: 20px; margin-bottom: 20px; }}
-      h1 {{ margin: 0 0 16px; font-size: 28px; }}
-      .toolbar {{ display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }}
+      h1 {{ margin: 0 0 16px; font-size: 28px; }} .toolbar {{ display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }}
       select, button {{ padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 8px; background: white; }}
       button {{ background: #111827; color: white; cursor: pointer; }}
       table {{ border-collapse: collapse; width: 100%; }}
@@ -337,12 +335,8 @@ def _build_dashboard_html(df: pd.DataFrame, selected: Path, files: List[Path]) -
         title=f"Return Distribution ({value_col})",
         template="plotly_white",
     )
-
     summary = _build_dashboard_summary(plot_df, value_col)
-
-    file_options = _build_file_options(files, selected)
-    summary_rows = _build_summary_rows(summary)
-    deviation_section = _build_deviation_section(plot_df)
+    file_options = _build_file_options(files, selected); summary_rows = _build_summary_rows(summary); deviation_section = _build_deviation_section(plot_df)
     return _render_dashboard_html(
         file_options=file_options,
         primary_fig_html=primary_fig.to_html(full_html=False, include_plotlyjs="cdn"),
@@ -363,17 +357,11 @@ async def _build_live_deviation_report(
 ) -> dict:
     """Build live/file-based CEX-DEFI deviation report payload."""
     cex_source = cex_file or os.getenv("CEX_QUOTES_FILE", ""); provider = cex_provider or os.getenv("CEX_QUOTES_PROVIDER", ""); defi_source = defi_file or os.getenv("DEFI_QUOTES_FILE", "")
-    if not defi_source:
-        raise HTTPException(status_code=422, detail="defi_file is required (query or env)")
-    if not cex_source and not provider:
-        raise HTTPException(status_code=422, detail="Either cex_file or cex_provider is required (query or env)")
+    if not defi_source: raise HTTPException(status_code=422, detail="defi_file is required (query or env)")
+    if not cex_source and not provider: raise HTTPException(status_code=422, detail="Either cex_file or cex_provider is required (query or env)")
     try:
         if cex_source:
-            dataset = build_cex_defi_deviation_dataset(
-                Path(cex_source),
-                Path(defi_source),
-                align_tolerance_seconds=align_tolerance_seconds,
-            )
+            dataset = build_cex_defi_deviation_dataset(Path(cex_source), Path(defi_source), align_tolerance_seconds=align_tolerance_seconds)
             source_meta = {"mode": "file", "cex_file": cex_source, "defi_file": defi_source}
         else:
             dataset = await build_cex_defi_deviation_dataset_live(
@@ -383,8 +371,7 @@ async def _build_live_deviation_report(
                 align_tolerance_seconds=align_tolerance_seconds,
             )
             source_meta = {"mode": "provider", "cex_provider": provider, "underlying": underlying, "defi_file": defi_source}
-    except (FileNotFoundError, ValueError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+    except (FileNotFoundError, ValueError) as exc: raise HTTPException(status_code=422, detail=str(exc))
     report = build_cross_market_deviation_report(dataset, threshold_bps=float(threshold_bps)); report["sources"] = {
         **source_meta,
         "align_tolerance_seconds": float(align_tolerance_seconds),
