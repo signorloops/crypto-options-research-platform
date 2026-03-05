@@ -283,36 +283,25 @@ class AdaptiveDeltaHedger:
         current_price: float,
         gamma: float
     ) -> float:
-        """
-        Calculate hedge size considering coin-margined non-linearity.
-
-        For coin-margined options:
-        - Hedge size needs to account for inverse price relationship
-        - Gamma effects are more pronounced at lower prices
-        """
+        """Calculate hedge size considering coin-margined non-linearity."""
         delta_diff = target_delta - current_delta
-
         # Base hedge size
         base_size = abs(delta_diff)
-
         # Adjust for coin-margined non-linearity
         if self.config.inverse and current_price > 0:
             # At lower prices, same delta change requires larger size adjustment
             # due to 1/S relationship
             inverse_factor = 50000 / current_price  # Normalize to $50k BTC
             base_size *= min(inverse_factor, 2.0)  # Cap at 2x
-
         # Adjust for gamma
         if abs(gamma) > self.config.gamma_threshold:
             # High gamma: hedge more conservatively (smaller steps)
             gamma_adjustment = 1 / (1 + abs(gamma) * 10)
             base_size *= gamma_adjustment
-
         # Apply limits
         hedge_size = max(self.config.min_hedge_size, base_size)
         max_size = abs(current_delta) * self.config.max_hedge_size_pct
         hedge_size = min(hedge_size, max_size)
-
         # Preserve sign
         return np.sign(delta_diff) * hedge_size
 

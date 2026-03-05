@@ -313,12 +313,10 @@ class BacktestEngine:
         """Generate synthetic trades from current event activity."""
         trades = []
         end_timestamp = market_state.timestamp
-
         # Use Poisson arrivals with adaptive cap to preserve high-activity regimes.
         arrival_intensity = float(max(volume, 0.0))
         max_trades = int(np.clip(np.ceil(arrival_intensity) + 2, 1, 50))
         num_trades = int(np.clip(self.rng.poisson(arrival_intensity), 0, max_trades))
-
         for _ in range(num_trades):
             imbalance = (
                 market_state.order_book.imbalance()
@@ -327,14 +325,11 @@ class BacktestEngine:
             )
             side_bias = 0.5 + imbalance * 0.2
             side = OrderSide.BUY if self.rng.random() < side_bias else OrderSide.SELL
-
             mid = market_state.spot_price
             price_offset = self.rng.normal(0, mid * 0.0001)
             trade_price = mid + price_offset
-
             trade_size = volume * self.rng.random() * 0.3
             trade_timestamp = self._sample_trade_timestamp(start_timestamp, end_timestamp)
-
             trades.append(
                 Trade(
                     timestamp=trade_timestamp,
@@ -344,7 +339,6 @@ class BacktestEngine:
                     side=side,
                 )
             )
-
         return trades
 
     def _sample_trade_timestamp(self, start_timestamp, end_timestamp):

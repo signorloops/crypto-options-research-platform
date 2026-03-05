@@ -20,24 +20,19 @@ logger = get_logger(__name__)
 def _pairwise_p_value(returns1: pd.Series, returns2: pd.Series) -> float:
     """Robust pairwise p-value with deterministic handling for degenerate samples."""
     from scipy import stats
-
     values1 = returns1.to_numpy(dtype=float)
     values2 = returns2.to_numpy(dtype=float)
     values1 = values1[np.isfinite(values1)]
     values2 = values2[np.isfinite(values2)]
-
     if len(values1) < 2 or len(values2) < 2:
         return 1.0
-
     if np.allclose(values1, values2, rtol=1e-10, atol=1e-12):
         return 1.0
-
     std1 = float(np.std(values1, ddof=1))
     std2 = float(np.std(values2, ddof=1))
     mean_diff = abs(float(np.mean(values1) - np.mean(values2)))
     mean_scale = max(abs(float(np.mean(values1))), abs(float(np.mean(values2))), 1.0)
     tol = 1e-12 * mean_scale
-
     # Degenerate distributions with effectively zero variance.
     if std1 <= 1e-12 and std2 <= 1e-12:
         return 1.0 if mean_diff <= tol else 0.0

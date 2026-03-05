@@ -670,16 +670,13 @@ class ComprehensiveHawkesComparison:
     ) -> ComparisonResult:
         """Run comparison for a single scenario."""
         market_data_enriched = self._attach_jump_risk_premia_signals(market_data)
-
         arena = StrategyArena(
             market_data=market_data_enriched,
             initial_capital=self.initial_capital,
             transaction_cost_bps=self.transaction_cost_bps
         )
-
         # Run tournament
         comparison_df = arena.run_tournament(strategies, verbose=verbose)
-
         # Collect Hawkes-specific metrics for Hawkes strategies
         hawkes_metrics = {}
         for strategy in strategies:
@@ -687,11 +684,9 @@ class ComprehensiveHawkesComparison:
                 metrics = self._extract_hawkes_metrics(strategy)
                 if metrics:
                     hawkes_metrics[strategy.name] = metrics
-
         # Determine scenario type
         scenario_type = self._classify_scenario(scenario_name)
         jump_risk_summary = self._build_jump_risk_summary(market_data_enriched)
-
         return ComparisonResult(
             scenario_name=scenario_name,
             scenario_type=scenario_type,

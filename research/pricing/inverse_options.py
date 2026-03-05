@@ -659,7 +659,6 @@ def calculate_position_value(
     """Compute current option value, unrealized PnL, and market value for a position."""
     InverseOptionPricer._validate_option_type(option_type)
     InverseOptionPricer._validate_inputs(S, K, T, r, sigma)
-
     if inverse:
         current_option_value = InverseOptionPricer.calculate_price(S, K, T, r, sigma, option_type)
         unrealized_pnl = size * (current_option_value - avg_entry_price_usd)
@@ -674,13 +673,10 @@ def calculate_position_value(
         else:
             d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
             d2 = d1 - sigma * np.sqrt(T)
-
             if option_type == "call":
                 current_option_value = S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
             else:
                 current_option_value = K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
-
         unrealized_pnl = size * (current_option_value - avg_entry_price_usd)
         market_value = size * current_option_value
-
     return current_option_value, unrealized_pnl, market_value
