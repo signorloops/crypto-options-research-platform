@@ -335,7 +335,6 @@ class DuckDBCache:
         safe_table = _sanitize_identifier(table_name)
         where_clause = ""
         params = {}
-
         if start and end:
             where_clause = "WHERE timestamp >= $start AND timestamp <= $end"
             params = {"start": start, "end": end}

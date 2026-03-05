@@ -173,12 +173,9 @@ def _align_cex_defi_quotes(
             merged["ts_bucket"] = merged["timestamp"].dt.floor("min")
     if merged.empty:
         raise ValueError("No aligned CEX/DeFi rows after key-based merge")
-
     out = pd.DataFrame(
         {
-            "timestamp": (
-                merged["ts_bucket"] if "ts_bucket" in merged.columns else merged["timestamp"]
-            ),
+            "timestamp": (merged["ts_bucket"] if "ts_bucket" in merged.columns else merged["timestamp"]),
             "symbol": merged["symbol"],
             "option_type": merged["option_type"],
             "maturity": merged["expiry_bucket"],

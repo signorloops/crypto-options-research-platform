@@ -478,9 +478,7 @@ class PPOMarketMaker(MarketMakingStrategy):
         imbalance = state.order_book.imbalance() if state.order_book else 0.0
         spread_bps = (state.order_book.spread / mid * 10000) if state.order_book and state.order_book.spread and mid > 0 else 20.0
         ret_1, ret_5, ret_10 = state.features.get('return_1', 0.0), state.features.get('return_5', 0.0), state.features.get('return_10', 0.0)
-        momentum = state.features.get('momentum', 0.0)
-        volume_ratio = state.features.get('volume_ratio', 1.0)
-        volume_z = state.features.get('volume_zscore', 0.0)
+        momentum, volume_ratio, volume_z = state.features.get('momentum', 0.0), state.features.get('volume_ratio', 1.0), state.features.get('volume_zscore', 0.0)
         bid_norm, ask_norm = self._depth_norms_from_order_book(state)
         inventory_abs = abs(position.size) / max(self.config.inventory_limit, 1e-8)
         inv_util = min(1.0, inventory_abs)

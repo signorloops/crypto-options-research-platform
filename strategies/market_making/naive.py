@@ -29,37 +29,19 @@ class NaiveMarketMaker(MarketMakingStrategy):
         self.name = "NaiveMM"
 
     def quote(self, state: MarketState, position: Position) -> QuoteAction:
-        """
-        Generate symmetric quote around mid price.
-
-        Args:
-            state: Current market state
-            position: Current position
-
-        Returns:
-            Quote action with bid/ask prices and sizes
-        """
+        """Generate symmetric quote around mid price."""
         mid = state.order_book.mid_price
         if mid is None:
             raise ValueError("Cannot quote without valid order book")
-
-        # Fixed spread
         half_spread = mid * self.config.spread_bps / 10000 / 2
-
         bid_price = mid - half_spread
         ask_price = mid + half_spread
-
-        # Check inventory limits (account for quote size to avoid exceeding limit)
         bid_size = self.config.quote_size
         ask_size = self.config.quote_size
-
         if position.size + self.config.quote_size > self.config.inventory_limit:
-            # Would exceed long limit
             bid_size = 0
         if position.size - self.config.quote_size < -self.config.inventory_limit:
-            # Would exceed short limit
             ask_size = 0
-
         return QuoteAction(
             bid_price=bid_price,
             bid_size=bid_size,

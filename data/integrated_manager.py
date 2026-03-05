@@ -172,33 +172,17 @@ class IntegratedDataManager(_IntegratedRealtimeCacheMixin):
         enable_redis: bool = True,
         enable_duckdb: bool = True,
     ):
-        """
-        Initialize integrated data manager.
-
-        Args:
-            parquet_cache: Existing DataCache instance or None for default
-            duckdb_path: Path to DuckDB database file or None for in-memory
-            redis_host: Redis server host
-            redis_port: Redis server port
-            enable_redis: Whether to enable Redis (set False if Redis not available)
-            enable_duckdb: Whether to enable DuckDB
-        """
-        # Parquet file cache (base layer)
+        """Initialize integrated data manager."""
         self.parquet_manager = DataManager(parquet_cache or DataCache())
-
-        # DuckDB analytics layer
         self.enable_duckdb = enable_duckdb
         self.duckdb_path = duckdb_path
         self.duckdb: Optional[DuckDBCache] = None
-
-        # Redis real-time cache layer
         self.enable_redis = enable_redis
         self.redis_host = redis_host
         self.redis_port = redis_port
         self.redis: Optional[RedisCache] = None
         self.greeks_manager: Optional[GreeksCacheManager] = None
         self._state_lock = asyncio.Lock()
-
         logger.info(
             "IntegratedDataManager initialized",
             extra=log_extra(

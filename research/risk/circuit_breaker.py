@@ -577,9 +577,7 @@ class CircuitBreaker:
             if notional <= 0:
                 self._instrument_states[instrument] = CircuitState.NORMAL
                 continue
-            critical_limit = self.config.per_instrument_notional_limits.get(
-                instrument, self.config.per_instrument_notional_limit
-            )
+            critical_limit = self.config.per_instrument_notional_limits.get(instrument, self.config.per_instrument_notional_limit)
             warning_limit = min(self.config.per_instrument_warning_notional, critical_limit)
             if not np.isfinite(critical_limit):
                 self._instrument_states[instrument] = CircuitState.NORMAL

@@ -80,9 +80,7 @@ class BlackScholesGreeks:
 
         d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
         d2 = d1 - sigma * np.sqrt(T)
-
-        nd1 = norm.cdf(d1)
-        nd2 = norm.cdf(d2)
+        nd1, nd2 = norm.cdf(d1), norm.cdf(d2)
         n_prime_d1 = norm.pdf(d1)
         if option_type == 'call':
             delta = nd1

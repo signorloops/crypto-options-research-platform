@@ -291,8 +291,7 @@ def _render_dashboard_html(
   <head>
     <meta charset=\"utf-8\" /><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
     <title>CORP Research Dashboard</title>
-    <style>
-      body {{ font-family: 'Helvetica Neue', Arial, sans-serif; margin: 0; color: #1f2937; background: #f4f6f8; }}
+    <style>body {{ font-family: 'Helvetica Neue', Arial, sans-serif; margin: 0; color: #1f2937; background: #f4f6f8; }}
       .container {{ max-width: 1200px; margin: 0 auto; padding: 24px; }}
       .card {{ background: white; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.06); padding: 20px; margin-bottom: 20px; }}
       h1 {{ margin: 0 0 16px; font-size: 28px; }}

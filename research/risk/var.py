@@ -771,17 +771,7 @@ class VaRCalculator:
             raise ValueError("n_simulations must be positive")
         if holding_period <= 0:
             raise ValueError("holding_period must be positive")
-
-        total_value, weights, aligned_returns, aligned_positions, simulated_returns, rng = (
-            self._prepare_monte_carlo_path_inputs(
-                positions=positions,
-                returns=returns,
-                n_simulations=n_simulations,
-                holding_period=holding_period,
-                leverage_correlation=leverage_correlation,
-                random_seed=random_seed,
-            )
-        )
+        total_value, weights, aligned_returns, aligned_positions, simulated_returns, rng = self._prepare_monte_carlo_path_inputs(positions=positions, returns=returns, n_simulations=n_simulations, holding_period=holding_period, leverage_correlation=leverage_correlation, random_seed=random_seed)
         pnl = _compute_monte_carlo_pnl(
             calculator=self,
             aligned_positions=aligned_positions,
@@ -795,9 +785,7 @@ class VaRCalculator:
             leverage_correlation=leverage_correlation,
             rng=rng,
         )
-
         var_95, var_99, cvar_95, cvar_99 = self._tail_risk_from_pnl(pnl)
-
         return VaRResult(
             var_95=var_95, var_99=var_99, cvar_95=cvar_95, cvar_99=cvar_99, method="monte_carlo"
         )

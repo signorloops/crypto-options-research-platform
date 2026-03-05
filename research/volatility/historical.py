@@ -73,47 +73,18 @@ def realized_volatility(returns: np.ndarray, annualize: bool = True, periods: in
 def parkinson_volatility(high: np.ndarray, low: np.ndarray,
                         annualize: bool = True, periods: int = 365,
                         unbiased: bool = True) -> float:
-    """
-    计算 Parkinson Volatility。
-
-    使用日内最高价和最低价估计波动率，比收盘价估计更有效。
-
-    sigma_p = sqrt( (1/(4N*ln2)) * sum(ln(hi/li))^2 )
-
-    小样本修正: 当 unbiased=True 时，应用修正因子 n/(n-0.83) 来减少偏差。
-    参考: Garman & Klass (1980) 的模拟研究表明 Parkinson 估计在小样本下有系统性低估。
-
-    Args:
-        high: 最高价序列
-        low: 最低价序列
-        annualize: 是否年化
-        periods: 年化周期数
-        unbiased: 是否应用小样本无偏修正 (默认 True)
-
-    Returns:
-        Parkinson 波动率估计
-    """
+    """Parkinson high-low volatility estimator with optional small-sample correction."""
     log_hl = np.log(high / low)
     n = len(log_hl)
-
     if n == 0:
         return 0.0
-
-    # 4 * ln(2) ≈ 2.7726
     var = np.sum(log_hl ** 2) / (4 * n * np.log(2))
-
-    # 小样本无偏修正 (参考 Garman & Klass, 1980)
     if unbiased and n > 1:
-        # 修正因子: n / (n - 0.83) 来自极值理论的模拟结果
-        # 也可以使用更简单的 n / (n - 1)，但 0.83 对 Parkinson 估计更精确
         adjustment = n / (n - 0.83)
         var *= adjustment
-
     vol = np.sqrt(var)
-
     if annualize:
         vol *= np.sqrt(periods)
-
     return float(vol)
 
 

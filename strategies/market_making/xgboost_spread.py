@@ -142,33 +142,21 @@ class XGBoostSpreadStrategy(MarketMakingStrategy):
         mid = state.order_book.mid_price
         if mid is None:
             raise ValueError("Cannot quote without valid order book")
-
-        # Update features
         self.feature_engineer.update(state)
         features = self.feature_engineer.get_features()
-
-        # Predict optimal spread
         if self.model is not None:
             spread_bps = self._predict_spread(features)
         else:
-            # Fallback to heuristic if not trained
             spread_bps = self._heuristic_spread(features)
-
-        # Apply inventory skew (keep AS intuition)
         q = position.size
-        gamma = 0.1  # Risk aversion
+        gamma = 0.1
         sigma = features.get('volatility_20', 0.5)
-
-        reservation_price = mid - q * gamma * sigma**2 * 0.1  # Small time horizon
+        reservation_price = mid - q * gamma * sigma**2 * 0.1
         half_spread = mid * spread_bps / 10000 / 2
-
         bid_price = reservation_price - half_spread
         ask_price = reservation_price + half_spread
-
-        # Inventory limits
         bid_size = self.config.quote_size if q < self.config.inventory_limit else 0
         ask_size = self.config.quote_size if q > -self.config.inventory_limit else 0
-
         return QuoteAction(
             bid_price=bid_price,
             bid_size=bid_size,
