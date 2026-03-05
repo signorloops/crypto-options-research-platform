@@ -355,30 +355,17 @@ class StrategyArena:
 
         total_pnl = result.total_pnl_usd
         total_return_pct = total_pnl / self.initial_capital
-
         periods_per_year = self._periods_per_year(pnl_series)
         periods_observed = max(len(pnl_series) - 1, 1)
-        annualized_return = _annualized_return_from_total(
-            total_return_pct=total_return_pct,
-            periods_per_year=periods_per_year,
-            periods_observed=periods_observed,
-        )
-
+        annualized_return = _annualized_return_from_total(total_return_pct=total_return_pct, periods_per_year=periods_per_year, periods_observed=periods_observed)
         daily_returns = pnl_series.diff().dropna()
         sharpe = result.sharpe_ratio
         deflated_sharpe = getattr(result, "deflated_sharpe_ratio", 0.0)
-
         sortino = _compute_sortino_ratio(daily_returns, self._periods_per_year(daily_returns))
         calmar = _calmar_ratio(annualized_return=annualized_return, max_drawdown=result.max_drawdown)
-
-        win_rate, avg_win, avg_loss, profit_factor = _compute_trade_stats(
-            result.trade_count, daily_returns
-        )
-
+        win_rate, avg_win, avg_loss, profit_factor = _compute_trade_stats(result.trade_count, daily_returns)
         daily_pnl_std, worst_day, best_day = _daily_pnl_stats(daily_returns)
-
         drawdown_series = _compute_drawdown_series(pnl_series, self.initial_capital)
-
         return _build_scorecard_from_result(
             result=result,
             pnl_series=pnl_series,

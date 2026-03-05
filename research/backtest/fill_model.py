@@ -221,36 +221,14 @@ class RealisticFillSimulator:
         our_size = quote.bid_size if our_side == OrderSide.BUY else quote.ask_size
         if our_size <= 0:
             return None
-        fill_prob = self._estimate_fill_probability(
-            quote=quote,
-            trade=trade,
-            our_side=our_side,
-            market_state=market_state,
-            latency_ms=latency_ms,
-            inventory_pressure=inventory_pressure,
-        )
+        fill_prob = self._estimate_fill_probability(quote=quote, trade=trade, our_side=our_side, market_state=market_state, latency_ms=latency_ms, inventory_pressure=inventory_pressure)
         if self.rng.random() > fill_prob:
             return None
         fill_size = min(trade.size, our_size)
         base_price = quote.bid_price if our_side == OrderSide.BUY else quote.ask_price
-        fill_price, slippage_cost = _apply_slippage_to_fill(
-            base_price=base_price,
-            trade_size=fill_size,
-            order_book=market_state.order_book,
-            side=our_side,
-            apply_order_book_slippage_fn=self._apply_order_book_slippage,
-            cost_against_side_fn=self._cost_against_side,
-        )
+        fill_price, slippage_cost = _apply_slippage_to_fill(base_price=base_price, trade_size=fill_size, order_book=market_state.order_book, side=our_side, apply_order_book_slippage_fn=self._apply_order_book_slippage, cost_against_side_fn=self._cost_against_side)
         self.slippage_cost += slippage_cost
-        fill_price, transaction_cost, adverse_selection_cost = _apply_post_slippage_costs(
-            fill_price=fill_price,
-            side=our_side,
-            size=fill_size,
-            transaction_cost_bps=transaction_cost_bps,
-            adverse_selection_factor=self.config.adverse_selection_factor,
-            is_adverse=self._check_adverse_selection(trade, market_state),
-            cost_against_side_fn=self._cost_against_side,
-        )
+        fill_price, transaction_cost, adverse_selection_cost = _apply_post_slippage_costs(fill_price=fill_price, side=our_side, size=fill_size, transaction_cost_bps=transaction_cost_bps, adverse_selection_factor=self.config.adverse_selection_factor, is_adverse=self._check_adverse_selection(trade, market_state), cost_against_side_fn=self._cost_against_side)
         self.transaction_cost_paid += transaction_cost
         self.adverse_selection_cost += adverse_selection_cost
         return Fill(
