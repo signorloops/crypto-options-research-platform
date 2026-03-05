@@ -481,17 +481,8 @@ class HawkesMarketMaker(MarketMakingStrategy):
         mid = state.order_book.mid_price
         if mid is None:
             raise ValueError("Cannot quote without valid order book")
-
         current_time = _timestamp_seconds(state.timestamp)
-        intensity, buy_int, sell_int, adverse_selection, spread_bps, skew, flow_imbalance = (
-            self._compute_quote_context(
-                state=state,
-                mid=mid,
-                inventory=position.size,
-                current_time=current_time,
-            )
-        )
-
+        intensity, buy_int, sell_int, adverse_selection, spread_bps, skew, flow_imbalance = self._compute_quote_context(state=state, mid=mid, inventory=position.size, current_time=current_time)
         bid_price, ask_price, imbalance, _ = self._compute_quote_prices(
             mid=mid,
             spread_bps=spread_bps,
@@ -500,34 +491,10 @@ class HawkesMarketMaker(MarketMakingStrategy):
             sell_int=sell_int,
             adverse_selection=adverse_selection,
         )
-        bid_size, ask_size = self._compute_quote_sizes(
-            intensity=intensity,
-            inventory=position.size,
-            adverse_selection=adverse_selection,
-            imbalance=imbalance,
-        )
-
-        control_signals = _build_control_signals(
-            intensity=float(intensity),
-            buy_intensity=float(buy_int),
-            sell_intensity=float(sell_int),
-            flow_imbalance=float(flow_imbalance),
-            adverse_selection=bool(adverse_selection),
-            spread_bps=float(spread_bps),
-            skew=float(skew),
-        )
+        bid_size, ask_size = self._compute_quote_sizes(intensity=intensity, inventory=position.size, adverse_selection=adverse_selection, imbalance=imbalance)
+        control_signals = _build_control_signals(intensity=float(intensity), buy_intensity=float(buy_int), sell_intensity=float(sell_int), flow_imbalance=float(flow_imbalance), adverse_selection=bool(adverse_selection), spread_bps=float(spread_bps), skew=float(skew))
         self.last_price = mid
-
-        return _build_hawkes_quote_action(
-            strategy_name=self.name,
-            quote=(bid_price, bid_size, ask_price, ask_size),
-            control_signals=control_signals,
-            hawkes_params=(
-                self.monitor.params.mu,
-                self.monitor.params.alpha,
-                self.monitor.params.beta,
-            ),
-        )
+        return _build_hawkes_quote_action(strategy_name=self.name, quote=(bid_price, bid_size, ask_price, ask_size), control_signals=control_signals, hawkes_params=(self.monitor.params.mu, self.monitor.params.alpha, self.monitor.params.beta))
 
     def get_internal_state(self) -> Dict:
         """Return current internal state for debugging and logging."""

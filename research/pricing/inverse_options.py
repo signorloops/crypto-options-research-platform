@@ -163,49 +163,21 @@ class InverseOptionPricer:
         sigma: float,
         option_type: Literal["call", "put"]
     ) -> float:
-        """
-        计算币本位期权价格（以加密货币计价）。
-
-        数学公式：
-        - Inverse Call = e^(-rT) * (1/K) * N(-d2) - (1/S) * N(-d1)
-        - Inverse Put = (1/S) * N(d1) - e^(-rT) * (1/K) * N(d2)
-
-        Args:
-            S: 标的当前价格 (USD per BTC)
-            K: 行权价 (USD per BTC)
-            T: 到期时间（年）
-            r: 无风险利率（连续复利）
-            sigma: 波动率
-            option_type: "call" 或 "put"
-
-        Returns:
-            期权价格（以加密货币为单位，如 BTC）
-        """
+        """计算币本位期权价格（以加密货币计价）。"""
         InverseOptionPricer._validate_option_type(option_type)
         InverseOptionPricer._validate_inputs(S, K, T, r, sigma)
-
-        # 到期边界条件
         if T < InverseOptionPricer.EPSILON:
             if option_type == "call":
-                # Payoff = max(0, 1/K - 1/S)
-                return max(0.0, 1.0/K - 1.0/S)
-            else:
-                # Payoff = max(0, 1/S - 1/K)
-                return max(0.0, 1.0/S - 1.0/K)
-
+                return max(0.0, 1.0 / K - 1.0 / S)
+            return max(0.0, 1.0 / S - 1.0 / K)
         d1, d2 = InverseOptionPricer._calculate_d1_d2(S, K, T, r, sigma)
         inv_S = 1.0 / S
         inv_K = 1.0 / K
         discount = np.exp(-r * T)
-
         if option_type == "call":
-            # 币本位看涨 = e^(-rT)*(1/K)*N(-d2) - (1/S)*N(-d1)
             price = float(discount * inv_K * norm.cdf(-d2) - inv_S * norm.cdf(-d1))
         else:
-            # 币本位看跌 = (1/S)*N(d1) - e^(-rT)*(1/K)*N(d2)
             price = float(inv_S * norm.cdf(d1) - discount * inv_K * norm.cdf(d2))
-
-        # 确保非负（数值误差可能导致微小负值）
         return max(0.0, price)
 
     @staticmethod
@@ -262,45 +234,11 @@ class InverseOptionPricer:
         context: _GreeksComputationContext,
     ) -> InverseGreeks:
         """从已计算的 d1, d2 计算希腊字母（内部辅助函数）。"""
-        delta = InverseOptionPricer._calculate_delta_from_d(
-            d1=d1,
-            d2=d2,
-            S=S,
-            sigma=sigma,
-            option_type=option_type,
-            context=context,
-        )
-        gamma = InverseOptionPricer._calculate_gamma_from_d(
-            d1=d1,
-            S=S,
-            sigma=sigma,
-            option_type=option_type,
-            context=context,
-        )
-        theta = InverseOptionPricer._calculate_theta_from_d(
-            d1=d1,
-            d2=d2,
-            S=S,
-            K=K,
-            T=T,
-            r=r,
-            sigma=sigma,
-            option_type=option_type,
-            context=context,
-        )
-        vega = InverseOptionPricer._calculate_vega_from_d(
-            d1=d1,
-            d2=d2,
-            sigma=sigma,
-            option_type=option_type,
-            context=context,
-        )
-        rho = InverseOptionPricer._calculate_rho_from_d(
-            d2=d2,
-            T=T,
-            option_type=option_type,
-            context=context,
-        )
+        delta = InverseOptionPricer._calculate_delta_from_d(d1=d1, d2=d2, S=S, sigma=sigma, option_type=option_type, context=context)
+        gamma = InverseOptionPricer._calculate_gamma_from_d(d1=d1, S=S, sigma=sigma, option_type=option_type, context=context)
+        theta = InverseOptionPricer._calculate_theta_from_d(d1=d1, d2=d2, S=S, K=K, T=T, r=r, sigma=sigma, option_type=option_type, context=context)
+        vega = InverseOptionPricer._calculate_vega_from_d(d1=d1, d2=d2, sigma=sigma, option_type=option_type, context=context)
+        rho = InverseOptionPricer._calculate_rho_from_d(d2=d2, T=T, option_type=option_type, context=context)
         return InverseGreeks(delta=delta, gamma=gamma, theta=theta, vega=vega, rho=rho)
 
     @staticmethod

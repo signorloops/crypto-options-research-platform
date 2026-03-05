@@ -167,45 +167,32 @@ class RoughVolatilityPricer:
         sqrt_dt = np.sqrt(dt)
         n_paths = int(n_paths if n_paths is not None else cfg.n_paths)
         n_steps = cfg.n_steps
-
         gen = rng or self._rng
         dW1, dW2 = self._draw_correlated_brownians(n_paths=n_paths, n_steps=n_steps, sqrt_dt=sqrt_dt, rng=gen)
         jump_returns, jump_var_mult, jump_stats = self._simulate_jump_components(n_paths=n_paths, n_steps=n_steps, dt=dt, rng=gen)
-
         weights = self._kernel_weights()
         volterra = np.zeros((n_paths, n_steps), dtype=float)
         for i in range(n_steps):
             segment = dW1[:, : i + 1]
             kernel = weights[: i + 1][::-1]
             volterra[:, i] = segment @ kernel
-
         times = np.arange(1, n_steps + 1, dtype=float) * dt
         var_t = cfg.initial_variance * np.exp(
             cfg.vol_of_vol * volterra - 0.5 * (cfg.vol_of_vol ** 2) * (times ** (2.0 * cfg.hurst))
         )
         var_t = var_t * jump_var_mult
         var_t = np.maximum(var_t, 1e-10)
-
         spots = np.zeros((n_paths, n_steps + 1), dtype=float)
         vars_path = np.zeros((n_paths, n_steps + 1), dtype=float)
         spots[:, 0] = cfg.spot
         vars_path[:, 0] = cfg.initial_variance
         vars_path[:, 1:] = var_t
-
         drift = (cfg.rate - 0.5 * var_t) * dt
         diffusion = np.sqrt(var_t) * dW2
         log_increments = drift + diffusion + jump_returns
         spots[:, 1:] = cfg.spot * np.exp(np.cumsum(log_increments, axis=1))
         spots = np.maximum(spots, 1e-8)
-
-        self._last_simulation_stats = {
-            "jump_mode": cfg.jump_mode,
-            "avg_jump_events_per_path": float(jump_stats["avg_jump_events_per_path"]),
-            "total_jump_events": float(jump_stats["total_jump_events"]),
-            "avg_jump_intensity": float(jump_stats["avg_jump_intensity"]),
-            "jump_intensity_std": float(jump_stats["jump_intensity_std"]),
-            "simulation_time_sec": float(max(time.perf_counter() - t0, 0.0))
-        }
+        self._last_simulation_stats = {"jump_mode": cfg.jump_mode, "avg_jump_events_per_path": float(jump_stats["avg_jump_events_per_path"]), "total_jump_events": float(jump_stats["total_jump_events"]), "avg_jump_intensity": float(jump_stats["avg_jump_intensity"]), "jump_intensity_std": float(jump_stats["jump_intensity_std"]), "simulation_time_sec": float(max(time.perf_counter() - t0, 0.0))}
         return spots, vars_path
 
     def get_last_simulation_stats(self) -> Dict[str, object]:

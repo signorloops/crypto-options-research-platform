@@ -151,42 +151,12 @@ def _build_deviation_alerts(
 def build_cross_market_deviation_report(
     df: pd.DataFrame, threshold_bps: float = 300.0
 ) -> Dict[str, Any]:
-    """
-    Build cross-market deviation heatmap and threshold alerts.
-
-    Expected minimal columns:
-    - market side: market_price or equivalent
-    - model side: model_price or equivalent
-    Optional:
-    - maturity proxy (years): expiry_years/maturity/time_to_expiry/tau
-    - delta proxy: delta/abs_delta
-    - venue label: venue/exchange/source/market
-    """
+    """Build cross-market deviation heatmap and threshold alerts."""
     market_col, model_col, expiry_col, delta_col, venue_col = _resolve_deviation_columns(df)
-    work = _prepare_deviation_frame(
-        df,
-        market_col=market_col,
-        model_col=model_col,
-        expiry_col=expiry_col,
-        delta_col=delta_col,
-    )
+    work = _prepare_deviation_frame(df, market_col=market_col, model_col=model_col, expiry_col=expiry_col, delta_col=delta_col)
     heatmap, pivot = _build_deviation_heatmap(work)
-    alerts, alert_cols = _build_deviation_alerts(
-        work,
-        threshold_bps=float(threshold_bps),
-        venue_col=venue_col,
-        expiry_col=expiry_col,
-        delta_col=delta_col,
-    )
-
-    summary = {
-        "n_rows": int(len(work)),
-        "n_alerts": int(len(alerts)),
-        "max_abs_deviation_bps": float(work["abs_deviation_bps"].max()),
-        "mean_abs_deviation_bps": float(work["abs_deviation_bps"].mean()),
-        "threshold_bps": float(threshold_bps),
-    }
-
+    alerts, alert_cols = _build_deviation_alerts(work, threshold_bps=float(threshold_bps), venue_col=venue_col, expiry_col=expiry_col, delta_col=delta_col)
+    summary = {"n_rows": int(len(work)), "n_alerts": int(len(alerts)), "max_abs_deviation_bps": float(work["abs_deviation_bps"].max()), "mean_abs_deviation_bps": float(work["abs_deviation_bps"].mean()), "threshold_bps": float(threshold_bps)}
     return {
         "summary": summary,
         "heatmap_matrix": pivot.to_dict(),

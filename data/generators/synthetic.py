@@ -300,37 +300,17 @@ class TradeFlowSimulator:
         """Generate trade flow matching price dynamics."""
         rng = np.random.default_rng() if rng is None else rng
         trades = []
-
         for i, row in price_path.iterrows():
             row_returns = float(row["returns"])
             arrival_rate = self._compute_arrival_rate(row_returns)
-
-            # Number of trades this hour (Poisson)
             n_trades = rng.poisson(arrival_rate * 3600)
-
             for _ in range(n_trades):
-                # Trade timing
                 offset_ms = int(rng.integers(0, 3600 * 1000))
                 timestamp = row["timestamp"] + timedelta(milliseconds=offset_ms)
-
-                # Is this an informed trade?
                 is_informed = rng.random() < self.informed_trade_prob
-
-                side = self._select_trade_side(
-                    is_informed=is_informed,
-                    row_index=i,
-                    row_returns=row_returns,
-                    rng=rng,
-                )
+                side = self._select_trade_side(is_informed=is_informed, row_index=i, row_returns=row_returns, rng=rng)
                 size = self._sample_trade_size(is_informed=is_informed, rng=rng)
-                price = self._sample_trade_price(
-                    row_price=float(row["price"]),
-                    side=side,
-                    row_index=i,
-                    order_books=order_books,
-                    rng=rng,
-                )
-
+                price = self._sample_trade_price(row_price=float(row["price"]), side=side, row_index=i, order_books=order_books, rng=rng)
                 trades.append({
                     "timestamp": timestamp,
                     "price": price,
