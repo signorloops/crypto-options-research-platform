@@ -34,33 +34,19 @@ class QuantoInverseHedger:
         spot_lot_size: float = 1e-4,
         fx_lot_size: float = 1e-4,
     ) -> QuantoInverseHedgePlan:
-        """Build hedge plan for position-level spot and FX deltas.
-
-        Args:
-            greeks: Per-contract quanto greeks.
-            position_size: Number of option contracts (signed).
-            spot_price: Underlying spot for notional conversion.
-            fx_rate: Settlement FX conversion rate.
-            spot_lot_size: Execution lot size for spot hedge.
-            fx_lot_size: Execution lot size for FX hedge.
-        """
+        """Build position-level spot and FX delta hedges under execution lot constraints."""
         if fx_rate <= 0:
             raise ValueError("fx_rate must be positive")
         if spot_price <= 0:
             raise ValueError("spot_price must be positive")
-
         net_spot_delta = greeks.delta * position_size
         net_fx_delta = greeks.fx_delta * position_size
-
         raw_spot_hedge = -net_spot_delta
         raw_fx_hedge = -net_fx_delta
-
         spot_hedge = QuantoInverseHedger._round_to_lot(raw_spot_hedge, spot_lot_size)
         fx_hedge = QuantoInverseHedger._round_to_lot(raw_fx_hedge, fx_lot_size)
-
         residual_spot = net_spot_delta + spot_hedge
         residual_fx = net_fx_delta + fx_hedge
-
         return QuantoInverseHedgePlan(
             spot_hedge_units=float(spot_hedge),
             fx_hedge_units=float(fx_hedge),

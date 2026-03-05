@@ -307,7 +307,6 @@ class ScenarioGenerator:
         """Normalize heterogeneous historical market files into price/volume schema."""
         if frame is None or frame.empty:
             return None
-
         columns = {str(col).lower(): col for col in frame.columns}
 
         def _pick(candidates: List[str]) -> Optional[str]:
@@ -319,23 +318,19 @@ class ScenarioGenerator:
         timestamp_col = _pick(["timestamp", "ts", "time", "datetime", "date"])
         price_col = _pick(["price", "mid_price", "close", "last", "mark_price"])
         volume_col = _pick(["volume", "size", "qty", "trade_size"])
-
         if price_col is None:
             return None
-
         if timestamp_col is not None:
             timestamps = pd.to_datetime(frame[timestamp_col], utc=True, errors="coerce")
         elif isinstance(frame.index, pd.DatetimeIndex):
             timestamps = pd.to_datetime(frame.index, utc=True, errors="coerce")
         else:
             return None
-
         prices = pd.to_numeric(frame[price_col], errors="coerce").to_numpy()
         if volume_col is not None:
             volumes = pd.to_numeric(frame[volume_col], errors="coerce").to_numpy()
         else:
             volumes = np.full(len(frame), 1.0, dtype=float)
-
         out = pd.DataFrame({"price": prices, "volume": volumes}, index=timestamps)
         out = out.dropna(subset=["price"])
         out = out[out["price"] > 0]

@@ -304,46 +304,18 @@ def estimate_har_params(rv_daily: np.ndarray, periods: Tuple[int, int, int] = (1
 
 def har_volatility(rv_daily: np.ndarray, periods: Tuple[int, int, int] = (1, 5, 22),
                    beta: Optional[Tuple[float, float, float, float]] = None) -> float:
-    """
-    HAR-RV (Heterogeneous Autoregressive Realized Volatility) 模型。
-
-    HAR-RV 模型将 RV 回归到不同频率的成分上:
-    RV_t = beta_0 + beta_d * RV_{t-1} + beta_w * RV_{t-5:t-1} + beta_m * RV_{t-22:t-1}
-
-    这是一个"近似长记忆"模型，能捕捉波动率聚集和粗糙波动率特征。
-
-    Args:
-        rv_daily: 日已实现波动率序列
-        periods: (日, 周, 月) 周期 (默认 1, 5, 22 天)
-                 加密货币24/7交易，所以是连续日历日
-        beta: 可选的预估计参数 (beta_0, beta_d, beta_w, beta_m)
-              如果为 None，则自动从历史数据估计
-
-    Returns:
-        下一期 RV 预测
-
-    Example:
-        >>> rv_pred = har_volatility(rv_series)  # rv_series 是日 RV 序列
-
-    Reference:
-        Corsi, F. (2009). "A simple approximate long-memory model of realized volatility"
-    """
+    """HAR-RV next-period volatility forecast with optional estimated coefficients."""
     if len(rv_daily) < max(periods) + 1:
         return float(np.mean(rv_daily)) if len(rv_daily) > 0 else 0.0
-
     # 如果没有提供参数，从历史数据估计
     if beta is None:
         beta = estimate_har_params(rv_daily, periods)
-
     beta_0, beta_d, beta_w, beta_m = beta
-
     # 构建特征: 日、周、月 RV
     rv_d = rv_daily[-1]  # 昨日
     rv_w = np.mean(rv_daily[-5:])  # 本周 (过去5天)
     rv_m = np.mean(rv_daily[-22:])  # 本月 (过去22天)
-
     rv_pred = beta_0 + beta_d * rv_d + beta_w * rv_w + beta_m * rv_m
-
     return float(max(rv_pred, 0))
 
 

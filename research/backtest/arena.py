@@ -18,11 +18,7 @@ logger = get_logger(__name__)
 
 
 def _pairwise_p_value(returns1: pd.Series, returns2: pd.Series) -> float:
-    """
-    Robust pairwise p-value:
-    - avoid numerical warnings on near-identical low-variance samples
-    - keep behavior deterministic for degenerate cases
-    """
+    """Robust pairwise p-value with deterministic handling for degenerate samples."""
     from scipy import stats
 
     values1 = returns1.to_numpy(dtype=float)

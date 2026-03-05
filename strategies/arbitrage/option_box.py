@@ -159,33 +159,14 @@ class OptionBoxArbitrage:
         expiry: datetime,
         option_prices: Dict[str, float]
     ) -> Optional[BoxSpread]:
-        """
-        构建盒式套利组合。
-
-        Args:
-            low_strike: 低执行价
-            high_strike: 高执行价
-            expiry: 到期日
-            option_prices: {
-                'call_low': 低执行价看涨价格,
-                'put_low': 低执行价看跌价格,
-                'call_high': 高执行价看涨价格,
-                'put_high': 高执行价看跌价格
-            }
-
-        Returns:
-            BoxSpread 对象或 None
-        """
+        """构建盒式套利组合，要求四腿期权价格齐备且执行价有效。"""
         required = ['call_low', 'put_low', 'call_high', 'put_high']
         if not all(k in option_prices for k in required):
             return None
-
         if low_strike <= 0 or high_strike <= 0 or low_strike >= high_strike:
             return None
-
         if any(not np.isfinite(option_prices[k]) or option_prices[k] < 0 for k in required):
             return None
-
         return BoxSpread(
             low_strike=low_strike,
             high_strike=high_strike,

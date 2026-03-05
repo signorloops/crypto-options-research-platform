@@ -152,10 +152,7 @@ class CrossExchangeArbitrage:
                     continue
                 if opportunity.profit_pct / 100 < self.min_profit_pct:
                     continue
-                if (
-                    best_opportunity is None
-                    or opportunity.profit_pct > best_opportunity.profit_pct
-                ):
+                if best_opportunity is None or opportunity.profit_pct > best_opportunity.profit_pct:
                     best_opportunity = opportunity
         if best_opportunity is not None:
             if self.opportunity_callback:

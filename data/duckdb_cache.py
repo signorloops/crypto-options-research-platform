@@ -126,17 +126,7 @@ class DuckDBCache:
         table_name: str,
         columns: Optional[List[str]] = None
     ) -> int:
-        """
-        Load Parquet files into a table.
-
-        Args:
-            pattern: Glob pattern for Parquet files (e.g., "data/cache/**/*.parquet")
-            table_name: Name for the table/view
-            columns: Optional column subset to load
-
-        Returns:
-            Number of rows loaded
-        """
+        """Load Parquet files into a view/table and return row count."""
         try:
             safe_table = _sanitize_identifier(table_name)
             if columns:
@@ -332,8 +322,7 @@ class DuckDBCache:
     ) -> pd.DataFrame:
         """Resample tick/trade data to OHLCV buckets."""
         safe_table = _sanitize_identifier(table_name)
-        where_clause = ""
-        params = {}
+        where_clause, params = "", {}
         if start and end:
             where_clause = "WHERE timestamp >= $start AND timestamp <= $end"
             params = {"start": start, "end": end}

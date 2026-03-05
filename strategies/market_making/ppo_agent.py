@@ -227,8 +227,7 @@ class MarketMakingEnv:
         bid_offset, ask_offset, size_scale = self._sanitize_action(action)
         current_data = self.market_data.iloc[self.episode_start + self.current_step]
         mid_price = current_data['price']
-        bid_price = mid_price * (1 - bid_offset / 10000)
-        ask_price = mid_price * (1 + ask_offset / 10000)
+        bid_price, ask_price = mid_price * (1 - bid_offset / 10000), mid_price * (1 + ask_offset / 10000)
         quote_size = size_scale
         next_step = self.current_step + 1
         done = next_step >= self.episode_length
@@ -483,8 +482,7 @@ class PPOMarketMaker(MarketMakingStrategy):
         inventory_abs = abs(position.size) / max(self.config.inventory_limit, 1e-8)
         inv_util = min(1.0, inventory_abs)
         time_left = state.features.get('time_left', 0.5)
-        realized_skew = state.features.get('realized_skew', 0.0)
-        realized_kurt = state.features.get('realized_kurt', 0.0)
+        realized_skew, realized_kurt = state.features.get('realized_skew', 0.0), state.features.get('realized_kurt', 0.0)
         delta = state.greeks.delta if state.greeks is not None else 0.0
         vega = state.greeks.vega if state.greeks is not None else 0.0
         return np.array([

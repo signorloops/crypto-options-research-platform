@@ -629,10 +629,7 @@ class VaRCalculator:
         simulated_returns: np.ndarray,
         column_index: dict[object, int],
         greeks: pd.DataFrame | None,
-        n_simulations: int,
-        holding_period: int,
-        leverage_correlation: float,
-        rng: Any,
+        n_simulations: int, holding_period: int, leverage_correlation: float, rng: Any,
     ) -> np.ndarray:
         """Simulate one-position PnL with option revaluation and linear/Greeks fallbacks."""
         position_value = float(row["value"])

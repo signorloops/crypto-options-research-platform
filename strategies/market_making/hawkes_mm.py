@@ -212,8 +212,7 @@ class HawkesIntensityMonitor:
         if len(self.trade_times) < 30:
             return None
         times = np.array(self.trade_times, dtype=float)
-        marks = np.array(self.trade_sizes, dtype=float)
-        marks = np.maximum(marks, 1e-8) ** self.mark_power
+        marks = np.maximum(np.array(self.trade_sizes, dtype=float), 1e-8) ** self.mark_power
         T = max(times[-1] - times[0], 1e-8)
         shifted_times = times - times[0]
         def neg_log_likelihood(x: np.ndarray) -> float:

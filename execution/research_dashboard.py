@@ -277,8 +277,7 @@ def _build_dashboard_summary(df: pd.DataFrame, value_col: str) -> Dict[str, Any]
 
 
 def _render_dashboard_html(
-    *,
-    file_options: str,
+    *, file_options: str,
     primary_fig_html: str,
     returns_fig_html: str,
     deviation_section: str, summary_rows: str,

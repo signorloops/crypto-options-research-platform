@@ -65,8 +65,7 @@ class BlackScholesGreeks:
         K: float,
         T: float,
         r: float,
-        sigma: float,
-        option_type: str
+        sigma: float, option_type: str
     ) -> Greeks:
         """Calculate all Greeks for an option."""
         if S <= 0:
@@ -77,7 +76,6 @@ class BlackScholesGreeks:
             raise ValueError(f"Volatility sigma must be positive, got {sigma}")
         if T <= 0:
             return Greeks(delta=0, gamma=0, theta=0, vega=0, rho=0)
-
         d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
         d2 = d1 - sigma * np.sqrt(T)
         nd1, nd2 = norm.cdf(d1), norm.cdf(d2)

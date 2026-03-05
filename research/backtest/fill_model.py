@@ -290,15 +290,12 @@ class RealisticFillSimulator:
             our_size = max(quote.ask_size, 1e-8)
             competitiveness = max(0.0, trade.price - our_price) / max(abs(our_price), 1e-8)
             imbalance_term = float(-order_book.imbalance(levels=5))
-
         queue_ahead = self._queue_depth_ahead(quote, our_side, order_book)
         queue_ratio = queue_ahead / our_size
         size_ratio = max(float(trade.size), 0.0) / our_size
         vol = self._short_horizon_volatility(market_state)
-
         latency_scale = max(self.config.base_latency_ms + self.config.latency_std_ms + 1.0, 1.0)
         latency_penalty = max(latency_ms, 0.0) / latency_scale
-
         # Logistic score calibrated to preserve old baseline behavior while using features.
         score = (
             1.8

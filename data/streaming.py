@@ -177,8 +177,7 @@ class WebSocketStream(ABC):
             producer_task.cancel()
             try:
                 await producer_task
-            except asyncio.CancelledError:
-                pass
+            except asyncio.CancelledError: pass
 
     async def _route_message(self, parsed: Dict) -> None:
         """Route parsed message to appropriate callback."""

@@ -265,8 +265,7 @@ class IntegratedMarketMakingStrategy(MarketMakingStrategy):
         position: Position,
         mid: float,
         circuit_state: object,
-        current_regime: RegimeState,
-        calibration_meta: Dict[str, float],
+        current_regime: RegimeState, calibration_meta: Dict[str, float],
     ) -> QuoteAction:
         """Build normal market-making quote after risk gate passes."""
         hedge_decision = self._evaluate_hedge_decision(state, mid, position)

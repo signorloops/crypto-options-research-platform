@@ -175,9 +175,7 @@ class AvellanedaStoikov(MarketMakingStrategy):
             raise ValueError("Cannot quote without valid order book")
         q = position.size  # Current inventory
         calibration_meta = self._update_online_calibration(state, q)
-        gamma = self.config.gamma
-        sigma = self.config.sigma
-        k = self.config.k
+        gamma, sigma, k = self.config.gamma, self.config.sigma, self.config.k
         time_remaining = self._compute_time_remaining(state)
         inventory_ratio, effective_q = self._compute_effective_inventory(q)
         reservation_price = mid - effective_q * gamma * sigma**2 * time_remaining

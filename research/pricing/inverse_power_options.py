@@ -299,8 +299,7 @@ class InversePowerOptionPricer:
         sigma: float,
         option_type: Literal["call", "put"],
         power: float,
-        n_paths: int,
-        bump_rel: float,
+        n_paths: int, bump_rel: float,
     ) -> tuple[float, _InversePowerFDBase, _InversePowerFDBumps]:
         price = InversePowerOptionPricer._price_with_normals(
             normals=normals,

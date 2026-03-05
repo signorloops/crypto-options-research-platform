@@ -487,8 +487,7 @@ class CircuitBreaker:
 
     def _check_all_limits(self, portfolio: PortfolioState) -> List[Violation]:
         """Check all risk limits and return violations."""
-        violations = []
-        now = datetime.now(timezone.utc)
+        violations = []; now = datetime.now(timezone.utc)
         daily_pnl_pct = portfolio.daily_pnl_pct
         if daily_pnl_pct < 0:
             daily_loss_violation = _build_threshold_violation(
@@ -569,8 +568,7 @@ class CircuitBreaker:
 
     def _check_per_instrument_limits(self, portfolio: PortfolioState) -> List[Violation]:
         """Instrument-level notional risk checks."""
-        now = datetime.now(timezone.utc)
-        violations: List[Violation] = []
+        now = datetime.now(timezone.utc); violations: List[Violation] = []
         for instrument, position in portfolio.positions.items():
             notional = abs(position.size) * max(position.avg_entry_price, 0.0)
             if notional <= 0:

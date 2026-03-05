@@ -245,8 +245,7 @@ class RoughVolatilityPricer:
         n, std = len(discounted), float(np.std(discounted, ddof=1) if len(discounted) > 1 else 0.0)
         std_error = std / np.sqrt(max(n, 1))
         z = float(norm.ppf(0.5 + confidence / 2.0))
-        ci_low = price - z * std_error
-        ci_high = price + z * std_error
+        ci_low, ci_high = price - z * std_error, price + z * std_error
         pricing_time = float(max(time.perf_counter() - pricing_t0, 0.0))
         return {
             "price": price,

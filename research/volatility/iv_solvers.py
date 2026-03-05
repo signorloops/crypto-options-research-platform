@@ -207,8 +207,7 @@ def _implied_volatility_lbr_fallback(
     T: float,
     r: float = None,
     is_call: bool = True,
-    tol: float = 1e-8,
-    max_iter: int = 20,
+    tol: float = 1e-8, max_iter: int = 20,
 ) -> float:
     """近似 Let's-Be-Rational 风格 IV 回退求解器。"""
     if r is None:
