@@ -258,17 +258,14 @@ def implied_volatility_jaeckel(
     """Prefer Jaeckel LBR solver when available, otherwise use local fallback."""
     if r is None:
         r = float(os.getenv("RISK_FREE_RATE", "0.05"))
-
     if market_price <= 0 or T <= 0:
         return 0.0
-
     lower_bound, upper_bound = _option_price_bounds(S, K, T, r, is_call)
     if market_price < lower_bound - 1e-10 or market_price > upper_bound + 1e-10:
         raise ValueError(
             f"Option price {market_price} violates no-arbitrage bounds "
             f"[{lower_bound}, {upper_bound}]"
         )
-
     if HAS_JAECKEL_SOLVER:
         flag = "c" if is_call else "p"
         try:
@@ -280,7 +277,6 @@ def implied_volatility_jaeckel(
                 "Jaeckel solver failed, fallback to local LBR",
                 extra=log_extra(error=str(exc), strike=K, expiry=T),
             )
-
     return _implied_volatility_lbr_fallback(
         market_price=market_price,
         S=S,

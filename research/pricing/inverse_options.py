@@ -535,13 +535,7 @@ class InverseOptionPricer:
         InverseOptionPricer._validate_option_type(option_type)
         if price <= 0:
             return 0.0
-        if price >= InverseOptionPricer._iv_price_upper_bound(
-            S=S,
-            K=K,
-            T=T,
-                r=r,
-                option_type=option_type,
-            ):
+        if price >= InverseOptionPricer._iv_price_upper_bound(S=S, K=K, T=T, r=r, option_type=option_type):
             return 0.0
         raw_sigma = InverseOptionPricer._solve_iv_newton(
             price=price,

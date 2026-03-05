@@ -296,21 +296,10 @@ class DuckDBCache:
         start: Optional[datetime] = None,
         end: Optional[datetime] = None
     ) -> Dict[str, Any]:
-        """
-        Get price statistics for a table.
-
-        Args:
-            table_name: Table/view name
-            start: Optional start time
-            end: Optional end time
-
-        Returns:
-            Dictionary with statistics
-        """
+        """Get price statistics for a table/view over an optional time range."""
         safe_table = _sanitize_identifier(table_name)
         where_clause = ""
         params = {}
-
         if start and end:
             where_clause = "WHERE timestamp >= $start AND timestamp <= $end"
             params = {"start": start, "end": end}
@@ -320,7 +309,6 @@ class DuckDBCache:
         elif end:
             where_clause = "WHERE timestamp <= $end"
             params = {"end": end}
-
         query = f"""
             SELECT
                 COUNT(*) as count,
@@ -333,7 +321,6 @@ class DuckDBCache:
             FROM {safe_table}
             {where_clause}
         """
-
         result = self.query(query, params if params else None)
         return result.iloc[0].to_dict()
 

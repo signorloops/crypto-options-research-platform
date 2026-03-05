@@ -314,8 +314,7 @@ def _render_dashboard_html(
           <button type=\"submit\">Load</button>
         </form>
       </div>
-      <div class=\"card\">{primary_fig_html}</div>
-      <div class=\"card\">{returns_fig_html}</div>
+      <div class=\"card\">{primary_fig_html}</div><div class=\"card\">{returns_fig_html}</div>
       {deviation_section}
       <div class=\"card\"><h2>Summary</h2><table>{summary_rows}</table></div>
     </div>

@@ -249,14 +249,12 @@ def calculate_volatility_from_ohlc(df: pd.DataFrame, method: str = "yang_zhang",
             raise ValueError("realized method requires 'close' column")
         returns = np.log(df['close'] / df['close'].shift(1)).dropna()
         return realized_volatility(returns.values, annualize, periods)
-
     elif method == "parkinson":
         if 'high' not in df.columns or 'low' not in df.columns:
             raise ValueError("parkinson method requires 'high' and 'low' columns")
         return parkinson_volatility(
             df['high'].values, df['low'].values, annualize, periods
         )
-
     elif method == "garman_klass":
         required = ['open', 'high', 'low', 'close']
         if not all(c in df.columns for c in required):
@@ -265,7 +263,6 @@ def calculate_volatility_from_ohlc(df: pd.DataFrame, method: str = "yang_zhang",
             df['open'].values, df['high'].values,
             df['low'].values, df['close'].values, annualize, periods
         )
-
     elif method == "rogers_satchell":
         required = ['open', 'high', 'low', 'close']
         if not all(c in df.columns for c in required):
@@ -274,7 +271,6 @@ def calculate_volatility_from_ohlc(df: pd.DataFrame, method: str = "yang_zhang",
             df['open'].values, df['high'].values,
             df['low'].values, df['close'].values, annualize, periods
         )
-
     elif method == "yang_zhang":
         required = ['open', 'high', 'low', 'close']
         if not all(c in df.columns for c in required):
@@ -283,6 +279,5 @@ def calculate_volatility_from_ohlc(df: pd.DataFrame, method: str = "yang_zhang",
             df['open'].values, df['high'].values,
             df['low'].values, df['close'].values, annualize, periods
         )
-
     else:
         raise ValueError(f"Unknown method: {method}")

@@ -523,7 +523,6 @@ class BacktestEngine:
         sharpe = self._calculate_sharpe_ratio(pnl_series)
         max_dd = _calculate_max_drawdown(pnl_series)
         buys, sells = _trade_side_counts(self.trades)
-        avg_size = np.mean([t.size for t in self.trades]) if self.trades else 0
         returns_for_ci = pnl_series.diff().dropna() / max(self.initial_crypto_balance, 1e-12) if len(pnl_series) > 1 else pd.Series(dtype=float)
         sharpe_ci, drawdown_ci = self._bootstrap_risk_ci(returns_for_ci)
         deflated_trials = max(2, int(getattr(self.strategy, "multiple_testing_trials", 2)))
@@ -547,7 +546,7 @@ class BacktestEngine:
             trade_count=len(self.trades),
             buy_count=buys,
             sell_count=sells,
-            avg_trade_size=avg_size,
+            avg_trade_size=np.mean([t.size for t in self.trades]) if self.trades else 0,
             avg_trade_pnl_crypto=total_pnl_crypto / len(self.trades) if self.trades else 0,
             total_spread_captured=0,
             avg_spread_captured_bps=0,

@@ -92,38 +92,27 @@ class JumpRiskPremiaEstimator:
         arr = arr[np.isfinite(arr)]
         if arr.size < self.min_obs:
             return JumpRiskPremiaSignal(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-
-        # Focus on the most recent window.
         if arr.size > self.window:
             arr = arr[-self.window :]
-
         mu = float(np.mean(arr))
         sigma = float(np.std(arr))
         if sigma < 1e-10:
             return JumpRiskPremiaSignal(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-
         upper = mu + self.jump_zscore * sigma
         lower = mu - self.jump_zscore * sigma
-
         pos_mask = arr > upper
         neg_mask = arr < lower
-
         pos_excess = arr[pos_mask] - upper
         neg_excess = lower - arr[neg_mask]
-
         pos_intensity = float(np.mean(pos_mask))
         neg_intensity = float(np.mean(neg_mask))
-
         pos_cluster = self._cluster_score(pos_mask)
         neg_cluster = self._cluster_score(neg_mask)
-
         pos_premium = pos_intensity * self._safe_mean(pos_excess) * (1.0 + pos_cluster)
         neg_premium = neg_intensity * self._safe_mean(neg_excess) * (1.0 + neg_cluster)
         net_premium = pos_premium - neg_premium
-
         imbalance_denom = pos_cluster + neg_cluster + 1e-12
         cluster_imbalance = (pos_cluster - neg_cluster) / imbalance_denom
-
         return JumpRiskPremiaSignal(
             positive_jump_premium=float(max(pos_premium, 0.0)),
             negative_jump_premium=float(max(neg_premium, 0.0)),

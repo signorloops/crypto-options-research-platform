@@ -107,7 +107,6 @@ class WebSocketStream(ABC):
         self._running = True
         self._cancel_event = asyncio.Event()
         url = self.get_ws_url(instruments)
-
         while self._running and self._reconnect_count < self.config.max_reconnects:
             try:
                 logger.info(f"Connecting to {url}...")
@@ -121,29 +120,21 @@ class WebSocketStream(ABC):
                     self._websocket = websocket
                     self._reconnect_count = 0
                     logger.info("Connected!")
-
                     try:
                         await self._handle_messages(websocket)
                     except asyncio.CancelledError:
                         logger.info("Message handling cancelled")
                         break
-
             except ConnectionClosed:
                 if not self._running:
                     break
-                logger.warning("Connection closed, reconnecting...")
-                backoff = self._next_reconnect_backoff()
+                logger.warning("Connection closed, reconnecting..."); backoff = self._next_reconnect_backoff()
                 logger.info(f"Reconnecting in {backoff:.1f}s (attempt {self._reconnect_count})")
                 await asyncio.sleep(backoff)
-
-            except asyncio.CancelledError:
-                logger.info("WebSocket connection cancelled")
-                break
-
+            except asyncio.CancelledError: logger.info("WebSocket connection cancelled"); break
             except STREAM_CONNECTION_EXCEPTIONS as e:
                 logger.error(f"WebSocket error: {e}")
-                backoff = self._next_reconnect_backoff()
-                await asyncio.sleep(backoff)
+                await asyncio.sleep(self._next_reconnect_backoff())
 
     async def _handle_messages(self, websocket: Any) -> None:
         """Handle incoming WebSocket messages with backpressure control."""
@@ -537,18 +528,13 @@ class OKXStream(WebSocketStream):
     async def connect(self, instruments: Optional[List[str]] = None) -> None:
         """Override to send subscription messages after connection."""
         instruments = instruments or self.instruments
-
-        # Build subscription messages
         subscriptions = []
         for instrument in instruments:
             subscriptions.append({"channel": "trades", "instId": instrument})
             subscriptions.append({"channel": "tickers", "instId": instrument})
             subscriptions.append({"channel": "books", "instId": instrument})
-
-        # Connect and subscribe
         self._running = True
         url = self.WS_URL
-
         while self._running and self._reconnect_count < self.config.max_reconnects:
             try:
                 logger.info("Connecting to OKX WebSocket...")
@@ -560,26 +546,19 @@ class OKXStream(WebSocketStream):
                     self._websocket = websocket
                     self._reconnect_count = 0
                     logger.info("Connected!")
-
-                    # Send subscription message
                     subscribe_msg = {
                         "op": "subscribe",
                         "args": subscriptions
                     }
                     await websocket.send(json.dumps(subscribe_msg))
                     logger.info(f"Subscribed to {len(instruments)} instruments")
-
                     await self._handle_messages(websocket)
-
             except ConnectionClosed:
                 logger.warning("Connection closed, reconnecting...")
-                backoff = self._next_reconnect_backoff()
-                await asyncio.sleep(backoff)
-
+                await asyncio.sleep(self._next_reconnect_backoff())
             except STREAM_CONNECTION_EXCEPTIONS as e:
                 logger.error(f"WebSocket error: {e}")
-                backoff = self._next_reconnect_backoff()
-                await asyncio.sleep(backoff)
+                await asyncio.sleep(self._next_reconnect_backoff())
 
 
 class MultiExchangeStream:

@@ -255,7 +255,6 @@ def plot_volatility_surface(
     except ImportError:
         logger.warning("matplotlib required for plotting")
         return
-
     if not surface.points:
         logger.warning("Empty surface, nothing to plot")
         return
@@ -264,11 +263,9 @@ def plot_volatility_surface(
     expiries = np.linspace(expiry_range[0], expiry_range[1], 50)
     K_grid, T_grid = np.meshgrid(strikes, expiries)
     V_grid = np.zeros_like(K_grid)
-
     for i in range(len(strikes)):
         for j in range(len(expiries)):
             V_grid[j, i] = surface.get_volatility(strikes[i], expiries[j])
-
     fig = plt.figure(figsize=(12, 5))
     ax1 = fig.add_subplot(121, projection="3d")
     ax1.plot_surface(K_grid / S, T_grid, V_grid, cmap="viridis")
@@ -282,11 +279,9 @@ def plot_volatility_surface(
         if skew:
             moneyness, vols = zip(*skew)
             ax2.plot(moneyness, vols, label=f"T={T:.2f}")
-
     ax2.set_xlabel("Moneyness")
     ax2.set_ylabel("Implied Volatility")
     ax2.set_title("Volatility Skew by Maturity")
     ax2.legend()
-
     plt.tight_layout()
     plt.show()

@@ -253,9 +253,7 @@ class BasisArbitrage:
         funding_rate: Optional[float] = None
     ) -> Optional[BasisOpportunity]:
         """检查是否存在套利机会。"""
-        raw_funding = funding_rate if funding_rate is not None else self.get_dynamic_funding_rate(
-            instrument, self.funding_cost
-        )
+        raw_funding = funding_rate if funding_rate is not None else self.get_dynamic_funding_rate(instrument, self.funding_cost)
         annualized_funding = self._annualized_funding_rate(raw_funding)
         basis_info = self.calculate_basis(instrument, annualized_funding)
         if basis_info is None:
@@ -264,12 +262,7 @@ class BasisArbitrage:
         basis, basis_pct, T = basis_info["basis"], basis_info["basis_pct"], basis_info["time_to_expiry"]
         if T <= 0:
             return None
-        annualized_return, net_return = _annualized_basis_returns(
-            basis_pct=basis_pct,
-            time_to_expiry=T,
-            annualized_funding=annualized_funding,
-            transaction_cost=self.transaction_cost,
-        )
+        annualized_return, net_return = _annualized_basis_returns(basis_pct=basis_pct, time_to_expiry=T, annualized_funding=annualized_funding, transaction_cost=self.transaction_cost)
         strategy_profit = _basis_strategy_profit(
             basis=basis,
             net_return=net_return,

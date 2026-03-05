@@ -57,23 +57,13 @@ class GBMPriceGenerator:
     ) -> pd.DataFrame:
         """Generate price path."""
         rng = self._get_rng(rng)
-
         n_steps = int(T / self.params.dt) + 1  # +1 to include start point
-
-        # Generate random walk (n_steps - 1 random returns, first return is 0)
         dW = rng.normal(0, np.sqrt(self.params.dt), n_steps - 1)
-        drift = (self.params.mu - 0.5 * self.params.sigma**2) * self.params.dt
-        log_returns = np.concatenate([[0], drift + self.params.sigma * dW])
-
-        # Cumulative - first price is S0, subsequent prices based on returns
+        log_returns = np.concatenate([[0], (self.params.mu - 0.5 * self.params.sigma**2) * self.params.dt + self.params.sigma * dW])
         log_prices = np.cumsum(log_returns)
         prices = self.params.S0 * np.exp(log_prices)
-
-        # Create timestamps
-        if start_time is None:
-            start_time = datetime(2024, 1, 1)
+        if start_time is None: start_time = datetime(2024, 1, 1)
         timestamps = [start_time + timedelta(hours=i) for i in range(n_steps)]
-
         return pd.DataFrame({
             "timestamp": timestamps,
             "price": prices,
@@ -96,15 +86,10 @@ class MertonJumpDiffusion(GBMPriceGenerator):
     ) -> pd.DataFrame:
         """Generate price path with jumps."""
         rng = self._get_rng(rng)
-
         n_steps = int(T / self.params.dt) + 1  # +1 to include start point
-
-        # GBM component (n_steps - 1 random returns, first return is 0)
         dW = rng.normal(0, np.sqrt(self.params.dt), n_steps - 1)
         drift = (self.params.mu - 0.5 * self.params.sigma**2) * self.params.dt
         log_returns = np.concatenate([[0], drift + self.params.sigma * dW])
-
-        # Jump component (Poisson) - no jumps at start
         jumps = rng.poisson(
             self.params.jump_intensity * self.params.dt,
             n_steps - 1
@@ -115,18 +100,11 @@ class MertonJumpDiffusion(GBMPriceGenerator):
             n_steps - 1
         )
         log_returns[1:] += jumps * jump_sizes
-
-        # Cumulative - first price is S0
         log_prices = np.cumsum(log_returns)
         prices = self.params.S0 * np.exp(log_prices)
-
-        if start_time is None:
-            start_time = datetime(2024, 1, 1)
+        if start_time is None: start_time = datetime(2024, 1, 1)
         timestamps = [start_time + timedelta(hours=i) for i in range(n_steps)]
-
-        # Pad jumps array to match length (first element is 0 - no jump at start)
         jumps_padded = np.concatenate([[0], jumps])
-
         return pd.DataFrame({
             "timestamp": timestamps,
             "price": prices,
@@ -364,37 +342,27 @@ class OptionMarketSimulator:
     ) -> Greeks:
         """Calculate option Greeks using Black-Scholes."""
         from scipy.stats import norm
-
         T = contract.time_to_expiry(as_of)
         if T <= 0:
             return Greeks(delta=0, gamma=0, theta=0, vega=0)
-
         S = spot
         K = contract.strike
         r = self.risk_free_rate
         sigma = volatility
-
         d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
         d2 = d1 - sigma * np.sqrt(T)
-
         if contract.option_type == OptionType.CALL:
             delta = norm.cdf(d1)
         else:
             delta = -norm.cdf(-d1)
-
         gamma = norm.pdf(d1) / (S * sigma * np.sqrt(T))
-
-        # Theta (annualized)
         if contract.option_type == OptionType.CALL:
             theta = (-S * norm.pdf(d1) * sigma / (2 * np.sqrt(T))
                      - r * K * np.exp(-r * T) * norm.cdf(d2))
         else:
             theta = (-S * norm.pdf(d1) * sigma / (2 * np.sqrt(T))
                      + r * K * np.exp(-r * T) * norm.cdf(-d2))
-
-        # Vega (per 1% change in vol)
         vega = S * norm.pdf(d1) * np.sqrt(T) / 100
-
         return Greeks(
             delta=delta,
             gamma=gamma,

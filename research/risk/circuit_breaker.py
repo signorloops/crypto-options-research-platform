@@ -933,12 +933,7 @@ class CircuitBreaker:
         elif method == "fhs":
             var_result = self._var_calculator.filtered_historical_var(positions, returns)
         else:
-            candidates = [
-                self._var_calculator.parametric_var(positions, returns),
-                self._var_calculator.cornish_fisher_var(positions, returns),
-                self._var_calculator.evt_var(positions, returns),
-                self._var_calculator.filtered_historical_var(positions, returns),
-            ]
+            candidates = [self._var_calculator.parametric_var(positions, returns), self._var_calculator.cornish_fisher_var(positions, returns), self._var_calculator.evt_var(positions, returns), self._var_calculator.filtered_historical_var(positions, returns)]
             var_result = max(candidates, key=lambda x: x.var_95)
         var_95_pct, var_99_pct = ((var_result.var_95 / portfolio_value, var_result.var_99 / portfolio_value) if portfolio_value > 0 else (0.0, 0.0))
         if var_99_pct > self.config.var_99_limit_pct:

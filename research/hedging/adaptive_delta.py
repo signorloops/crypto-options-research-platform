@@ -117,9 +117,7 @@ class AdaptiveDeltaHedger:
             base_interval, price_drop_pct, price_rise_pct, portfolio_greeks.gamma
         )
         time_trigger = time_since_last >= adjusted_interval
-        target_delta, current_delta, delta_deviation = _delta_metrics(
-            portfolio_greeks, position_size
-        )
+        target_delta, current_delta, delta_deviation = _delta_metrics(portfolio_greeks, position_size)
         delta_threshold = self._calculate_delta_threshold(time_since_last, base_interval)
         delta_trigger = delta_deviation > delta_threshold
         urgency = self._determine_urgency(
