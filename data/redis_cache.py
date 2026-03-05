@@ -539,7 +539,6 @@ class GreeksCacheManager:
     ) -> Dict[str, float]:
         """Get Greeks with background refresh and singleflight cache-miss fetch."""
         greeks = await self.redis.get_greeks(instrument)
-
         if greeks is not None:
             ttl = await self.redis.get_ttl(f"greeks:{instrument}")
             if ttl < self.refresh_threshold:
@@ -551,17 +550,13 @@ class GreeksCacheManager:
                 self._refresh_tasks.add(task)
                 task.add_done_callback(lambda t: self._refresh_tasks.discard(t))
             return greeks
-
         lock = await self._get_fetch_lock(instrument)
-
         async with lock:
             greeks = await self.redis.get_greeks(instrument)
             if greeks is not None:
                 return greeks
-
             if instrument in self._fetch_cache:
                 return self._fetch_cache[instrument]
-
             logger.debug("Greeks cache miss", extra=log_extra(instrument=instrument))
             try:
                 greeks = await fetch_func(instrument)
@@ -577,7 +572,6 @@ class GreeksCacheManager:
                     extra=log_extra(instrument=instrument, error=str(e))
                 )
                 raise
-
         return greeks
 
     async def _refresh_greeks(

@@ -202,13 +202,7 @@ class QuantoInversePowerOptionPricer:
             seed=seed_value,
             bump_rel=bump_rel_value,
         )
-        t_eff, quanto_adjustment, factor = QuantoInversePowerOptionPricer._compute_quanto_scalars(
-            T=T,
-            sigma=sigma,
-            sigma_fx=sigma_fx,
-            rho=rho,
-            fx_rate=fx_rate,
-        )
+        t_eff, quanto_adjustment, factor = QuantoInversePowerOptionPricer._compute_quanto_scalars(T=T, sigma=sigma, sigma_fx=sigma_fx, rho=rho, fx_rate=fx_rate)
         return QuantoInversePowerOptionPricer._compose_quanto_price_and_greeks(
             base_price=base_price,
             base_greeks=base_greeks,

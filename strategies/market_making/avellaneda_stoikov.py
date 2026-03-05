@@ -173,13 +173,11 @@ class AvellanedaStoikov(MarketMakingStrategy):
         mid = state.order_book.mid_price
         if mid is None:
             raise ValueError("Cannot quote without valid order book")
-
         q = position.size  # Current inventory
         calibration_meta = self._update_online_calibration(state, q)
         gamma = self.config.gamma
         sigma = self.config.sigma
         k = self.config.k
-
         time_remaining = self._compute_time_remaining(state)
         inventory_ratio, effective_q = self._compute_effective_inventory(q)
         reservation_price = mid - effective_q * gamma * sigma**2 * time_remaining
@@ -192,11 +190,9 @@ class AvellanedaStoikov(MarketMakingStrategy):
                 inventory_ratio=inventory_ratio,
             )
         )
-
         bid_price = reservation_price - half_spread
         ask_price = reservation_price + half_spread
         bid_size, ask_size = self._compute_quote_sizes(q, inventory_ratio)
-
         return QuoteAction(
             bid_price=bid_price,
             bid_size=bid_size,

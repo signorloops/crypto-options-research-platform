@@ -433,33 +433,25 @@ class PPOMarketMaker(MarketMakingStrategy):
         mid = state.order_book.mid_price
         if mid is None:
             raise ValueError("Cannot quote without valid order book")
-
         state_vec = self._market_state_to_vector(state, position)
         self.current_state = state_vec
         self._state_sequence.append(state_vec)
         self._init_network(len(state_vec))
         state_tensor = self._build_policy_state_tensor(state_vec)
-
         action, value, log_prob = self.network.get_action(state_tensor)
-
         bid_offset_bps = np.clip(action[0], self.config.min_spread_bps/2, self.config.max_spread_bps/2)
         ask_offset_bps = np.clip(action[1], self.config.min_spread_bps/2, self.config.max_spread_bps/2)
         size_scale = np.clip(action[2], 0.1, 2.0)
-
         inventory_skew = np.clip(
             -position.size * self.config.max_skew_bps / self.config.inventory_limit,
             -self.config.max_skew_bps,
             self.config.max_skew_bps
         )
-
         bid_price = mid * (1 - bid_offset_bps / 10000 + inventory_skew / 10000)
         ask_price = mid * (1 + ask_offset_bps / 10000 + inventory_skew / 10000)
-
         quote_size = self.config.quote_size * size_scale
-
         bid_size = quote_size if position.size < self.config.inventory_limit else 0
         ask_size = quote_size if position.size > -self.config.inventory_limit else 0
-
         return QuoteAction(
             bid_price=bid_price,
             bid_size=bid_size,
@@ -485,9 +477,7 @@ class PPOMarketMaker(MarketMakingStrategy):
         volatility_20 = state.features.get('volatility_20', volatility_5)
         imbalance = state.order_book.imbalance() if state.order_book else 0.0
         spread_bps = (state.order_book.spread / mid * 10000) if state.order_book and state.order_book.spread and mid > 0 else 20.0
-        ret_1 = state.features.get('return_1', 0.0)
-        ret_5 = state.features.get('return_5', 0.0)
-        ret_10 = state.features.get('return_10', 0.0)
+        ret_1, ret_5, ret_10 = state.features.get('return_1', 0.0), state.features.get('return_5', 0.0), state.features.get('return_10', 0.0)
         momentum = state.features.get('momentum', 0.0)
         volume_ratio = state.features.get('volume_ratio', 1.0)
         volume_z = state.features.get('volume_zscore', 0.0)

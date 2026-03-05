@@ -839,43 +839,21 @@ class StressTest:
     def run_stress_test(
         self, positions: pd.DataFrame, greeks: pd.DataFrame, scenario: str
     ) -> dict[str, object]:
-        """
-        Run stress test for a given scenario.
-
-        Args:
-            positions: Position data
-            greeks: Greeks for each position
-            scenario: Name of predefined scenario or custom dict
-
-        Returns:
-            Dictionary with scenario results
-        """
+        """Run stress test for a predefined or custom scenario."""
         if isinstance(scenario, str):
             scenario = self.SCENARIOS.get(scenario, {})
-
         spot_shock = scenario.get("spot_shock", 0)
         vol_shock = scenario.get("vol_shock", 0)
-
         total_pnl = 0
-
         for idx, pos in positions.iterrows():
             if idx in greeks.index:
                 g = greeks.loc[idx]
-
-                # Delta PnL
                 delta_pnl = g["delta"] * spot_shock * pos["value"]
-
-                # Gamma PnL
                 gamma_pnl = 0.5 * g.get("gamma", 0) * (spot_shock**2) * pos["value"]
-
-                # Vega PnL
                 vega_pnl = g.get("vega", 0) * vol_shock * 100 * pos["value"]
-
                 total_pnl += delta_pnl + gamma_pnl + vega_pnl
-
         gross_exposure = float(np.abs(positions["value"]).sum()) if "value" in positions else 0.0
         pct_of_portfolio = (total_pnl / gross_exposure * 100) if gross_exposure > 1e-12 else 0.0
-
         return {
             "scenario_name": scenario.get("description", "Custom"),
             "spot_shock": spot_shock,

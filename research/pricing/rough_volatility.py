@@ -239,14 +239,12 @@ class RoughVolatilityPricer:
             payoff = np.maximum(strike - terminal, 0.0)
         else:
             raise ValueError("option_type must be 'call' or 'put'")
-
         discount = np.exp(-self.config.rate * self.config.maturity)
         discounted = discount * payoff
         price = float(np.mean(discounted))
         n = len(discounted)
         std = float(np.std(discounted, ddof=1) if n > 1 else 0.0)
         std_error = std / np.sqrt(max(n, 1))
-
         z = float(norm.ppf(0.5 + confidence / 2.0))
         ci_low = price - z * std_error
         ci_high = price + z * std_error

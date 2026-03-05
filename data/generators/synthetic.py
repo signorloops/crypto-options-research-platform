@@ -161,27 +161,17 @@ class OrderBookSimulator:
     ) -> OrderBook:
         """Generate order book around mid price."""
         rng = np.random.default_rng() if rng is None else rng
-        # Adjust spread based on volatility
         effective_spread = self.base_spread_bps * volatility_regime * spread_multiplier
         half_spread = mid_price * effective_spread / 10000 / 2
-
         bids = []
         asks = []
-
         for i in range(self.depth_levels):
-            # Price levels
             bid_price = mid_price - half_spread - i * self.tick_size
             ask_price = mid_price + half_spread + i * self.tick_size
-
-            # Size with exponential decay by depth
-            # Higher volatility = thinner book
             decay_rate = 0.3 * volatility_regime
             base_size = 10 * np.exp(-decay_rate * i)
-
-            # Add noise
             bid_size = max(0.1, base_size * rng.lognormal(0, 0.5))
             ask_size = max(0.1, base_size * rng.lognormal(0, 0.5))
-
             bids.append(OrderBookLevel(
                 price=round(bid_price, 2),
                 size=round(bid_size, 4),
@@ -192,7 +182,6 @@ class OrderBookSimulator:
                 size=round(ask_size, 4),
                 num_orders=rng.poisson(3)
             ))
-
         return OrderBook(
             timestamp=datetime.now(timezone.utc),
             instrument="SYNTHETIC",

@@ -89,28 +89,13 @@ class OKXClient(ExchangeInterface):
         params: Optional[Dict] = None,
         timeout: float = 30.0
     ) -> Dict:
-        """Make API request with timeout.
-
-        Args:
-            endpoint: API endpoint path
-            params: Query parameters
-            timeout: Request timeout in seconds (default: 30)
-
-        Returns:
-            API response data
-
-        Raises:
-            OKXAPIError: If API returns error
-            asyncio.TimeoutError: If request times out
-        """
+        """Make API request with timeout and OKX error handling."""
         if not self._session:
             await self.connect()
-
         url = f"{self.BASE_URL}{endpoint}"
         headers = {}
         if self.api_key:
             headers["OK-ACCESS-KEY"] = self.api_key
-
         try:
             async with self._session.get(
                 url,

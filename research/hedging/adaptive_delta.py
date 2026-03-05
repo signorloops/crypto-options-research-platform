@@ -137,7 +137,6 @@ class AdaptiveDeltaHedger:
         reason = self._build_reason(
             time_trigger, delta_trigger, urgency, time_since_last, delta_deviation
         )
-
         return HedgeDecision(
             should_hedge=should_hedge,
             reason=reason,

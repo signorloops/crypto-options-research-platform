@@ -229,44 +229,32 @@ class FastVolatilityRegimeDetector:
             if self._hmm_training:
                 return
             self._hmm_training = True
-
         def train():
             try:
-                # 复制数据,避免在锁内执行长时间操作
                 with self._buffer_lock:
                     if len(self._returns_buffer) < self.config.hmm_min_samples:
                         return
                     returns = np.array(list(self._returns_buffer)).reshape(-1, 1)
-
-                # 重新初始化模型 (避免状态累积)
                 self._init_hmm()
-
                 if self._hmm_model is not None:
-                    # HMM often emits non-actionable convergence warnings on noisy streams.
                     with warnings.catch_warnings():
                         try:
                             from sklearn.exceptions import ConvergenceWarning
-
                             warnings.filterwarnings("ignore", category=ConvergenceWarning)
                         except ImportError:
                             warnings.filterwarnings("ignore", message=".*converge.*")
                         self._hmm_model.fit(returns)
-                    # Sort states by volatility so 0=LOW, 1=MEDIUM, 2=HIGH
                     if hasattr(self._hmm_model, 'means_'):
                         means = self._hmm_model.means_
                         vol_order = np.argsort(np.abs(means[:, 0]))
                         self._state_map = {int(old): int(new) for new, old in enumerate(vol_order)}
                     self._hmm_fitted = True
                     self._hmm_last_train = self._hmm_sample_count
-
             except HMM_RUNTIME_EXCEPTIONS:
-                # 训练失败时保留当前状态并记录可观测日志.
                 logger.exception("Fast HMM training failed; keeping previous regime model")
             finally:
                 with self._hmm_lock:
                     self._hmm_training = False
-
-        # 启动后台线程
         thread = threading.Thread(target=train, daemon=True)
         thread.start()
         self._hmm_thread = thread

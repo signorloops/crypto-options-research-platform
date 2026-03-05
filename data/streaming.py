@@ -149,7 +149,6 @@ class WebSocketStream(ABC):
         """Handle incoming WebSocket messages with backpressure control."""
         message_queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
         queue_full_logged = False
-
         async def producer():
             nonlocal queue_full_logged
             try:
@@ -165,7 +164,6 @@ class WebSocketStream(ABC):
                 logger.info("WebSocket connection closed in producer")
             finally:
                 await message_queue.put(None)
-
         async def consumer():
             while True:
                 try:
@@ -182,7 +180,6 @@ class WebSocketStream(ABC):
                     raise
                 except Exception as e:
                     logger.error(f"Error processing message: {e}")
-
         producer_task = asyncio.create_task(producer())
         try:
             await consumer()

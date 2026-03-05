@@ -494,35 +494,17 @@ class InverseOptionPricer:
         sigma: float,
         option_type: Literal["call", "put"]
     ) -> InverseGreeks:
-        """
-        计算币本位期权的希腊字母。
-
-        Args:
-            S: 标的当前价格 (USD)
-            K: 行权价 (USD)
-            T: 到期时间（年）
-            r: 无风险利率
-            sigma: 波动率
-            option_type: "call" 或 "put"
-
-        Returns:
-            InverseGreeks对象
-        """
+        """计算币本位期权的希腊字母。"""
         InverseOptionPricer._validate_option_type(option_type)
         InverseOptionPricer._validate_inputs(S, K, T, r, sigma)
-
         if T < InverseOptionPricer.EPSILON:
             return InverseGreeks(delta=0.0, gamma=0.0, theta=0.0, vega=0.0, rho=0.0)
-
-        # 统一计算 d1, d2
         d1, d2 = InverseOptionPricer._calculate_d1_d2(S, K, T, r, sigma)
         inv_S = 1.0 / S
         inv_K = 1.0 / K
         discount = np.exp(-r * T)
         sqrt_T = np.sqrt(T)
         n_d1 = norm.pdf(d1)
-
-        # 使用辅助函数计算希腊字母
         context = _GreeksComputationContext(
             inv_S=inv_S,
             inv_K=inv_K,
