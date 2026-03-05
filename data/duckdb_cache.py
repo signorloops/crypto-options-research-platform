@@ -63,6 +63,53 @@ def _validate_timeframe(timeframe: str) -> str:
     raise ValueError(f"Invalid timeframe: {timeframe}. Use format like '1min', '5min', '1H', '1D'")
 
 
+def _time_range_clause(
+    *,
+    start: Optional[datetime],
+    end: Optional[datetime],
+) -> tuple[str, dict[str, datetime]]:
+    if start and end:
+        return "WHERE timestamp >= $start AND timestamp <= $end", {
+            "start": start,
+            "end": end,
+        }
+    if start:
+        return "WHERE timestamp >= $start", {"start": start}
+    if end:
+        return "WHERE timestamp <= $end", {"end": end}
+    return "", {}
+
+
+def _ohlcv_resample_query(
+    *,
+    safe_table: str,
+    safe_timeframe: str,
+    where_clause: str,
+) -> str:
+    return f"""
+            WITH bucketed AS (
+                SELECT
+                    time_bucket(INTERVAL '{safe_timeframe}', timestamp) as bucket,
+                    timestamp,
+                    mid,
+                    ROW_NUMBER() OVER (PARTITION BY time_bucket(INTERVAL '{safe_timeframe}', timestamp) ORDER BY timestamp) as rn_asc,
+                    ROW_NUMBER() OVER (PARTITION BY time_bucket(INTERVAL '{safe_timeframe}', timestamp) ORDER BY timestamp DESC) as rn_desc
+                FROM {safe_table}
+                {where_clause}
+            )
+            SELECT
+                bucket as timestamp,
+                MAX(CASE WHEN rn_asc = 1 THEN mid END) as open,
+                MAX(mid) as high,
+                MIN(mid) as low,
+                MAX(CASE WHEN rn_desc = 1 THEN mid END) as close,
+                COUNT(*) as tick_count
+            FROM bucketed
+            GROUP BY bucket
+            ORDER BY bucket
+        """
+
+
 class DuckDBCache:
     """
     DuckDB-based cache for local market data analytics.
@@ -288,16 +335,7 @@ class DuckDBCache:
     ) -> Dict[str, Any]:
         """Get price statistics for a table/view over an optional time range."""
         safe_table = _sanitize_identifier(table_name)
-        where_clause = ""
-        params = {}
-        if start and end:
-            where_clause = "WHERE timestamp >= $start AND timestamp <= $end"
-            params = {"start": start, "end": end}
-        elif start:
-            where_clause = "WHERE timestamp >= $start"
-            params = {"start": start}
-        elif end:
-            where_clause = "WHERE timestamp <= $end"; params = {"end": end}
+        where_clause, params = _time_range_clause(start=start, end=end)
         query = f"""
             SELECT
                 COUNT(*) as count,
@@ -313,39 +351,22 @@ class DuckDBCache:
         result = self.query(query, params if params else None)
         return result.iloc[0].to_dict()
 
-    def resample_ohlcv(self, table_name: str, timeframe: str = "1H", start: Optional[datetime] = None, end: Optional[datetime] = None) -> pd.DataFrame:
+    def resample_ohlcv(
+        self,
+        table_name: str,
+        timeframe: str = "1H",
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
+    ) -> pd.DataFrame:
         """Resample tick/trade data to OHLCV buckets."""
-        safe_table = _sanitize_identifier(table_name); where_clause, params = "", {}
-        if start and end:
-            where_clause = "WHERE timestamp >= $start AND timestamp <= $end"; params = {"start": start, "end": end}
-        elif start:
-            where_clause = "WHERE timestamp >= $start"
-            params = {"start": start}
-        elif end:
-            where_clause = "WHERE timestamp <= $end"
-            params = {"end": end}
-        safe_timeframe = _validate_timeframe(timeframe); query = f"""
-            WITH bucketed AS (
-                SELECT
-                    time_bucket(INTERVAL '{safe_timeframe}', timestamp) as bucket,
-                    timestamp,
-                    mid,
-                    ROW_NUMBER() OVER (PARTITION BY time_bucket(INTERVAL '{safe_timeframe}', timestamp) ORDER BY timestamp) as rn_asc,
-                    ROW_NUMBER() OVER (PARTITION BY time_bucket(INTERVAL '{safe_timeframe}', timestamp) ORDER BY timestamp DESC) as rn_desc
-                FROM {safe_table}
-                {where_clause}
-            )
-            SELECT
-                bucket as timestamp,
-                MAX(CASE WHEN rn_asc = 1 THEN mid END) as open,
-                MAX(mid) as high,
-                MIN(mid) as low,
-                MAX(CASE WHEN rn_desc = 1 THEN mid END) as close,
-                COUNT(*) as tick_count
-            FROM bucketed
-            GROUP BY bucket
-            ORDER BY bucket
-        """
+        safe_table = _sanitize_identifier(table_name)
+        where_clause, params = _time_range_clause(start=start, end=end)
+        safe_timeframe = _validate_timeframe(timeframe)
+        query = _ohlcv_resample_query(
+            safe_table=safe_table,
+            safe_timeframe=safe_timeframe,
+            where_clause=where_clause,
+        )
         return self.query(query, params if params else None)
 
     def export_to_parquet(

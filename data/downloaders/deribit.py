@@ -30,6 +30,156 @@ SNAPSHOT_RATE_LIMIT_SLEEP_SECONDS = 0.05
 TICK_RESAMPLE_FREQUENCY = "1s"
 
 
+def _cached_frame_or_none(
+    *,
+    cache: "DataCache",
+    exchange: str,
+    data_type: str,
+    instrument: str,
+    start: datetime,
+    end: datetime,
+    use_cache: bool,
+) -> Optional[pd.DataFrame]:
+    if not use_cache:
+        return None
+    return cache.get(exchange, data_type, instrument, start, end)
+
+
+def _cache_range_if_nonempty(
+    *,
+    cache: "DataCache",
+    df: pd.DataFrame,
+    exchange: str,
+    data_type: str,
+    instrument: str,
+    use_cache: bool,
+) -> None:
+    if use_cache and df is not None and not df.empty:
+        cache.put_range(df, exchange, data_type, instrument)
+
+
+def _recent_cached_nonempty(
+    *,
+    cache: "DataCache",
+    exchange: str,
+    data_type: str,
+    instrument: str,
+    now: datetime,
+    hours: int,
+    use_cache: bool,
+) -> Optional[pd.DataFrame]:
+    if not use_cache:
+        return None
+    start = now - timedelta(hours=hours)
+    cached = cache.get(exchange, data_type, instrument, start, now)
+    if cached is None or cached.empty:
+        return None
+    return cached
+
+
+def _greeks_dataframe(greeks: Dict[str, Any], instrument: str, now: datetime) -> pd.DataFrame:
+    df = pd.DataFrame([greeks])
+    df["instrument"] = instrument
+    df["timestamp"] = now
+    return df
+
+
+def _cached_greeks_frame(
+    *,
+    cache: "DataCache",
+    instrument: str,
+    now: datetime,
+    use_cache: bool,
+) -> Optional[pd.DataFrame]:
+    return _recent_cached_nonempty(
+        cache=cache,
+        exchange="deribit",
+        data_type="greeks",
+        instrument=instrument,
+        now=now,
+        hours=24,
+        use_cache=use_cache,
+    )
+
+
+async def _fetch_greeks_frame(
+    *,
+    client: "DeribitClient",
+    instrument: str,
+    now: datetime,
+) -> Optional[pd.DataFrame]:
+    async with client:
+        greeks = await client.get_option_greeks(instrument)
+    if greeks is None:
+        return None
+    return _greeks_dataframe(greeks, instrument, now)
+
+
+def _cache_greeks_frame_if_enabled(
+    *,
+    cache: "DataCache",
+    df: pd.DataFrame,
+    instrument: str,
+    now: datetime,
+    use_cache: bool,
+) -> None:
+    if use_cache:
+        cache.put(df, "deribit", "greeks", instrument, now)
+
+
+async def _download_greeks_with_cache(
+    *,
+    cache: "DataCache",
+    client: "DeribitClient",
+    instrument: str,
+    use_cache: bool,
+) -> Optional[pd.DataFrame]:
+    now = datetime.now(timezone.utc)
+    cached = _cached_greeks_frame(
+        cache=cache,
+        instrument=instrument,
+        now=now,
+        use_cache=use_cache,
+    )
+    if cached is not None:
+        return cached
+    df = await _fetch_greeks_frame(
+        client=client,
+        instrument=instrument,
+        now=now,
+    )
+    if df is None:
+        return None
+    _cache_greeks_frame_if_enabled(
+        cache=cache,
+        df=df,
+        instrument=instrument,
+        now=now,
+        use_cache=use_cache,
+    )
+    return df
+
+
+def _dvol_time_window(period_days: int) -> Tuple[datetime, datetime]:
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(days=period_days)
+    return start, end
+
+
+def _trades_to_ticks(trades_df: pd.DataFrame) -> pd.DataFrame:
+    if len(trades_df) == 0:
+        return pd.DataFrame()
+    ticks = trades_df.copy()
+    ticks["timestamp"] = pd.to_datetime(ticks["timestamp"])
+    ticks.set_index("timestamp", inplace=True)
+    tick_df = ticks.resample(TICK_RESAMPLE_FREQUENCY).agg(
+        {"price": ["first", "last", "max", "min"], "size": "sum"}
+    )
+    tick_df.columns = ["open", "close", "high", "low", "volume"]
+    tick_df = tick_df.dropna()
+    return tick_df.reset_index()
+
+
 class DeribitAPIError(Exception):
     """Deribit API error."""
 
@@ -376,36 +526,49 @@ class DeribitDataDownloader:
         self, instrument: str, timestamps: List[datetime], use_cache: bool = True
     ) -> pd.DataFrame:
         """Download order book snapshots at specific times."""
+        if (cached := self._get_cached_order_book_snapshots(
+            instrument=instrument, timestamps=timestamps, use_cache=use_cache
+        )) is not None:
+            return cached
         snapshots = []
-        if use_cache and len(timestamps) > 0:
-            start, end = min(timestamps), max(timestamps)
-            if self.cache.exists("deribit", "orderbook", instrument, start, end):
-                cached = self.cache.get("deribit", "orderbook", instrument, start, end)
-                if cached is not None:
-                    return cached
         logger.info("Downloading order book snapshots", extra=log_extra(count=len(timestamps)))
+        should_throttle = len(timestamps) > SNAPSHOT_RATE_LIMIT_THRESHOLD
         async with self.client:
             for ts in timestamps:
                 ob = await self.client.get_order_book(instrument)
-                snapshots.append(
-                    {
-                        "timestamp": ts,
-                        "best_bid": ob.best_bid,
-                        "best_ask": ob.best_ask,
-                        "bid_1_size": ob.bids[0].size if ob.bids else 0,
-                        "ask_1_size": ob.asks[0].size if ob.asks else 0,
-                        "spread": ob.spread,
-                        "imbalance": ob.imbalance(),
-                        "bid_volume_5": sum(lvl.size for lvl in ob.bids[:5]),
-                        "ask_volume_5": sum(lvl.size for lvl in ob.asks[:5]),
-                    }
-                )
-                if len(timestamps) > SNAPSHOT_RATE_LIMIT_THRESHOLD:
+                snapshots.append(self._snapshot_row(ts, ob))
+                if should_throttle:
                     await asyncio.sleep(SNAPSHOT_RATE_LIMIT_SLEEP_SECONDS)
         df = pd.DataFrame(snapshots)
         if use_cache and len(df) > 0:
             self.cache.put_range(df, "deribit", "orderbook", instrument)
         return df
+
+    def _get_cached_order_book_snapshots(
+        self, *, instrument: str, timestamps: List[datetime], use_cache: bool
+    ) -> Optional[pd.DataFrame]:
+        """Try reading order-book snapshots from cache for the requested window."""
+        if not use_cache or not timestamps:
+            return None
+        start, end = min(timestamps), max(timestamps)
+        if not self.cache.exists("deribit", "orderbook", instrument, start, end):
+            return None
+        return self.cache.get("deribit", "orderbook", instrument, start, end)
+
+    @staticmethod
+    def _snapshot_row(ts: datetime, ob: OrderBook) -> Dict[str, Any]:
+        """Convert one order-book snapshot into a tabular row."""
+        return {
+            "timestamp": ts,
+            "best_bid": ob.best_bid,
+            "best_ask": ob.best_ask,
+            "bid_1_size": ob.bids[0].size if ob.bids else 0,
+            "ask_1_size": ob.asks[0].size if ob.asks else 0,
+            "spread": ob.spread,
+            "imbalance": ob.imbalance(),
+            "bid_volume_5": sum(lvl.size for lvl in ob.bids[:5]),
+            "ask_volume_5": sum(lvl.size for lvl in ob.asks[:5]),
+        }
 
     async def download_tick_data(
         self, instrument: str, start: datetime, end: datetime, use_cache: bool = True
@@ -413,33 +576,30 @@ class DeribitDataDownloader:
         """
         Download tick-level data (best bid/ask over time).
         """
-        if use_cache:
-            cached = self.cache.get("deribit", "ticks", instrument, start, end)
-            if cached is not None:
-                return cached
+        cached = _cached_frame_or_none(
+            cache=self.cache,
+            exchange="deribit",
+            data_type="ticks",
+            instrument=instrument,
+            start=start,
+            end=end,
+            use_cache=use_cache,
+        )
+        if cached is not None:
+            return cached
 
         # Deribit doesn't have direct tick endpoint, so we construct from trades
         trades_df = await self.download_trades(instrument, start, end, use_cache)
-
-        if len(trades_df) == 0:
-            return pd.DataFrame()
-
-        # Aggregate to 1-second ticks
-        trades_df["timestamp"] = pd.to_datetime(trades_df["timestamp"])
-        trades_df.set_index("timestamp", inplace=True)
-
-        # Resample to get OHLC-style ticks
-        tick_df = trades_df.resample(TICK_RESAMPLE_FREQUENCY).agg(
-            {"price": ["first", "last", "max", "min"], "size": "sum"}
+        tick_df = _trades_to_ticks(trades_df)
+        _cache_range_if_nonempty(
+            cache=self.cache,
+            df=tick_df,
+            exchange="deribit",
+            data_type="ticks",
+            instrument=instrument,
+            use_cache=use_cache,
         )
-
-        tick_df.columns = ["open", "close", "high", "low", "volume"]
-        tick_df = tick_df.dropna()
-
-        if use_cache and len(tick_df) > 0:
-            self.cache.put_range(tick_df.reset_index(), "deribit", "ticks", instrument)
-
-        return tick_df.reset_index()
+        return tick_df
 
     async def download_greeks(
         self, instrument: str, use_cache: bool = True
@@ -454,27 +614,12 @@ class DeribitDataDownloader:
         Returns:
             DataFrame with Greeks or None if not an option
         """
-        if use_cache:
-            start, end = self._recent_cache_bounds(hours=24)
-            cached = self.cache.get("deribit", "greeks", instrument, start, end)
-            if cached is not None and not cached.empty:
-                return cached
-
-        async with self.client:
-            greeks = await self.client.get_option_greeks(instrument)
-
-        if greeks is None:
-            return None
-
-        df = pd.DataFrame([greeks])
-        df["instrument"] = instrument
-        now = datetime.now(timezone.utc)
-        df["timestamp"] = now
-
-        if use_cache:
-            self.cache.put(df, "deribit", "greeks", instrument, now)
-
-        return df
+        return await _download_greeks_with_cache(
+            cache=self.cache,
+            client=self.client,
+            instrument=instrument,
+            use_cache=use_cache,
+        )
 
     async def download_iv(self, instrument: str, use_cache: bool = True) -> Optional[float]:
         """
@@ -507,34 +652,33 @@ class DeribitDataDownloader:
     async def download_volatility_index(
         self, currency: str = "BTC", period_days: int = 30, use_cache: bool = True
     ) -> pd.DataFrame:
-        """
-        Download DVOL (Deribit Volatility Index) history.
-
-        Args:
-            currency: 'BTC' or 'ETH'
-            period_days: Number of days of history
-            use_cache: Whether to use cache
-
-        Returns:
-            DataFrame with DVOL history
-        """
-        end = datetime.now(timezone.utc)
-        start = end - timedelta(days=period_days)
-
-        if use_cache:
-            cached = self.cache.get("deribit", "dvol", currency, start, end)
-            if cached is not None and not cached.empty:
-                return cached
+        """Download DVOL (Deribit volatility index) history."""
+        start, end = _dvol_time_window(period_days)
+        cached = _cached_frame_or_none(
+            cache=self.cache,
+            exchange="deribit",
+            data_type="dvol",
+            instrument=currency,
+            start=start,
+            end=end,
+            use_cache=use_cache,
+        )
+        if cached is not None and not cached.empty:
+            return cached
 
         logger.info("Downloading DVOL data", extra=log_extra(currency=currency))
-
         async with self.client:
             df = await self.client.get_volatility_index_history(
                 currency=currency, resolution="1D", start=start, end=end
             )
-
-        if use_cache and not df.empty:
-            self.cache.put_range(df, "deribit", "dvol", currency)
+        _cache_range_if_nonempty(
+            cache=self.cache,
+            df=df,
+            exchange="deribit",
+            data_type="dvol",
+            instrument=currency,
+            use_cache=use_cache,
+        )
 
         return df
 

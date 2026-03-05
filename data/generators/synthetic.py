@@ -266,28 +266,15 @@ class TradeFlowSimulator:
         rng = np.random.default_rng() if rng is None else rng
         trades = []
         for i, row in price_path.iterrows():
-            row_returns = float(row["returns"])
-            arrival_rate = self._compute_arrival_rate(row_returns)
-            n_trades = rng.poisson(arrival_rate * 3600)
+            row_returns = float(row["returns"]); n_trades = rng.poisson(self._compute_arrival_rate(row_returns) * 3600)
             for _ in range(n_trades):
                 offset_ms = int(rng.integers(0, 3600 * 1000))
                 timestamp = row["timestamp"] + timedelta(milliseconds=offset_ms)
                 is_informed = rng.random() < self.informed_trade_prob
                 side = self._select_trade_side(is_informed=is_informed, row_index=i, row_returns=row_returns, rng=rng)
-                size = self._sample_trade_size(is_informed=is_informed, rng=rng)
                 price = self._sample_trade_price(row_price=float(row["price"]), side=side, row_index=i, order_books=order_books, rng=rng)
-                trades.append({
-                    "timestamp": timestamp,
-                    "price": price,
-                    "size": round(size, 4),
-                    "side": side.value,
-                    "is_informed": is_informed
-                })
-
-        df = pd.DataFrame(trades)
-        if not df.empty:
-            df = df.sort_values("timestamp").reset_index(drop=True)
-        return df
+                trades.append({"timestamp": timestamp, "price": price, "size": round(self._sample_trade_size(is_informed=is_informed, rng=rng), 4), "side": side.value, "is_informed": is_informed})
+        return pd.DataFrame(trades).sort_values("timestamp").reset_index(drop=True) if trades else pd.DataFrame()
 
 
 class OptionMarketSimulator:

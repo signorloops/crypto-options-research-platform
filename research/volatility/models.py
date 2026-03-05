@@ -166,20 +166,63 @@ def ewma_series(returns: np.ndarray, lambda_param: float = 0.94,
         return np.array([])
     alpha = 1 - lambda_param
     r2 = returns ** 2
+    init_var = _ewma_initial_variance(returns=returns, squared_returns=r2)
+    variances = _ewma_variances(
+        squared_returns=r2,
+        lambda_param=lambda_param,
+        alpha=alpha,
+        init_var=init_var,
+    )
+    vols = np.sqrt(np.maximum(variances, 0))
+    if annualize:
+        vols *= np.sqrt(periods)
+    return vols
+
+
+def _ewma_initial_variance(
+    *, returns: np.ndarray, squared_returns: np.ndarray
+) -> float:
+    return float(np.var(returns) if len(returns) > 1 else squared_returns[0])
+
+
+def _ewma_variances(
+    *,
+    squared_returns: np.ndarray,
+    lambda_param: float,
+    alpha: float,
+    init_var: float,
+) -> np.ndarray:
     try:
         from scipy.signal import lfilter
-        init_var = np.var(returns) if len(returns) > 1 else r2[0]
-        variances = lfilter([alpha], [1, -lambda_param], r2,
-                            zi=[init_var * lambda_param])[0]
+
+        return lfilter(
+            [alpha],
+            [1, -lambda_param],
+            squared_returns,
+            zi=[init_var * lambda_param],
+        )[0]
     except ImportError:
-        variances = np.zeros(len(returns))
-        variance = np.var(returns) if len(returns) > 1 else r2[0]
-        for i in range(len(returns)):
-            variance = lambda_param * variance + alpha * r2[i]
-            variances[i] = variance
-    vols = np.sqrt(np.maximum(variances, 0))
-    if annualize: vols *= np.sqrt(periods)
-    return vols
+        return _ewma_variances_iterative(
+            squared_returns=squared_returns,
+            lambda_param=lambda_param,
+            alpha=alpha,
+            init_var=init_var,
+        )
+
+
+def _ewma_variances_iterative(
+    *,
+    squared_returns: np.ndarray,
+    lambda_param: float,
+    alpha: float,
+    init_var: float,
+) -> np.ndarray:
+    variances = np.zeros(len(squared_returns))
+    variance = init_var
+    for i, value in enumerate(squared_returns):
+        variance = lambda_param * variance + alpha * value
+        variances[i] = variance
+    return variances
 
 
 def garch_volatility(returns: np.ndarray, omega: float = 0.000001,
@@ -204,38 +247,54 @@ def garch_volatility(returns: np.ndarray, omega: float = 0.000001,
     return float(vol)
 
 
+def _default_garch_params(values: np.ndarray) -> Tuple[float, float, float]:
+    return float(np.var(values) * 0.01), 0.1, 0.85
+
+
+def _garch_neg_log_likelihood(
+    params: np.ndarray,
+    values: np.ndarray,
+    init_variance: float,
+) -> float:
+    omega, alpha, beta = params
+    if omega <= 0 or alpha < 0 or beta < 0 or alpha + beta >= 1:
+        return 1e10
+    ll = _garch_log_likelihood_fast(values, omega, alpha, beta, init_variance)
+    if not np.isfinite(ll):
+        return 1e10
+    return float(-ll)
+
+
+def _clip_stationary_garch_params(omega: float, alpha: float, beta: float) -> Tuple[float, float, float]:
+    alpha_clipped = max(0.0, min(alpha, 0.5))
+    beta_clipped = max(0.0, min(beta, 0.99))
+    if alpha_clipped + beta_clipped >= 1.0:
+        beta_clipped = 0.99 - alpha_clipped
+    return float(omega), float(alpha_clipped), float(beta_clipped)
+
+
 def estimate_garch_params(returns: np.ndarray) -> Tuple[float, float, float]:
     """Estimate GARCH(1,1) parameters with constrained maximum likelihood."""
     values = np.asarray(returns, dtype=np.float64)
-    if len(values) < 30 or not HAS_SCIPY: return (float(np.var(values) * 0.01), 0.1, 0.85)
+    omega_init, alpha_init, beta_init = _default_garch_params(values)
+    if len(values) < 30 or not HAS_SCIPY:
+        return omega_init, alpha_init, beta_init
+
     var_returns = float(np.var(values))
-    omega_init, alpha_init, beta_init = var_returns * 0.01, 0.1, 0.85
-    def neg_log_likelihood(params):
-        """Negative log-likelihood for minimization."""
-        omega, alpha, beta = params
-        if omega <= 0 or alpha < 0 or beta < 0 or alpha + beta >= 1:
-            return 1e10
-        ll = _garch_log_likelihood_fast(values, omega, alpha, beta, var_returns)
-        if not np.isfinite(ll):
-            return 1e10
-        return float(-ll)
     bounds = [(1e-8, None), (0, 0.5), (0, 0.99)]
-    constraints = {'type': 'ineq', 'fun': lambda x: 0.999 - x[1] - x[2]}
+    constraints = {"type": "ineq", "fun": lambda x: 0.999 - x[1] - x[2]}
     result = minimize(
-        neg_log_likelihood,
+        _garch_neg_log_likelihood,
         [omega_init, alpha_init, beta_init],
-        method='SLSQP',
+        args=(values, var_returns),
+        method="SLSQP",
         bounds=bounds,
         constraints=constraints,
-        options={'maxiter': 1000, 'ftol': 1e-8}
+        options={"maxiter": 1000, "ftol": 1e-8},
     )
     if result.success:
         omega, alpha, beta = result.x
-        alpha = max(0.0, min(alpha, 0.5))
-        beta = max(0.0, min(beta, 0.99))
-        if alpha + beta >= 1.0:
-            beta = 0.99 - alpha
-        return (float(omega), float(alpha), float(beta))
+        return _clip_stationary_garch_params(float(omega), float(alpha), float(beta))
     return (omega_init, alpha_init, beta_init)
 
 

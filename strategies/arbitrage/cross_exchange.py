@@ -48,6 +48,43 @@ class ExchangeFees:
     deposit_fee: float = 0.0  # 充值费
 
 
+def _currency_universe(pair_prices: Dict[str, float]) -> List[str]:
+    return sorted({currency for pair in pair_prices for currency in pair.split("/")})
+
+
+def _iter_triangular_paths(start_currency: str, currencies: List[str]) -> List[List[str]]:
+    paths: List[List[str]] = []
+    for b in currencies:
+        if b == start_currency:
+            continue
+        for c in currencies:
+            if c == start_currency or c == b:
+                continue
+            paths.append(
+                [f"{start_currency}/{b}", f"{b}/{c}", f"{c}/{start_currency}"]
+            )
+    return paths
+
+
+def _path_has_positive_prices(path: List[str], pair_prices: Dict[str, float]) -> bool:
+    for pair in path:
+        price = pair_prices.get(pair)
+        if price is None or price <= 0:
+            return False
+    return True
+
+
+def _triangular_end_amount(
+    *,
+    path: List[str],
+    pair_prices: Dict[str, float],
+    start_amount: float,
+) -> float:
+    amount_b = start_amount / pair_prices[path[0]]
+    amount_c = amount_b / pair_prices[path[1]]
+    return amount_c * pair_prices[path[2]]
+
+
 class CrossExchangeArbitrage:
     """
     跨交易所套利策略。
@@ -117,23 +154,31 @@ class CrossExchangeArbitrage:
         self.price_cache[instrument][exchange] = entry
         self._check_arbitrage(instrument)
 
-    def _check_arbitrage(self, instrument: str) -> None:
-        """检查特定交易对的套利机会。"""
+    @staticmethod
+    def _extract_entry_price(entry: object) -> float:
+        """Extract numeric price from either cached entry object or raw float."""
+        return float(entry.price) if hasattr(entry, "price") else float(entry)
+
+    def _resolve_prices(self, instrument: str, max_age_ms: Optional[float] = None) -> Dict[str, float]:
+        """Resolve per-exchange prices with optional freshness filter."""
         price_entries = self.price_cache.get(instrument, {})
-        if len(price_entries) < 2:
-            return
-        now = datetime.now(timezone.utc); prices = {}
+        if max_age_ms is None:
+            return {ex: self._extract_entry_price(entry) for ex, entry in price_entries.items()}
+        now = datetime.now(timezone.utc)
+        prices: Dict[str, float] = {}
         for ex, entry in price_entries.items():
-            if hasattr(entry, 'received_at'):
+            if hasattr(entry, "received_at"):
                 age_ms = (now - entry.received_at).total_seconds() * 1000
-                if age_ms > 200:
+                if age_ms > max_age_ms:
                     continue
-                prices[ex] = entry.price
-            else:
-                prices[ex] = entry
-        if len(prices) < 2:
-            return
-        best_opportunity: Optional[ArbitrageOpportunity] = None
+            prices[ex] = self._extract_entry_price(entry)
+        return prices
+
+    def _iter_instrument_opportunities(
+        self, instrument: str, prices: Dict[str, float]
+    ) -> List[ArbitrageOpportunity]:
+        """Generate all directional buy/sell opportunities for one instrument."""
+        opportunities: List[ArbitrageOpportunity] = []
         for buy_ex, buy_price in prices.items():
             for sell_ex, sell_price in prices.items():
                 if buy_ex == sell_ex:
@@ -145,43 +190,40 @@ class CrossExchangeArbitrage:
                     buy_price=buy_price,
                     sell_price=sell_price,
                 )
-                if opportunity is None or opportunity.spread_bps < self.min_spread_bps or opportunity.profit_pct / 100 < self.min_profit_pct:
-                    continue
-                if best_opportunity is None or opportunity.profit_pct > best_opportunity.profit_pct:
-                    best_opportunity = opportunity
+                if opportunity is not None:
+                    opportunities.append(opportunity)
+        return opportunities
+
+    def _passes_thresholds(self, opportunity: ArbitrageOpportunity) -> bool:
+        """Check spread and net-profit thresholds."""
+        return (
+            opportunity.spread_bps >= self.min_spread_bps
+            and opportunity.profit_pct / 100 >= self.min_profit_pct
+        )
+
+    def _check_arbitrage(self, instrument: str) -> None:
+        """检查特定交易对的套利机会。"""
+        prices = self._resolve_prices(instrument, max_age_ms=200.0)
+        if len(prices) < 2:
+            return
+        best_opportunity: Optional[ArbitrageOpportunity] = None
+        for opportunity in self._iter_instrument_opportunities(instrument, prices):
+            if not self._passes_thresholds(opportunity):
+                continue
+            if best_opportunity is None or opportunity.profit_pct > best_opportunity.profit_pct:
+                best_opportunity = opportunity
         if best_opportunity is not None and self.opportunity_callback:
             self.opportunity_callback(best_opportunity)
 
     def get_best_opportunities(self, top_n: int = 10) -> List[ArbitrageOpportunity]:
         """获取当前最佳套利机会（简化版，不维护历史队列）。"""
         opportunities: List[ArbitrageOpportunity] = []
-        for instrument, price_entries in self.price_cache.items():
-            # Extract prices from PriceEntry objects
-            prices = {}
-            for ex, entry in price_entries.items():
-                if hasattr(entry, 'price'):
-                    prices[ex] = entry.price
-                else:
-                    prices[ex] = entry
+        for instrument in self.price_cache:
+            prices = self._resolve_prices(instrument)
             if len(prices) < 2:
                 continue
-            for buy_ex, buy_price in prices.items():
-                for sell_ex, sell_price in prices.items():
-                    if buy_ex == sell_ex:
-                        continue
-                    opportunity = self._build_opportunity(
-                        instrument=instrument,
-                        buy_exchange=buy_ex,
-                        sell_exchange=sell_ex,
-                        buy_price=buy_price,
-                        sell_price=sell_price,
-                    )
-                    if opportunity is None:
-                        continue
-                    if opportunity.spread_bps < self.min_spread_bps:
-                        continue
-                    if opportunity.profit_pct / 100 < self.min_profit_pct:
-                        continue
+            for opportunity in self._iter_instrument_opportunities(instrument, prices):
+                if self._passes_thresholds(opportunity):
                     opportunities.append(opportunity)
         # 按净利润排序
         opportunities.sort(key=lambda x: x.profit_pct, reverse=True)
@@ -309,25 +351,23 @@ class CrossExchangeArbitrage:
         min_profit_pct: float = 0.001
     ) -> Optional[TriangularOpportunity]:
         """检查简化三角套利（3条边）: A/B -> B/C -> C/A。"""
-        currencies = sorted({currency for pair in pair_prices for currency in pair.split("/")})
-        for b in currencies:
-            for c in currencies:
-                if b == c or b == start_currency or c == start_currency:
-                    continue
-                path = [f"{start_currency}/{b}", f"{b}/{c}", f"{c}/{start_currency}"]
-                if not all(p in pair_prices and pair_prices[p] > 0 for p in path):
-                    continue
-                amount_b = start_amount / pair_prices[path[0]]
-                amount_c = amount_b / pair_prices[path[1]]
-                end_amount = amount_c * pair_prices[path[2]]
-                profit_pct = (end_amount - start_amount) / start_amount
-                if profit_pct >= min_profit_pct:
-                    return TriangularOpportunity(
-                        exchange=exchange,
-                        path=path,
-                        start_amount=float(start_amount),
-                        end_amount=float(end_amount),
-                        profit_pct=float(profit_pct * 100),
-                        timestamp=datetime.now(timezone.utc)
-                    )
+        currencies = _currency_universe(pair_prices)
+        for path in _iter_triangular_paths(start_currency, currencies):
+            if not _path_has_positive_prices(path, pair_prices):
+                continue
+            end_amount = _triangular_end_amount(
+                path=path,
+                pair_prices=pair_prices,
+                start_amount=start_amount,
+            )
+            profit_pct = (end_amount - start_amount) / start_amount
+            if profit_pct >= min_profit_pct:
+                return TriangularOpportunity(
+                    exchange=exchange,
+                    path=path,
+                    start_amount=float(start_amount),
+                    end_amount=float(end_amount),
+                    profit_pct=float(profit_pct * 100),
+                    timestamp=datetime.now(timezone.utc)
+                )
         return None

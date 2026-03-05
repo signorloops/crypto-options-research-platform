@@ -5,7 +5,7 @@ import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Set, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import websockets
 from websockets.exceptions import ConnectionClosed, WebSocketException
@@ -22,6 +22,82 @@ STREAM_CONNECTION_EXCEPTIONS = (
     asyncio.TimeoutError,
     WebSocketException,
 )
+
+
+async def _run_websocket_session(
+    *,
+    stream: "WebSocketStream",
+    url: str,
+    on_connected: Optional[Callable[[Any], Any]] = None,
+) -> None:
+    logger.info(f"Connecting to {url}...")
+    async with websockets.connect(
+        url,
+        ping_interval=stream.config.ping_interval,
+        ping_timeout=stream.config.ping_timeout,
+        close_timeout=5.0,
+        open_timeout=10.0,
+    ) as websocket:
+        stream._websocket = websocket
+        stream._reconnect_count = 0
+        logger.info("Connected!")
+        if on_connected is not None:
+            await on_connected(websocket)
+        await stream._handle_messages(websocket)
+
+
+async def _sleep_after_reconnect_signal(
+    stream: "WebSocketStream", *, message: str, include_attempt_log: bool = False
+) -> None:
+    logger.warning(message)
+    backoff = stream._next_reconnect_backoff()
+    if include_attempt_log:
+        logger.info(f"Reconnecting in {backoff:.1f}s (attempt {stream._reconnect_count})")
+    await asyncio.sleep(backoff)
+
+
+def _okx_subscription_args(instruments: List[str]) -> List[Dict[str, str]]:
+    subscriptions: List[Dict[str, str]] = []
+    for instrument in instruments:
+        subscriptions.append({"channel": "trades", "instId": instrument})
+        subscriptions.append({"channel": "tickers", "instId": instrument})
+        subscriptions.append({"channel": "books", "instId": instrument})
+    return subscriptions
+
+
+async def _send_okx_subscribe(
+    websocket: Any, *, instruments: List[str], subscriptions: List[Dict[str, str]]
+) -> None:
+    subscribe_msg = {"op": "subscribe", "args": subscriptions}
+    await websocket.send(json.dumps(subscribe_msg))
+    logger.info(f"Subscribed to {len(instruments)} instruments")
+
+
+async def _deribit_on_connected(
+    stream: "DeribitStream", websocket: Any, instruments: List[str]
+) -> None:
+    await stream._subscribe(websocket, instruments)
+
+
+def _okx_payload_item(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if data.get("event"):
+        return None
+    payload = data.get("data", [])
+    if not payload:
+        return None
+    return payload[0]
+
+
+def _okx_channel_parser(
+    stream: "OKXStream", channel: str
+) -> Tuple[Optional[str], Optional[Callable[[Dict[str, Any]], Union[Trade, Tick, OrderBook]]]]:
+    if "trades" in channel:
+        return "trade", stream._parse_trade
+    if "tickers" in channel:
+        return "tick", stream._parse_tick
+    if "books" in channel:
+        return "orderbook", stream._parse_orderbook
+    return None, None
 
 
 @dataclass
@@ -109,67 +185,70 @@ class WebSocketStream(ABC):
         url = self.get_ws_url(instruments)
         while self._running and self._reconnect_count < self.config.max_reconnects:
             try:
-                logger.info(f"Connecting to {url}...")
-                async with websockets.connect(
-                    url,
-                    ping_interval=self.config.ping_interval,
-                    ping_timeout=self.config.ping_timeout,
-                    close_timeout=5.0,
-                    open_timeout=10.0  # Timeout for connection establishment
-                ) as websocket:
-                    self._websocket = websocket
-                    self._reconnect_count = 0
-                    logger.info("Connected!")
-                    try:
-                        await self._handle_messages(websocket)
-                    except asyncio.CancelledError:
-                        logger.info("Message handling cancelled")
-                        break
+                await _run_websocket_session(stream=self, url=url)
             except ConnectionClosed:
                 if not self._running:
                     break
-                logger.warning("Connection closed, reconnecting..."); backoff = self._next_reconnect_backoff()
-                logger.info(f"Reconnecting in {backoff:.1f}s (attempt {self._reconnect_count})")
-                await asyncio.sleep(backoff)
-            except asyncio.CancelledError: logger.info("WebSocket connection cancelled"); break
+                await _sleep_after_reconnect_signal(
+                    self,
+                    message="Connection closed, reconnecting...",
+                    include_attempt_log=True,
+                )
+            except asyncio.CancelledError:
+                logger.info("WebSocket connection cancelled")
+                break
             except STREAM_CONNECTION_EXCEPTIONS as e:
                 logger.error(f"WebSocket error: {e}")
                 await asyncio.sleep(self._next_reconnect_backoff())
 
-    async def _handle_messages(self, websocket: Any) -> None:
-        message_queue: asyncio.Queue = asyncio.Queue(maxsize=1000); queue_full_logged = False
-        async def producer():
-            nonlocal queue_full_logged
-            try:
-                async for message in websocket:
-                    no_drop = self._enqueue_with_drop_oldest(message_queue, message)
-                    if no_drop: queue_full_logged = False
-                    elif not queue_full_logged:
-                        logger.warning("Message queue full, dropping old messages"); queue_full_logged = True
-            except ConnectionClosed:
-                logger.info("WebSocket connection closed in producer")
-            finally:
-                await message_queue.put(None)
-        async def consumer():
-            while True:
-                try:
-                    if (message := await message_queue.get()) is None: break
-                    try:
-                        parsed = self.parse_message(message)
-                        if parsed: await self._route_message(parsed)
-                    except (json.JSONDecodeError, KeyError, TypeError) as e:
-                        await self._emit('error', e)
-                except asyncio.CancelledError: raise
-                except Exception as e:
-                    logger.error(f"Error processing message: {e}")
-        producer_task = asyncio.create_task(producer())
+    async def _produce_messages(self, websocket: Any, message_queue: asyncio.Queue) -> None:
+        """Read from websocket and enqueue messages with drop-oldest backpressure."""
+        queue_full_logged = False
         try:
-            await consumer()
+            async for message in websocket:
+                no_drop = self._enqueue_with_drop_oldest(message_queue, message)
+                if no_drop:
+                    queue_full_logged = False
+                elif not queue_full_logged:
+                    logger.warning("Message queue full, dropping old messages")
+                    queue_full_logged = True
+        except ConnectionClosed:
+            logger.info("WebSocket connection closed in producer")
+        finally:
+            await message_queue.put(None)
+
+    async def _process_message(self, message: Any) -> None:
+        """Parse one websocket message and route events/errors."""
+        try:
+            parsed = self.parse_message(message)
+            if parsed:
+                await self._route_message(parsed)
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            await self._emit("error", e)
+
+    async def _consume_messages(self, message_queue: asyncio.Queue) -> None:
+        """Consume queued messages until producer sentinel is received."""
+        while True:
+            try:
+                if (message := await message_queue.get()) is None:
+                    break
+                await self._process_message(message)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error(f"Error processing message: {e}")
+
+    async def _handle_messages(self, websocket: Any) -> None:
+        message_queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
+        producer_task = asyncio.create_task(self._produce_messages(websocket, message_queue))
+        try:
+            await self._consume_messages(message_queue)
         finally:
             producer_task.cancel()
             try:
                 await producer_task
-            except asyncio.CancelledError: pass
+            except asyncio.CancelledError:
+                pass
 
     async def _route_message(self, parsed: Dict) -> None:
         """Route parsed message to appropriate callback."""
@@ -213,6 +292,26 @@ from data.orderbook_reconstructor import (
     OrderBookReconstructor, MultiInstrumentReconstructor,
     OrderBookDelta, ReconstructionState
 )
+
+
+def _reconstructed_orderbook(
+    *,
+    reconstructor: OrderBookReconstructor,
+    instrument: str,
+    change_id: Optional[int],
+    deltas: list[OrderBookDelta],
+    fallback: Optional[OrderBook],
+) -> Optional[OrderBook]:
+    if change_id is None:
+        return fallback
+    if reconstructor.state.last_sequence is not None:
+        expected = reconstructor.state.last_sequence + 1
+        if change_id != expected:
+            logger.warning(f"{instrument}: Gap detected! Expected {expected}, got {change_id}")
+            reconstructor.reset()
+    if deltas:
+        reconstructor.apply_deltas(deltas)
+    return reconstructor.get_order_book()
 
 
 class DeribitStream(WebSocketStream):
@@ -336,33 +435,17 @@ class DeribitStream(WebSocketStream):
         """Handle order book message with reconstruction."""
         if not self._enable_reconstruction:
             return parsed.get('order_book')
-
         instrument = parsed.get('instrument', '')
         change_id = parsed.get('change_id')
         deltas = parsed.get('deltas', [])
-
         reconstructor = self._reconstructors.get_or_create(instrument)
-
-        # Check if this is a snapshot (initial) or delta update
-        if change_id is not None:
-            # Check for gap
-            if reconstructor.state.last_sequence is not None:
-                expected = reconstructor.state.last_sequence + 1
-                if change_id != expected:
-                    logger.warning(
-                        f"{instrument}: Gap detected! Expected {expected}, got {change_id}"
-                    )
-                    # Trigger resync by resetting and treating as snapshot
-                    reconstructor.reset()
-
-            # Apply deltas
-            if deltas:
-                reconstructor.apply_deltas(deltas)
-
-            # Return reconstructed order book
-            return reconstructor.get_order_book()
-
-        return parsed.get('order_book')
+        return _reconstructed_orderbook(
+            reconstructor=reconstructor,
+            instrument=instrument,
+            change_id=change_id,
+            deltas=deltas,
+            fallback=parsed.get('order_book'),
+        )
 
     def _build_subscriptions(self, instruments: List[str]) -> List[str]:
         """Build subscription channels for instruments."""
@@ -395,30 +478,21 @@ class DeribitStream(WebSocketStream):
 
         while self._running and self._reconnect_count < self.config.max_reconnects:
             try:
-                logger.info("Connecting to Deribit WebSocket...")
-                async with websockets.connect(
-                    url,
-                    ping_interval=self.config.ping_interval,
-                    ping_timeout=self.config.ping_timeout
-                ) as websocket:
-                    self._websocket = websocket
-                    self._reconnect_count = 0
-                    logger.info("Connected!")
-
-                    # Send subscription message on EVERY connection (including reconnects)
-                    await self._subscribe(websocket, instruments)
-
-                    await self._handle_messages(websocket)
-
+                await _run_websocket_session(
+                    stream=self,
+                    url=url,
+                    on_connected=lambda websocket: _deribit_on_connected(
+                        self, websocket, instruments
+                    ),
+                )
             except ConnectionClosed:
-                logger.warning("Connection closed, reconnecting...")
-                backoff = self._next_reconnect_backoff()
-                await asyncio.sleep(backoff)
-
+                await _sleep_after_reconnect_signal(
+                    self,
+                    message="Connection closed, reconnecting...",
+                )
             except STREAM_CONNECTION_EXCEPTIONS as e:
                 logger.error(f"WebSocket error: {e}")
-                backoff = self._next_reconnect_backoff()
-                await asyncio.sleep(backoff)
+                await asyncio.sleep(self._next_reconnect_backoff())
 
 
 class OKXStream(WebSocketStream):
@@ -446,30 +520,15 @@ class OKXStream(WebSocketStream):
         """Parse OKX message format."""
         try:
             data = json.loads(message)
-
-            # Handle event messages
-            if data.get("event"):
-                return None
-
-            # Handle data messages
             arg = data.get("arg", {})
             channel = arg.get("channel", "")
-            payload = data.get("data", [])
-
-            if not payload:
+            item = _okx_payload_item(data)
+            if item is None:
                 return None
-
-            item = payload[0]
-
-            if "trades" in channel:
-                return {"type": "trade", "data": self._parse_trade(item)}
-            elif "tickers" in channel:
-                return {"type": "tick", "data": self._parse_tick(item)}
-            elif "books" in channel:
-                return {"type": "orderbook", "data": self._parse_orderbook(item)}
-
-            return None
-
+            event_type, parser = _okx_channel_parser(self, channel)
+            if event_type is None or parser is None:
+                return None
+            return {"type": event_type, "data": parser(item)}
         except json.JSONDecodeError:
             return None
 
@@ -518,34 +577,25 @@ class OKXStream(WebSocketStream):
     async def connect(self, instruments: Optional[List[str]] = None) -> None:
         """Override to send subscription messages after connection."""
         instruments = instruments or self.instruments
-        subscriptions = []
-        for instrument in instruments:
-            subscriptions.append({"channel": "trades", "instId": instrument})
-            subscriptions.append({"channel": "tickers", "instId": instrument})
-            subscriptions.append({"channel": "books", "instId": instrument})
+        subscriptions = _okx_subscription_args(instruments)
         self._running = True
         url = self.WS_URL
         while self._running and self._reconnect_count < self.config.max_reconnects:
             try:
-                logger.info("Connecting to OKX WebSocket...")
-                async with websockets.connect(
-                    url,
-                    ping_interval=self.config.ping_interval,
-                    ping_timeout=self.config.ping_timeout
-                ) as websocket:
-                    self._websocket = websocket
-                    self._reconnect_count = 0
-                    logger.info("Connected!")
-                    subscribe_msg = {
-                        "op": "subscribe",
-                        "args": subscriptions
-                    }
-                    await websocket.send(json.dumps(subscribe_msg))
-                    logger.info(f"Subscribed to {len(instruments)} instruments")
-                    await self._handle_messages(websocket)
+                await _run_websocket_session(
+                    stream=self,
+                    url=url,
+                    on_connected=lambda websocket: _send_okx_subscribe(
+                        websocket,
+                        instruments=instruments,
+                        subscriptions=subscriptions,
+                    ),
+                )
             except ConnectionClosed:
-                logger.warning("Connection closed, reconnecting...")
-                await asyncio.sleep(self._next_reconnect_backoff())
+                await _sleep_after_reconnect_signal(
+                    self,
+                    message="Connection closed, reconnecting...",
+                )
             except STREAM_CONNECTION_EXCEPTIONS as e:
                 logger.error(f"WebSocket error: {e}")
                 await asyncio.sleep(self._next_reconnect_backoff())

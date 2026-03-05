@@ -60,6 +60,35 @@ def _option_schema_available(aligned_positions: pd.DataFrame) -> bool:
     return option_fields.issubset(set(aligned_positions.columns))
 
 
+def _validate_positions_frame(positions: pd.DataFrame) -> None:
+    if "value" not in positions.columns:
+        raise ValueError("positions must contain 'value' column")
+    if positions.empty:
+        raise ValueError("positions must not be empty")
+    if positions.index.has_duplicates:
+        raise ValueError("positions index must be unique")
+
+
+def _validated_position_values(positions: pd.DataFrame) -> pd.Series:
+    position_values = positions["value"].astype(float)
+    if not np.all(np.isfinite(position_values.values)):
+        raise ValueError("positions values must be finite")
+    return position_values
+
+
+def _validate_and_align_returns(returns: pd.DataFrame, assets: list[Any]) -> pd.DataFrame:
+    if returns.empty:
+        raise ValueError("returns must not be empty")
+    missing_assets = [asset for asset in assets if asset not in returns.columns]
+    if missing_assets:
+        missing_str = ", ".join(map(str, missing_assets))
+        raise ValueError(f"missing return series for assets: {missing_str}")
+    aligned_returns = returns.loc[:, assets]
+    if not np.isfinite(aligned_returns.to_numpy()).all():
+        raise ValueError("returns must be finite")
+    return aligned_returns
+
+
 def _compute_monte_carlo_pnl(
     *,
     calculator: "VaRCalculator",
@@ -111,18 +140,8 @@ class VaRCalculator:
         self, positions: pd.DataFrame, returns: pd.DataFrame
     ) -> tuple[float, np.ndarray, pd.DataFrame]:
         """Validate inputs and align returns columns to positions index."""
-        if "value" not in positions.columns:
-            raise ValueError("positions must contain 'value' column")
-        if positions.empty:
-            raise ValueError("positions must not be empty")
-        if returns.empty:
-            raise ValueError("returns must not be empty")
-        if positions.index.has_duplicates:
-            raise ValueError("positions index must be unique")
-
-        position_values = positions["value"].astype(float)
-        if not np.all(np.isfinite(position_values.values)):
-            raise ValueError("positions values must be finite")
+        _validate_positions_frame(positions)
+        position_values = _validated_position_values(positions)
 
         # Use gross exposure as risk scaling base so long/short books are supported.
         total_value = float(np.abs(position_values.values).sum())
@@ -130,15 +149,7 @@ class VaRCalculator:
             raise ValueError("total portfolio value must be non-zero")
 
         assets = list(positions.index)
-        missing_assets = [asset for asset in assets if asset not in returns.columns]
-        if missing_assets:
-            missing_str = ", ".join(map(str, missing_assets))
-            raise ValueError(f"missing return series for assets: {missing_str}")
-
-        aligned_returns = returns.loc[:, assets]
-        if not np.isfinite(aligned_returns.to_numpy()).all():
-            raise ValueError("returns must be finite")
-
+        aligned_returns = _validate_and_align_returns(returns, assets)
         weights = position_values.values / total_value
         return total_value, weights, aligned_returns
 
@@ -202,16 +213,14 @@ class VaRCalculator:
             return VaRResult(0.0, 0.0, 0.0, 0.0, method="cornish_fisher")
         skew = stats.skew(portfolio_returns, bias=False)
         kurt = stats.kurtosis(portfolio_returns, fisher=False, bias=False)
-        def cf_quantile(alpha: float) -> float:
-            z = stats.norm.ppf(alpha)
-            return (
-                z
-                + (z**2 - 1) * skew / 6.0
-                + (z**3 - 3 * z) * (kurt - 3.0) / 24.0
-                - (2 * z**3 - 5 * z) * (skew**2) / 36.0
-            )
-        z95 = cf_quantile(0.95)
-        z99 = cf_quantile(0.99)
+        z = stats.norm.ppf(np.array([0.95, 0.99]))
+        cf = (
+            z
+            + (z**2 - 1) * skew / 6.0
+            + (z**3 - 3 * z) * (kurt - 3.0) / 24.0
+            - (2 * z**3 - 5 * z) * (skew**2) / 36.0
+        )
+        z95, z99 = map(float, cf)
         var_95 = total_value * max(0.0, -mu + z95 * sigma)
         var_99 = total_value * max(0.0, -mu + z99 * sigma)
         cvar_95 = total_value * max(0.0, -mu + sigma * stats.norm.pdf(z95) / 0.05)
@@ -227,28 +236,20 @@ class VaRCalculator:
         total_value, weights_arr, aligned_returns = self._prepare_portfolio_inputs(
             positions, returns
         )
-        portfolio_returns = pd.Series(
-            aligned_returns.to_numpy() @ weights_arr, index=aligned_returns.index
-        )
+        portfolio_returns = self._portfolio_return_series(aligned_returns, weights_arr)
         if holding_period > 1:
             n_periods = len(portfolio_returns) // holding_period
-            if n_periods > 0:
-                reshaped = portfolio_returns.iloc[: n_periods * holding_period].values.reshape(
-                    n_periods, holding_period
-                )
-                portfolio_returns = pd.Series(reshaped.sum(axis=1))
-            else:
-                portfolio_returns = portfolio_returns * np.sqrt(holding_period)
-        var_95 = -np.percentile(portfolio_returns, 5) * total_value
-        var_99 = -np.percentile(portfolio_returns, 1) * total_value
-        cvar_95 = (
-            -portfolio_returns[portfolio_returns <= np.percentile(portfolio_returns, 5)].mean()
-            * total_value
-        )
-        cvar_99 = (
-            -portfolio_returns[portfolio_returns <= np.percentile(portfolio_returns, 1)].mean()
-            * total_value
-        )
+            portfolio_returns = (
+                portfolio_returns[: n_periods * holding_period].reshape(n_periods, holding_period).sum(axis=1)
+                if n_periods > 0
+                else portfolio_returns * np.sqrt(holding_period)
+            )
+        q95 = np.percentile(portfolio_returns, 5)
+        q99 = np.percentile(portfolio_returns, 1)
+        var_95 = -q95 * total_value
+        var_99 = -q99 * total_value
+        cvar_95 = -portfolio_returns[portfolio_returns <= q95].mean() * total_value
+        cvar_99 = -portfolio_returns[portfolio_returns <= q99].mean() * total_value
         return VaRResult(
             var_95=var_95, var_99=var_99, cvar_95=cvar_95, cvar_99=cvar_99, method="historical"
         )

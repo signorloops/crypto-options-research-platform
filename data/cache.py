@@ -16,6 +16,129 @@ logger = get_logger(__name__)
 import os
 
 
+def _day_floor(value: datetime) -> datetime:
+    return value.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _iter_days_inclusive(start: datetime, end: datetime):
+    current = _day_floor(start)
+    end_date = _day_floor(end)
+    while current <= end_date:
+        yield current
+        current += timedelta(days=1)
+
+
+def _read_cached_parquet(cache_path: Path) -> Optional[pd.DataFrame]:
+    try:
+        return pd.read_parquet(cache_path)
+    except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError) as exc:
+        logger.warning(
+            "Failed to read cache file",
+            extra=log_extra(path=str(cache_path), error=str(exc)),
+        )
+        return None
+
+
+def _clip_to_timestamp_range(df: pd.DataFrame, start: datetime, end: datetime) -> pd.DataFrame:
+    if "timestamp" not in df.columns:
+        return df.reset_index(drop=True)
+
+    clipped = df.copy()
+    clipped["timestamp"] = pd.to_datetime(clipped["timestamp"])
+    if start == end and start.hour == 0 and start.minute == 0:
+        end = end + timedelta(days=1) - timedelta(microseconds=1)
+    clipped = clipped[
+        (clipped["timestamp"] >= start) & (clipped["timestamp"] <= end)
+    ]
+    return clipped.reset_index(drop=True)
+
+
+def _cache_first_lookup(
+    *,
+    cache: "DataCache",
+    exchange: str,
+    data_type: str,
+    instrument: str,
+    start: datetime,
+    end: datetime,
+) -> Optional[pd.DataFrame]:
+    if not cache.exists(exchange, data_type, instrument, start, end):
+        return None
+    cached = cache.get(exchange, data_type, instrument, start, end)
+    if cached is not None:
+        return cached
+    logger.warning(
+        "Cache exists but read returned no data; falling back to downloader",
+        extra=log_extra(
+            exchange=exchange,
+            data_type=data_type,
+            instrument=instrument,
+            start=start.isoformat(),
+            end=end.isoformat(),
+        ),
+    )
+    return None
+
+
+async def _download_data(
+    downloader,
+    *,
+    instrument: str,
+    start: datetime,
+    end: datetime,
+) -> pd.DataFrame:
+    if downloader is None:
+        raise ValueError("Data not cached and no downloader provided")
+    return await downloader(instrument, start, end)
+
+
+def _write_cache_if_nonempty(
+    *,
+    cache: "DataCache",
+    data: Optional[pd.DataFrame],
+    exchange: str,
+    data_type: str,
+    instrument: str,
+) -> None:
+    if data is None or len(data) == 0:
+        return
+    cache.put_range(data, exchange, data_type, instrument)
+
+
+async def _get_data_with_optional_cache(
+    *,
+    cache: "DataCache",
+    exchange: str,
+    data_type: str,
+    instrument: str,
+    start: datetime,
+    end: datetime,
+    downloader,
+    use_cache: bool,
+) -> pd.DataFrame:
+    if use_cache:
+        cached = _cache_first_lookup(
+            cache=cache,
+            exchange=exchange,
+            data_type=data_type,
+            instrument=instrument,
+            start=start,
+            end=end,
+        )
+        if cached is not None:
+            return cached
+    data = await _download_data(downloader, instrument=instrument, start=start, end=end)
+    if use_cache:
+        _write_cache_if_nonempty(
+            cache=cache,
+            data=data,
+            exchange=exchange,
+            data_type=data_type,
+            instrument=instrument,
+        )
+    return data
+
+
 class DataCache:
     """
     File-based cache for market data.
@@ -72,30 +195,18 @@ class DataCache:
         processed: bool = False
     ) -> Optional[pd.DataFrame]:
         """Retrieve cached data for a date range, returning None if any day is missing."""
-        if start > end: raise ValueError("start must be <= end")
-        frames = []; current = start.replace(hour=0, minute=0, second=0, microsecond=0); end_date = end.replace(hour=0, minute=0, second=0, microsecond=0)
-        while current <= end_date:
-            cache_path = self._get_cache_path(
-                exchange, data_type, instrument, current, processed
-            )
-            if not cache_path.exists():
+        if start > end:
+            raise ValueError("start must be <= end")
+        frames: List[pd.DataFrame] = []
+        for current in _iter_days_inclusive(start, end):
+            cache_path = self._get_cache_path(exchange, data_type, instrument, current, processed)
+            df = _read_cached_parquet(cache_path) if cache_path.exists() else None
+            if df is None:
                 return None
-            try:
-                df = pd.read_parquet(cache_path)
-                frames.append(df)
-            except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError) as e:
-                logger.warning("Failed to read cache file", extra=log_extra(path=str(cache_path), error=str(e)))
-                return None
-            current += timedelta(days=1)
+            frames.append(df)
         if not frames:
             return None
-        combined = pd.concat(frames, ignore_index=True)
-        if 'timestamp' in combined.columns:
-            combined['timestamp'] = pd.to_datetime(combined['timestamp'])
-            if start == end and start.hour == 0 and start.minute == 0:
-                end = end + timedelta(days=1) - timedelta(microseconds=1)
-            combined = combined[(combined['timestamp'] >= start) & (combined['timestamp'] <= end)]
-        return combined.reset_index(drop=True)
+        return _clip_to_timestamp_range(pd.concat(frames, ignore_index=True), start, end)
 
     def put(
         self,
@@ -230,38 +341,36 @@ class DataCache:
 
         return info
 
+    @staticmethod
+    def _prune_parquet_files_older_than(root: Path, cutoff: datetime) -> None:
+        """Delete parquet files with date-stem older than cutoff."""
+        for f in root.rglob("*.parquet"):
+            try:
+                file_date = datetime.strptime(f.stem, "%Y-%m-%d")
+                if file_date < cutoff:
+                    f.unlink()
+            except ValueError:
+                continue
+
     def clear_cache(self, exchange: Optional[str] = None, older_than_days: Optional[int] = None) -> None:
         """Clear cached data."""
         import shutil
+        bases = [self.raw_dir, self.processed_dir]
+        if older_than_days:
+            cutoff = datetime.now() - timedelta(days=older_than_days)
+            for base in bases:
+                target = base / exchange if exchange else base
+                if target.exists():
+                    self._prune_parquet_files_older_than(target, cutoff)
+            return
         if exchange:
-            for base in [self.raw_dir, self.processed_dir]:
+            for base in bases:
                 exchange_dir = base / exchange
                 if exchange_dir.exists():
-                    if older_than_days:
-                        cutoff = datetime.now() - timedelta(days=older_than_days)
-                        for f in exchange_dir.rglob("*.parquet"):
-                            try:
-                                file_date = datetime.strptime(f.stem, "%Y-%m-%d")
-                                if file_date < cutoff:
-                                    f.unlink()
-                            except ValueError:
-                                pass
-                    else:
-                        shutil.rmtree(exchange_dir)
+                    shutil.rmtree(exchange_dir)
         else:
-            if older_than_days:
-                cutoff = datetime.now() - timedelta(days=older_than_days)
-                for base in [self.raw_dir, self.processed_dir]:
-                    for f in base.rglob("*.parquet"):
-                        try:
-                            file_date = datetime.strptime(f.stem, "%Y-%m-%d")
-                            if file_date < cutoff:
-                                f.unlink()
-                        except ValueError:
-                            pass
-            else:
-                shutil.rmtree(self.base_dir)
-                self.base_dir.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(self.base_dir)
+            self.base_dir.mkdir(parents=True, exist_ok=True)
 
 
 class DataManager:
@@ -285,23 +394,13 @@ class DataManager:
         """Get data for a time range with cache-first behavior and downloader fallback."""
         if start > end:
             raise ValueError("start must be <= end")
-        if use_cache and self.cache.exists(exchange, data_type, instrument, start, end):
-            cached = self.cache.get(exchange, data_type, instrument, start, end)
-            if cached is not None:
-                return cached
-            logger.warning(
-                "Cache exists but read returned no data; falling back to downloader",
-                extra=log_extra(
-                    exchange=exchange,
-                    data_type=data_type,
-                    instrument=instrument,
-                    start=start.isoformat(),
-                    end=end.isoformat(),
-                ),
-            )
-        if downloader is None:
-            raise ValueError("Data not cached and no downloader provided")
-        data = await downloader(instrument, start, end)
-        if use_cache and data is not None and len(data) > 0:
-            self.cache.put_range(data, exchange, data_type, instrument)
-        return data
+        return await _get_data_with_optional_cache(
+            cache=self.cache,
+            exchange=exchange,
+            data_type=data_type,
+            instrument=instrument,
+            start=start,
+            end=end,
+            downloader=downloader,
+            use_cache=use_cache,
+        )

@@ -1,12 +1,100 @@
-"""
-Rough-volatility Monte Carlo pricer.
-"""
+"""Rough-volatility Monte Carlo pricer."""
 import time
 from dataclasses import dataclass
 from typing import Dict, Literal, Optional, Tuple
 
 import numpy as np
 from scipy.stats import norm
+
+
+def _rough_option_payoff(
+    *, terminal: np.ndarray, strike: float, option_type: Literal["call", "put"]
+) -> np.ndarray:
+    if option_type == "call":
+        return np.maximum(terminal - strike, 0.0)
+    if option_type == "put":
+        return np.maximum(strike - terminal, 0.0)
+    raise ValueError("option_type must be 'call' or 'put'")
+
+
+def _discounted_payoff_stats(
+    *, discounted: np.ndarray, confidence: float
+) -> tuple[float, float, float, float, int]:
+    price = float(np.mean(discounted))
+    n = int(len(discounted))
+    std = float(np.std(discounted, ddof=1) if n > 1 else 0.0)
+    std_error = std / np.sqrt(max(n, 1))
+    z = float(norm.ppf(0.5 + confidence / 2.0))
+    ci_low = float(price - z * std_error)
+    ci_high = float(price + z * std_error)
+    return price, float(std_error), ci_low, ci_high, n
+
+
+def _rough_pricing_result(
+    *,
+    price: float,
+    std_error: float,
+    ci_low: float,
+    ci_high: float,
+    n_paths: int,
+    sim_stats: Dict[str, object],
+    pricing_time: float,
+    total_time: float,
+) -> Dict[str, object]:
+    return {
+        "price": price,
+        "std_error": float(std_error),
+        "ci_low": float(ci_low),
+        "ci_high": float(ci_high),
+        "n_paths": float(n_paths),
+        "jump_mode": str(sim_stats.get("jump_mode", "none")),
+        "avg_jump_events_per_path": float(sim_stats.get("avg_jump_events_per_path", 0.0)),
+        "avg_jump_intensity": float(sim_stats.get("avg_jump_intensity", 0.0)),
+        "jump_intensity_std": float(sim_stats.get("jump_intensity_std", 0.0)),
+        "simulation_time_sec": float(sim_stats.get("simulation_time_sec", 0.0)),
+        "pricing_time_sec": pricing_time,
+        "total_time_sec": total_time,
+    }
+
+
+def _jump_stats(*, avg_jump_events_per_path: float, total_jump_events: float, avg_jump_intensity: float, jump_intensity_std: float) -> Dict[str, float]:
+    return {
+        "avg_jump_events_per_path": float(avg_jump_events_per_path),
+        "total_jump_events": float(total_jump_events),
+        "avg_jump_intensity": float(avg_jump_intensity),
+        "jump_intensity_std": float(jump_intensity_std),
+    }
+
+
+def _simulate_cojump_components(*, cfg: "RoughVolConfig", n_paths: int, n_steps: int, dt: float, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray, Dict[str, float]]:
+    counts = rng.poisson(cfg.jump_intensity * dt, size=(n_paths, n_steps))
+    jump_sizes = rng.normal(cfg.jump_mean, cfg.jump_std, size=(n_paths, n_steps))
+    jump_returns = counts * jump_sizes
+    var_multipliers = np.exp(cfg.variance_jump_scale * np.abs(jump_returns))
+    total_events = float(np.sum(counts))
+    avg_events = float(np.mean(np.sum(counts, axis=1)))
+    return jump_returns, var_multipliers, _jump_stats(avg_jump_events_per_path=avg_events, total_jump_events=total_events, avg_jump_intensity=cfg.jump_intensity, jump_intensity_std=0.0)
+
+
+def _simulate_clustered_jump_components(*, cfg: "RoughVolConfig", n_paths: int, n_steps: int, dt: float, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray, Dict[str, float]]:
+    jump_returns = np.zeros((n_paths, n_steps), dtype=float)
+    var_multipliers = np.ones((n_paths, n_steps), dtype=float)
+    intensity = np.full(n_paths, cfg.jump_intensity, dtype=float)
+    intensity_history = np.zeros((n_paths, n_steps), dtype=float)
+    counts = np.zeros((n_paths, n_steps), dtype=float)
+    decay = np.exp(-cfg.jump_decay * dt)
+    base = float(cfg.jump_intensity)
+    for i in range(n_steps):
+        intensity = np.clip(intensity, 0.0, cfg.max_jump_intensity)
+        intensity_history[:, i] = intensity
+        step_counts = rng.poisson(np.clip(intensity * dt, 0.0, 50.0))
+        counts[:, i] = step_counts
+        jump_returns[:, i] = step_counts * rng.normal(cfg.jump_mean, cfg.jump_std, size=n_paths)
+        var_multipliers[:, i] = np.exp(cfg.variance_jump_scale * np.abs(jump_returns[:, i]))
+        intensity = base + decay * (intensity - base) + cfg.jump_excitation * step_counts
+    total_events = float(np.sum(counts))
+    avg_events = float(np.mean(np.sum(counts, axis=1)))
+    return jump_returns, var_multipliers, _jump_stats(avg_jump_events_per_path=avg_events, total_jump_events=total_events, avg_jump_intensity=float(np.mean(intensity_history)), jump_intensity_std=float(np.std(intensity_history)))
 
 
 @dataclass
@@ -34,36 +122,32 @@ class RoughVolConfig:
 
 
 class RoughVolatilityPricer:
-    """
-    Simplified rough Bergomi-style volatility model pricer.
+    """Simplified rough Bergomi-style volatility model pricer."""
 
-    This implementation prioritizes numerical robustness and fast experimentation.
-    """
+    @staticmethod
+    def _validate_config(config: RoughVolConfig) -> None:
+        """Validate rough-vol configuration constraints."""
+        checks = (
+            (config.spot <= 0, "spot must be positive"),
+            (config.maturity <= 0, "maturity must be positive"),
+            (config.n_steps <= 1, "n_steps must be > 1"),
+            (config.n_paths <= 0, "n_paths must be positive"),
+            (not (0 < config.hurst < 0.5), "hurst must be in (0, 0.5)"),
+            (not (-0.999 <= config.correlation <= 0.999), "correlation must be in [-0.999, 0.999]"),
+            (config.initial_variance <= 0, "initial_variance must be positive"),
+            (config.jump_mode not in {"none", "cojump", "clustered"}, "jump_mode must be one of {'none', 'cojump', 'clustered'}"),
+            (config.jump_intensity < 0, "jump_intensity must be non-negative"),
+            (config.jump_std < 0, "jump_std must be non-negative"),
+            (config.jump_decay <= 0, "jump_decay must be positive"),
+            (config.max_jump_intensity <= 0, "max_jump_intensity must be positive"),
+        )
+        for failed, message in checks:
+            if failed:
+                raise ValueError(message)
 
     def __init__(self, config: Optional[RoughVolConfig] = None):
         config = config or RoughVolConfig()
-        if config.spot <= 0: raise ValueError("spot must be positive")
-        if config.maturity <= 0: raise ValueError("maturity must be positive")
-        if config.n_steps <= 1:
-            raise ValueError("n_steps must be > 1")
-        if config.n_paths <= 0:
-            raise ValueError("n_paths must be positive")
-        if not (0 < config.hurst < 0.5):
-            raise ValueError("hurst must be in (0, 0.5)")
-        if not (-0.999 <= config.correlation <= 0.999):
-            raise ValueError("correlation must be in [-0.999, 0.999]")
-        if config.initial_variance <= 0:
-            raise ValueError("initial_variance must be positive")
-        if config.jump_mode not in {"none", "cojump", "clustered"}:
-            raise ValueError("jump_mode must be one of {'none', 'cojump', 'clustered'}")
-        if config.jump_intensity < 0:
-            raise ValueError("jump_intensity must be non-negative")
-        if config.jump_std < 0:
-            raise ValueError("jump_std must be non-negative")
-        if config.jump_decay <= 0:
-            raise ValueError("jump_decay must be positive")
-        if config.max_jump_intensity <= 0:
-            raise ValueError("max_jump_intensity must be positive")
+        self._validate_config(config)
         self.config = config
         self._rng = np.random.default_rng(config.seed)
         self._last_simulation_stats: Dict[str, object] = {
@@ -118,41 +202,28 @@ class RoughVolatilityPricer:
         jump_returns = np.zeros((n_paths, n_steps), dtype=float)
         var_multipliers = np.ones((n_paths, n_steps), dtype=float)
         if cfg.jump_mode == "none" or cfg.jump_intensity <= 0.0 or cfg.jump_std <= 0.0:
-            return jump_returns, var_multipliers, {"avg_jump_events_per_path": 0.0, "total_jump_events": 0.0, "avg_jump_intensity": float(max(cfg.jump_intensity, 0.0)), "jump_intensity_std": 0.0}
+            return jump_returns, var_multipliers, _jump_stats(
+                avg_jump_events_per_path=0.0,
+                total_jump_events=0.0,
+                avg_jump_intensity=max(cfg.jump_intensity, 0.0),
+                jump_intensity_std=0.0,
+            )
         if cfg.jump_mode == "cojump":
-            lam_dt = cfg.jump_intensity * dt
-            counts = rng.poisson(lam_dt, size=(n_paths, n_steps))
-            jump_sizes = rng.normal(cfg.jump_mean, cfg.jump_std, size=(n_paths, n_steps))
-            jump_returns = counts * jump_sizes
-            var_multipliers = np.exp(cfg.variance_jump_scale * np.abs(jump_returns))
-            total_events = float(np.sum(counts))
-            avg_events = float(np.mean(np.sum(counts, axis=1)))
-            return jump_returns, var_multipliers, {"avg_jump_events_per_path": avg_events, "total_jump_events": total_events, "avg_jump_intensity": float(cfg.jump_intensity), "jump_intensity_std": 0.0}
-        intensity = np.full(n_paths, cfg.jump_intensity, dtype=float)
-        intensity_history = np.zeros((n_paths, n_steps), dtype=float); counts = np.zeros((n_paths, n_steps), dtype=float)
-        decay = np.exp(-cfg.jump_decay * dt)
-        base = float(cfg.jump_intensity)
-        for i in range(n_steps):
-            intensity = np.clip(intensity, 0.0, cfg.max_jump_intensity)
-            intensity_history[:, i] = intensity
-            lam_dt = np.clip(intensity * dt, 0.0, 50.0)
-            step_counts = rng.poisson(lam_dt)
-            counts[:, i] = step_counts
-            jump_sizes = rng.normal(cfg.jump_mean, cfg.jump_std, size=n_paths)
-            jump_returns[:, i] = step_counts * jump_sizes
-            var_multipliers[:, i] = np.exp(cfg.variance_jump_scale * np.abs(jump_returns[:, i]))
-            intensity = base + decay * (intensity - base) + cfg.jump_excitation * step_counts
-        total_events = float(np.sum(counts))
-        avg_events = float(np.mean(np.sum(counts, axis=1)))
-        return jump_returns, var_multipliers, {"avg_jump_events_per_path": avg_events, "total_jump_events": total_events, "avg_jump_intensity": float(np.mean(intensity_history)), "jump_intensity_std": float(np.std(intensity_history))}
+            return _simulate_cojump_components(cfg=cfg, n_paths=n_paths, n_steps=n_steps, dt=dt, rng=rng)
+        return _simulate_clustered_jump_components(
+            cfg=cfg,
+            n_paths=n_paths,
+            n_steps=n_steps,
+            dt=dt,
+            rng=rng,
+        )
 
     def simulate_paths(self, n_paths: Optional[int] = None, rng: Optional[np.random.Generator] = None) -> Tuple[np.ndarray, np.ndarray]:
         """Simulate spot and variance paths."""
         t0 = time.perf_counter()
         cfg = self.config
         dt = cfg.maturity / cfg.n_steps; sqrt_dt = np.sqrt(dt)
-        n_paths = int(n_paths if n_paths is not None else cfg.n_paths)
-        n_steps = cfg.n_steps
+        n_paths = int(n_paths if n_paths is not None else cfg.n_paths); n_steps = cfg.n_steps
         gen = rng or self._rng
         dW1, dW2 = self._draw_correlated_brownians(n_paths=n_paths, n_steps=n_steps, sqrt_dt=sqrt_dt, rng=gen)
         jump_returns, jump_var_mult, jump_stats = self._simulate_jump_components(n_paths=n_paths, n_steps=n_steps, dt=dt, rng=gen)
@@ -168,8 +239,7 @@ class RoughVolatilityPricer:
         )
         var_t = var_t * jump_var_mult
         var_t = np.maximum(var_t, 1e-10)
-        spots = np.zeros((n_paths, n_steps + 1), dtype=float)
-        vars_path = np.zeros((n_paths, n_steps + 1), dtype=float)
+        spots = np.zeros((n_paths, n_steps + 1), dtype=float); vars_path = np.zeros((n_paths, n_steps + 1), dtype=float)
         spots[:, 0] = cfg.spot
         vars_path[:, 0] = cfg.initial_variance
         vars_path[:, 1:] = var_t
@@ -209,33 +279,31 @@ class RoughVolatilityPricer:
         """Price option and report Monte Carlo confidence interval."""
         if not (0.5 < confidence < 1.0):
             raise ValueError("confidence must be in (0.5, 1.0)")
-        total_t0 = time.perf_counter(); spots, _ = self.simulate_paths()
-        sim_stats = self.get_last_simulation_stats(); pricing_t0 = time.perf_counter()
+        total_t0 = time.perf_counter()
+        spots, _ = self.simulate_paths()
+        sim_stats = self.get_last_simulation_stats()
+        pricing_t0 = time.perf_counter()
         terminal = spots[:, -1]
-        if option_type == "call":
-            payoff = np.maximum(terminal - strike, 0.0)
-        elif option_type == "put":
-            payoff = np.maximum(strike - terminal, 0.0)
-        else:
-            raise ValueError("option_type must be 'call' or 'put'")
-        discount = np.exp(-self.config.rate * self.config.maturity); discounted = discount * payoff
-        price = float(np.mean(discounted))
-        n, std = len(discounted), float(np.std(discounted, ddof=1) if len(discounted) > 1 else 0.0)
-        std_error = std / np.sqrt(max(n, 1))
-        z = float(norm.ppf(0.5 + confidence / 2.0))
-        ci_low, ci_high = price - z * std_error, price + z * std_error
+        payoff = _rough_option_payoff(
+            terminal=terminal,
+            strike=strike,
+            option_type=option_type,
+        )
+        discount = np.exp(-self.config.rate * self.config.maturity)
+        discounted = discount * payoff
+        price, std_error, ci_low, ci_high, n_paths = _discounted_payoff_stats(
+            discounted=discounted,
+            confidence=confidence,
+        )
         pricing_time = float(max(time.perf_counter() - pricing_t0, 0.0))
-        return {
-            "price": price,
-            "std_error": float(std_error),
-            "ci_low": float(ci_low),
-            "ci_high": float(ci_high),
-            "n_paths": float(n),
-            "jump_mode": str(sim_stats.get("jump_mode", "none")),
-            "avg_jump_events_per_path": float(sim_stats.get("avg_jump_events_per_path", 0.0)),
-            "avg_jump_intensity": float(sim_stats.get("avg_jump_intensity", 0.0)),
-            "jump_intensity_std": float(sim_stats.get("jump_intensity_std", 0.0)),
-            "simulation_time_sec": float(sim_stats.get("simulation_time_sec", 0.0)),
-            "pricing_time_sec": pricing_time,
-            "total_time_sec": float(max(time.perf_counter() - total_t0, 0.0)),
-        }
+        total_time = float(max(time.perf_counter() - total_t0, 0.0))
+        return _rough_pricing_result(
+            price=price,
+            std_error=std_error,
+            ci_low=ci_low,
+            ci_high=ci_high,
+            n_paths=n_paths,
+            sim_stats=sim_stats,
+            pricing_time=pricing_time,
+            total_time=total_time,
+        )

@@ -173,20 +173,24 @@ def yang_zhang_volatility(open: np.ndarray, high: np.ndarray,
     return float(vol * np.sqrt(periods)) if annualize else float(vol)
 
 
+def _require_columns(df: pd.DataFrame, required: list[str], method: str) -> None:
+    """Validate required columns for selected estimator."""
+    if not all(col in df.columns for col in required):
+        raise ValueError(f"{method} method requires {required}")
+
+
 def calculate_volatility_from_ohlc(df: pd.DataFrame, method: str = "yang_zhang", annualize: bool = True, periods: int = 365) -> float:
     """Compute volatility from OHLC data using the selected estimator."""
     if (method := method.lower()) == "realized":
-        if 'close' not in df.columns:
-            raise ValueError("realized method requires 'close' column")
+        _require_columns(df, ["close"], method)
         returns = np.log(df['close'] / df['close'].shift(1)).dropna()
         return realized_volatility(returns.values, annualize, periods)
     if method == "parkinson":
-        if 'high' not in df.columns or 'low' not in df.columns:
-            raise ValueError("parkinson method requires 'high' and 'low' columns")
+        _require_columns(df, ["high", "low"], method)
         return parkinson_volatility(df['high'].values, df['low'].values, annualize, periods)
     required = ['open', 'high', 'low', 'close']
-    if method in {"garman_klass", "rogers_satchell", "yang_zhang"} and not all(c in df.columns for c in required):
-        raise ValueError(f"{method} method requires {required}")
+    if method in {"garman_klass", "rogers_satchell", "yang_zhang"}:
+        _require_columns(df, required, method)
     if method == "garman_klass":
         return garman_klass_volatility(df['open'].values, df['high'].values, df['low'].values, df['close'].values, annualize, periods)
     if method == "rogers_satchell":

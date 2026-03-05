@@ -87,6 +87,118 @@ def _annualized_basis_returns(
     return float(annualized_return), float(net_return)
 
 
+def _resolve_annualized_funding_rate(
+    *,
+    strategy: "BasisArbitrage",
+    instrument: str,
+    funding_rate: Optional[float],
+) -> float:
+    raw_funding = (
+        funding_rate
+        if funding_rate is not None
+        else strategy.get_dynamic_funding_rate(instrument, strategy.funding_cost)
+    )
+    return float(strategy._annualized_funding_rate(raw_funding))
+
+
+def _basis_opportunity_candidate(
+    *,
+    strategy: "BasisArbitrage",
+    instrument: str,
+    annualized_funding: float,
+) -> Optional[dict]:
+    basis_info = strategy.calculate_basis(instrument, annualized_funding)
+    if basis_info is None or (terms := _basis_terms_or_none(basis_info)) is None:
+        return None
+    spot, basis, basis_pct, time_to_expiry = terms
+    if (
+        annualized_profit_candidate := _basis_annualized_profit_candidate(
+            basis=basis,
+            basis_pct=basis_pct,
+            time_to_expiry=time_to_expiry,
+            annualized_funding=annualized_funding,
+            spot=spot,
+            transaction_cost=strategy.transaction_cost,
+            min_annualized_return=strategy.min_annualized_return,
+        )
+    ) is None:
+        return None
+    annualized_return, strategy_name, expected_profit = annualized_profit_candidate
+    return _basis_candidate_payload(
+        basis_info=basis_info,
+        basis=basis,
+        basis_pct=basis_pct,
+        annualized_return=annualized_return,
+        strategy_name=strategy_name,
+        expected_profit=expected_profit,
+        spot=spot,
+    )
+
+
+def _basis_terms_or_none(
+    basis_info: Dict[str, float],
+) -> Optional[tuple[float, float, float, float]]:
+    time_to_expiry = float(basis_info["time_to_expiry"])
+    if time_to_expiry <= 0:
+        return None
+    return (
+        float(basis_info["spot"]),
+        float(basis_info["basis"]),
+        float(basis_info["basis_pct"]),
+        time_to_expiry,
+    )
+
+
+def _basis_candidate_payload(
+    *,
+    basis_info: Dict[str, float],
+    basis: float,
+    basis_pct: float,
+    annualized_return: float,
+    strategy_name: Literal["long_basis", "short_basis"],
+    expected_profit: float,
+    spot: float,
+) -> dict:
+    return {
+        "spot": spot,
+        "futures": basis_info["futures"],
+        "basis": basis,
+        "basis_pct": basis_pct,
+        "annualized_return": annualized_return,
+        "strategy": strategy_name,
+        "expected_profit": expected_profit,
+    }
+
+
+def _basis_annualized_profit_candidate(
+    *,
+    basis: float,
+    basis_pct: float,
+    time_to_expiry: float,
+    annualized_funding: float,
+    spot: float,
+    transaction_cost: float,
+    min_annualized_return: float,
+) -> Optional[tuple[float, Literal["long_basis", "short_basis"], float]]:
+    annualized_return, net_return = _annualized_basis_returns(
+        basis_pct=basis_pct,
+        time_to_expiry=time_to_expiry,
+        annualized_funding=annualized_funding,
+        transaction_cost=transaction_cost,
+    )
+    strategy_profit = _basis_strategy_profit(
+        basis=basis,
+        net_return=net_return,
+        min_annualized_return=min_annualized_return,
+        spot=spot,
+        transaction_cost=transaction_cost,
+    )
+    if strategy_profit is None:
+        return None
+    strategy_name, expected_profit = strategy_profit
+    return annualized_return, strategy_name, expected_profit
+
+
 @dataclass
 class BasisOpportunity:
     """期现套利机会。"""
@@ -236,33 +348,32 @@ class BasisArbitrage:
         funding_rate: Optional[float] = None
     ) -> Optional[BasisOpportunity]:
         """检查是否存在套利机会。"""
-        raw_funding = funding_rate if funding_rate is not None else self.get_dynamic_funding_rate(instrument, self.funding_cost); annualized_funding = self._annualized_funding_rate(raw_funding)
-        basis_info = self.calculate_basis(instrument, annualized_funding)
-        if basis_info is None: return None
-        spot, futures = basis_info["spot"], basis_info["futures"]
-        basis, basis_pct, T = basis_info["basis"], basis_info["basis_pct"], basis_info["time_to_expiry"]
-        if T <= 0: return None
-        annualized_return, net_return = _annualized_basis_returns(basis_pct=basis_pct, time_to_expiry=T, annualized_funding=annualized_funding, transaction_cost=self.transaction_cost)
-        if (strategy_profit := _basis_strategy_profit(
-            basis=basis,
-            net_return=net_return,
-            min_annualized_return=self.min_annualized_return,
-            spot=spot,
-            transaction_cost=self.transaction_cost,
-        )) is None: return None
-        strategy, expected_profit = strategy_profit
-        required_capital = spot * (1 + self.margin_requirement_ratio + self.liquidation_buffer_pct)
+        annualized_funding = _resolve_annualized_funding_rate(
+            strategy=self,
+            instrument=instrument,
+            funding_rate=funding_rate,
+        )
+        candidate = _basis_opportunity_candidate(
+            strategy=self,
+            instrument=instrument,
+            annualized_funding=annualized_funding,
+        )
+        if candidate is None:
+            return None
+        required_capital = candidate["spot"] * (
+            1 + self.margin_requirement_ratio + self.liquidation_buffer_pct
+        )
         return _build_basis_opportunity(
             instrument=instrument,
-            spot=spot,
-            futures=futures,
+            spot=candidate["spot"],
+            futures=candidate["futures"],
             expiry=self.futures_expiry[instrument],
-            basis=basis,
-            basis_pct=basis_pct,
-            annualized_return=annualized_return,
-            strategy=strategy,
+            basis=candidate["basis"],
+            basis_pct=candidate["basis_pct"],
+            annualized_return=candidate["annualized_return"],
+            strategy=candidate["strategy"],
             required_capital=required_capital,
-            expected_profit=expected_profit,
+            expected_profit=candidate["expected_profit"],
         )
 
     def get_hedge_ratio(

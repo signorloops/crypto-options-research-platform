@@ -11,20 +11,20 @@ from research.volatility.iv_solvers import black_scholes_price
 
 
 def vol_from_ssvi(surface, strike: float, expiry: float, ssvi_total_variance_fn) -> Optional[float]:
-    if (
+    missing = (
         surface._ssvi_params is None
         or surface._ssvi_atm_expiries is None
         or surface._ssvi_atm_total_vars is None
-    ):
+    )
+    if missing:
         surface.fit_ssvi()
-
-    if (
-        surface._ssvi_params is None
-        or surface._ssvi_atm_expiries is None
-        or surface._ssvi_atm_total_vars is None
-    ):
+        missing = (
+            surface._ssvi_params is None
+            or surface._ssvi_atm_expiries is None
+            or surface._ssvi_atm_total_vars is None
+        )
+    if missing:
         return None
-
     theta = np.interp(
         float(expiry),
         surface._ssvi_atm_expiries,
@@ -93,21 +93,25 @@ def get_volatility(surface, strike: float, expiry: float, method: str = "linear"
     return surface._vol_from_idw(strike, expiry)
 
 
-def get_skew(
-    surface,
-    expiry: float,
-    stabilize_short_maturity: bool = False,
-    short_maturity_threshold: float = 14.0 / 365.0,
-    atm_anchor_window: float = 0.10,
-    max_adjacent_jump: float = 0.20,
-) -> List[Tuple[float, float]]:
-    points = [p for p in surface.points if abs(p.expiry - expiry) < 0.01]
-    if not points: return []
-    ordered_points = sorted(points, key=lambda x: x.strike)
-    skew = [(p.moneyness, p.volatility) for p in ordered_points]
-    if not stabilize_short_maturity or expiry > short_maturity_threshold or len(skew) < 3:
-        return skew
+def _ordered_expiry_points(surface, expiry: float, tol: float = 0.01):
+    points = [p for p in surface.points if abs(p.expiry - expiry) < tol]
+    return sorted(points, key=lambda x: x.strike)
 
+
+def _clip_adjacent_jumps(values: np.ndarray, jump_cap: float) -> np.ndarray:
+    for i in range(1, len(values)):
+        values[i] = float(np.clip(values[i], values[i - 1] - jump_cap, values[i - 1] + jump_cap))
+    for i in range(len(values) - 2, -1, -1):
+        values[i] = float(np.clip(values[i], values[i + 1] - jump_cap, values[i + 1] + jump_cap))
+    return values
+
+
+def _stabilized_short_maturity_skew(
+    skew: List[Tuple[float, float]],
+    *,
+    atm_anchor_window: float,
+    max_adjacent_jump: float,
+) -> List[Tuple[float, float]]:
     moneyness = np.array([m for m, _ in skew], dtype=float)
     vols = np.array([v for _, v in skew], dtype=float)
     log_m = np.log(np.maximum(moneyness, 1e-12))
@@ -116,13 +120,31 @@ def get_skew(
     atm_weights = np.exp(-np.abs(log_m) / window)
     atm_anchor = float(np.average(vols, weights=atm_weights))
     smoothed = (1.0 - atm_weights) * vols + atm_weights * atm_anchor
-
-    jump_cap = max(max_adjacent_jump, 1e-6)
-    for i in range(1, len(smoothed)):
-        smoothed[i] = float(np.clip(smoothed[i], smoothed[i - 1] - jump_cap, smoothed[i - 1] + jump_cap))
-    for i in range(len(smoothed) - 2, -1, -1):
-        smoothed[i] = float(np.clip(smoothed[i], smoothed[i + 1] - jump_cap, smoothed[i + 1] + jump_cap))
+    smoothed = _clip_adjacent_jumps(smoothed, max(max_adjacent_jump, 1e-6))
     return [(float(m), float(v)) for m, v in zip(moneyness, smoothed)]
+
+
+def get_skew(
+    surface,
+    expiry: float,
+    stabilize_short_maturity: bool = False,
+    short_maturity_threshold: float = 14.0 / 365.0,
+    atm_anchor_window: float = 0.10,
+    max_adjacent_jump: float = 0.20,
+) -> List[Tuple[float, float]]:
+    ordered_points = _ordered_expiry_points(surface, expiry)
+    if not ordered_points:
+        return []
+
+    skew = [(p.moneyness, p.volatility) for p in ordered_points]
+    if not stabilize_short_maturity or expiry > short_maturity_threshold or len(skew) < 3:
+        return skew
+
+    return _stabilized_short_maturity_skew(
+        skew,
+        atm_anchor_window=atm_anchor_window,
+        max_adjacent_jump=max_adjacent_jump,
+    )
 
 
 def get_term_structure(surface, moneyness: float = 1.0) -> List[Tuple[float, float]]:
@@ -177,6 +199,23 @@ def check_butterfly_arbitrage(
     return {"has_arbitrage": len(violations) > 0, "violations": violations}
 
 
+def _calendar_violations_for_moneyness(
+    *,
+    surface,
+    moneyness: float,
+    spot: float,
+    expiries: List[float],
+    tol: float,
+) -> List[tuple[float, float, float]]:
+    strike = spot * moneyness
+    total_vars = [surface.get_volatility(strike, expiry, method="svi") ** 2 * expiry for expiry in expiries]
+    return [
+        (float(moneyness), float(expiries[i - 1]), float(expiries[i]))
+        for i in range(1, len(total_vars))
+        if total_vars[i] + tol < total_vars[i - 1]
+    ]
+
+
 def check_calendar_arbitrage(
     surface, moneyness_grid: Optional[List[float]] = None, tol: float = 1e-6
 ) -> Dict[str, object]:
@@ -193,14 +232,15 @@ def check_calendar_arbitrage(
 
     violations = []
     for m in moneyness_grid:
-        strike = spot * m
-        total_vars = []
-        for expiry in expiries:
-            vol = surface.get_volatility(strike, expiry, method="svi")
-            total_vars.append(vol * vol * expiry)
-        for i in range(1, len(total_vars)):
-            if total_vars[i] + tol < total_vars[i - 1]:
-                violations.append((float(m), float(expiries[i - 1]), float(expiries[i])))
+        violations.extend(
+            _calendar_violations_for_moneyness(
+                surface=surface,
+                moneyness=float(m),
+                spot=spot,
+                expiries=expiries,
+                tol=tol,
+            )
+        )
     return {"has_arbitrage": len(violations) > 0, "violations": violations}
 
 
@@ -216,13 +256,13 @@ def validate_no_arbitrage(surface) -> Dict[str, object]:
     }
 
 
-def detect_arbitrage_opportunities(surface) -> Dict[str, object]:
-    checks = surface.validate_no_arbitrage(); findings = []
-
-    for expiry, detail in checks.get("butterfly", {}).items():
+def _collect_butterfly_findings(butterfly_checks: Dict[str, object]) -> List[Dict[str, object]]:
+    findings: List[Dict[str, object]] = []
+    for expiry, detail in butterfly_checks.items():
         if not detail.get("has_arbitrage", False):
             continue
-        for strike, second_diff in detail.get("violations", []):
+        violations = detail.get("violations", [])
+        for strike, second_diff in violations:
             findings.append(
                 {
                     "type": "butterfly",
@@ -232,19 +272,35 @@ def detect_arbitrage_opportunities(surface) -> Dict[str, object]:
                     "detail": float(second_diff),
                 }
             )
+    return findings
 
-    calendar = checks.get("calendar", {})
-    if calendar.get("has_arbitrage", False):
-        for moneyness, t_prev, t_next in calendar.get("violations", []):
-            findings.append(
-                {
-                    "type": "calendar",
-                    "moneyness": float(moneyness),
-                    "expiry_prev": float(t_prev),
-                    "expiry_next": float(t_next),
-                    "severity": float(abs(t_next - t_prev)),
-                }
-            )
 
+def _collect_calendar_findings(calendar: Dict[str, object]) -> List[Dict[str, object]]:
+    if not calendar.get("has_arbitrage", False):
+        return []
+
+    findings: List[Dict[str, object]] = []
+    for moneyness, t_prev, t_next in calendar.get("violations", []):
+        findings.append(
+            {
+                "type": "calendar",
+                "moneyness": float(moneyness),
+                "expiry_prev": float(t_prev),
+                "expiry_next": float(t_next),
+                "severity": float(abs(t_next - t_prev)),
+            }
+        )
+    return findings
+
+
+def detect_arbitrage_opportunities(surface) -> Dict[str, object]:
+    checks = surface.validate_no_arbitrage()
+    findings = _collect_butterfly_findings(checks.get("butterfly", {}))
+    findings.extend(_collect_calendar_findings(checks.get("calendar", {})))
     findings_sorted = sorted(findings, key=lambda x: float(x.get("severity", 0.0)), reverse=True)
-    return {"has_arbitrage": len(findings_sorted) > 0, "n_findings": len(findings_sorted), "findings": findings_sorted, "summary": checks}
+    return {
+        "has_arbitrage": len(findings_sorted) > 0,
+        "n_findings": len(findings_sorted),
+        "findings": findings_sorted,
+        "summary": checks,
+    }

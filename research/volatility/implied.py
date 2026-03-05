@@ -240,31 +240,81 @@ def plot_volatility_surface(
     expiry_range: Tuple[float, float] = (0.1, 1.0),
 ):
     """Plot a 3D volatility surface and maturity skews (requires matplotlib)."""
+    plt = _load_matplotlib()
+    if plt is None:
+        return
+    if not surface.points:
+        logger.warning("Empty surface, nothing to plot")
+        return
+
+    S, strikes, expiries, K_grid, T_grid = _surface_plot_grid(
+        surface=surface,
+        strike_range=strike_range,
+        expiry_range=expiry_range,
+    )
+    V_grid = _surface_vol_grid(surface=surface, strikes=strikes, expiries=expiries)
+
+    fig = plt.figure(figsize=(12, 5))
+    ax1 = fig.add_subplot(121, projection="3d")
+    _plot_surface_3d(ax=ax1, moneyness_grid=K_grid / S, expiry_grid=T_grid, vol_grid=V_grid)
+    ax2 = fig.add_subplot(122)
+    _plot_surface_skew_panel(ax=ax2, surface=surface)
+    plt.tight_layout()
+    plt.show()
+
+
+def _load_matplotlib():
     try:
         import matplotlib.pyplot as plt
     except ImportError:
         logger.warning("matplotlib required for plotting")
-        return
-    if not surface.points: logger.warning("Empty surface, nothing to plot"); return
+        return None
+    return plt
+
+
+def _plot_surface_3d(*, ax, moneyness_grid: np.ndarray, expiry_grid: np.ndarray, vol_grid: np.ndarray) -> None:
+    ax.plot_surface(moneyness_grid, expiry_grid, vol_grid, cmap="viridis")
+    ax.set_xlabel("Moneyness (K/S)")
+    ax.set_ylabel("Time to Expiry")
+    ax.set_zlabel("Implied Volatility")
+    ax.set_title("Volatility Surface")
+
+
+def _plot_surface_skew_panel(*, ax, surface: VolatilitySurface) -> None:
+    _plot_surface_skews(ax=ax, surface=surface)
+    ax.set_xlabel("Moneyness")
+    ax.set_ylabel("Implied Volatility")
+    ax.set_title("Volatility Skew by Maturity")
+    ax.legend()
+
+
+def _surface_plot_grid(
+    *,
+    surface: VolatilitySurface,
+    strike_range: Tuple[float, float],
+    expiry_range: Tuple[float, float],
+) -> Tuple[float, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     S = surface.points[0].underlying_price
     strikes = np.linspace(strike_range[0] * S, strike_range[1] * S, 50)
     expiries = np.linspace(expiry_range[0], expiry_range[1], 50)
     K_grid, T_grid = np.meshgrid(strikes, expiries)
-    V_grid = np.zeros_like(K_grid)
+    return S, strikes, expiries, K_grid, T_grid
+
+
+def _surface_vol_grid(
+    *, surface: VolatilitySurface, strikes: np.ndarray, expiries: np.ndarray
+) -> np.ndarray:
+    V_grid = np.zeros((len(expiries), len(strikes)), dtype=float)
     for i in range(len(strikes)):
         for j in range(len(expiries)):
             V_grid[j, i] = surface.get_volatility(strikes[i], expiries[j])
-    fig = plt.figure(figsize=(12, 5)); ax1 = fig.add_subplot(121, projection="3d")
-    ax1.plot_surface(K_grid / S, T_grid, V_grid, cmap="viridis")
-    ax1.set_xlabel("Moneyness (K/S)"); ax1.set_ylabel("Time to Expiry")
-    ax1.set_zlabel("Implied Volatility")
-    ax1.set_title("Volatility Surface")
-    ax2 = fig.add_subplot(122)
+    return V_grid
+
+
+def _plot_surface_skews(*, ax, surface: VolatilitySurface) -> None:
     for T in np.linspace(0.1, 1.0, 5):
         skew = surface.get_skew(T)
-        if skew: moneyness, vols = zip(*skew); ax2.plot(moneyness, vols, label=f"T={T:.2f}")
-    ax2.set_xlabel("Moneyness")
-    ax2.set_ylabel("Implied Volatility"); ax2.set_title("Volatility Skew by Maturity")
-    ax2.legend()
-    plt.tight_layout()
-    plt.show()
+        if not skew:
+            continue
+        moneyness, vols = zip(*skew)
+        ax.plot(moneyness, vols, label=f"T={T:.2f}")

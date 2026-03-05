@@ -28,6 +28,34 @@ REGIME_TRAINING_EXCEPTIONS = (
 )
 
 
+def _has_distinct_training_samples(X: np.ndarray, n_regimes: int) -> bool:
+    return np.unique(X, axis=0).shape[0] >= n_regimes
+
+
+def _normalized_training_batch(X: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    feature_mean = np.mean(X, axis=0)
+    feature_scale = np.std(X, axis=0)
+    feature_scale = np.where(feature_scale < 1e-8, 1.0, feature_scale)
+    return feature_mean, feature_scale, (X - feature_mean) / feature_scale
+
+
+def _should_log_training_failure(failures: int) -> bool:
+    return failures <= 3 or failures % 50 == 0
+
+
+def _mark_regime_training_failure(detector, error: str) -> None:
+    detector._training_failures += 1
+    detector._last_training_error = error
+    if _should_log_training_failure(detector._training_failures):
+        logger.warning(
+            "Regime detector training failed",
+            extra={
+                "failures": detector._training_failures,
+                "error": detector._last_training_error,
+            },
+        )
+
+
 class RegimeState(Enum):
     """Volatility regime states."""
 
@@ -222,34 +250,23 @@ class VolatilityRegimeDetector:
     def _train_model(self) -> bool:
         """Train HMM model on buffered data."""
         X = self._prepare_training_data()
-        if len(X) < self.config.min_samples_for_training: return False
+        if len(X) < self.config.min_samples_for_training:
+            return False
         # Degenerate samples frequently cause unstable covariance estimates.
         # Skip training until we have enough distinct observations.
-        if np.unique(X, axis=0).shape[0] < self.config.n_regimes:
-            self._training_failures += 1
-            self._last_training_error = "insufficient_distinct_samples"
+        if not _has_distinct_training_samples(X, self.config.n_regimes):
+            _mark_regime_training_failure(self, "insufficient_distinct_samples")
             return False
+
         try:
-            feature_mean = np.mean(X, axis=0)
-            feature_scale = np.std(X, axis=0)
-            feature_scale = np.where(feature_scale < 1e-8, 1.0, feature_scale)
-            X_norm = (X - feature_mean) / feature_scale
+            feature_mean, feature_scale, X_norm = _normalized_training_batch(X)
             self._fit_hmm_model(X_norm)
             self._normalize_transition_matrix()
             self._mark_training_success(feature_mean=feature_mean, feature_scale=feature_scale)
             return True
         except REGIME_TRAINING_EXCEPTIONS as e:
             # Model fitting failed, will retry later
-            self._training_failures += 1
-            self._last_training_error = str(e)
-            if self._training_failures <= 3 or self._training_failures % 50 == 0:
-                logger.warning(
-                    "Regime detector training failed",
-                    extra={
-                        "failures": self._training_failures,
-                        "error": self._last_training_error,
-                    },
-                )
+            _mark_regime_training_failure(self, str(e))
             return False
 
     def _build_state_map_from_model(self) -> Dict[int, int]:

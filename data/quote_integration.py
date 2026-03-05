@@ -31,29 +31,71 @@ def _load_table(path: Path) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
-def _normalize_quotes(df: pd.DataFrame, fallback_venue: str) -> pd.DataFrame:
-    time_col = _find_first_existing(df, TIMESTAMP_CANDIDATES)
-    price_col = _find_first_existing(df, PRICE_CANDIDATES)
-    if price_col is None:
-        raise ValueError("Quote data requires a price column")
-    symbol_col = _find_first_existing(df, SYMBOL_CANDIDATES)
-    option_type_col = _find_first_existing(df, OPTION_TYPE_CANDIDATES)
-    expiry_col = _find_first_existing(df, EXPIRY_CANDIDATES)
-    delta_col = _find_first_existing(df, DELTA_CANDIDATES)
-    venue_col = _find_first_existing(df, VENUE_CANDIDATES)
-    out = pd.DataFrame()
-    if time_col is not None:
-        out["timestamp"] = pd.to_datetime(df[time_col], errors="coerce", utc=True)
-    else:
-        out["timestamp"] = pd.NaT
-    out["price"] = pd.to_numeric(df[price_col], errors="coerce")
-    out["symbol"] = df[symbol_col].astype(str) if symbol_col else "UNKNOWN"
-    out["option_type"] = (
-        df[option_type_col].astype(str).str.lower() if option_type_col else "unknown"
+def _quote_column_map(df: pd.DataFrame) -> dict[str, str | None]:
+    return {
+        "time_col": _find_first_existing(df, TIMESTAMP_CANDIDATES),
+        "price_col": _find_first_existing(df, PRICE_CANDIDATES),
+        "symbol_col": _find_first_existing(df, SYMBOL_CANDIDATES),
+        "option_type_col": _find_first_existing(df, OPTION_TYPE_CANDIDATES),
+        "expiry_col": _find_first_existing(df, EXPIRY_CANDIDATES),
+        "delta_col": _find_first_existing(df, DELTA_CANDIDATES),
+        "venue_col": _find_first_existing(df, VENUE_CANDIDATES),
+    }
+
+
+def _timestamp_series(df: pd.DataFrame, column: str | None) -> pd.Series:
+    if column is None:
+        return pd.Series(pd.NaT, index=df.index, dtype="datetime64[ns, UTC]")
+    return pd.to_datetime(df[column], errors="coerce", utc=True)
+
+
+def _numeric_series(df: pd.DataFrame, column: str | None, *, default: float) -> pd.Series:
+    if column is None:
+        return pd.Series(default, index=df.index, dtype=float)
+    return pd.to_numeric(df[column], errors="coerce")
+
+
+def _string_series(
+    df: pd.DataFrame,
+    column: str | None,
+    *,
+    default: str,
+    lowercase: bool = False,
+) -> pd.Series:
+    series = (
+        pd.Series(default, index=df.index, dtype=object)
+        if column is None
+        else df[column].astype(str)
     )
-    out["expiry_years"] = pd.to_numeric(df[expiry_col], errors="coerce") if expiry_col else 0.0
-    out["delta"] = pd.to_numeric(df[delta_col], errors="coerce") if delta_col else 0.5
-    out["venue"] = df[venue_col].astype(str) if venue_col else fallback_venue
+    return series.str.lower() if lowercase else series
+
+
+def _normalized_quotes_frame(
+    df: pd.DataFrame, *, columns: dict[str, str | None], fallback_venue: str
+) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "timestamp": _timestamp_series(df, columns["time_col"]),
+            "price": _numeric_series(df, columns["price_col"], default=float("nan")),
+            "symbol": _string_series(df, columns["symbol_col"], default="UNKNOWN"),
+            "option_type": _string_series(
+                df,
+                columns["option_type_col"],
+                default="unknown",
+                lowercase=True,
+            ),
+            "expiry_years": _numeric_series(df, columns["expiry_col"], default=0.0),
+            "delta": _numeric_series(df, columns["delta_col"], default=0.5),
+            "venue": _string_series(
+                df,
+                columns["venue_col"],
+                default=fallback_venue,
+            ),
+        }
+    )
+
+
+def _finalize_normalized_quotes(out: pd.DataFrame) -> pd.DataFrame:
     out = out.dropna(subset=["price"])
     if out.empty:
         raise ValueError("Quote data has no valid rows after normalization")
@@ -65,6 +107,14 @@ def _normalize_quotes(df: pd.DataFrame, fallback_venue: str) -> pd.DataFrame:
     out["delta_bucket"] = out["delta"].astype(float).abs().round(2)
     out["ts_bucket"] = pd.to_datetime(out["timestamp"]).dt.floor("min")
     return out
+
+
+def _normalize_quotes(df: pd.DataFrame, fallback_venue: str) -> pd.DataFrame:
+    columns = _quote_column_map(df)
+    if columns["price_col"] is None:
+        raise ValueError("Quote data requires a price column")
+    out = _normalized_quotes_frame(df, columns=columns, fallback_venue=fallback_venue)
+    return _finalize_normalized_quotes(out)
 
 
 def _normalize_option_type(raw_value: Any, symbol: str) -> str:
@@ -98,60 +148,117 @@ def _normalize_okx_option_summary(
     return _normalize_quotes(pd.DataFrame(normalized_rows), fallback_venue="okx")
 
 
+def _first_present_value(row: dict[str, Any], keys: list[str]) -> Any:
+    for key in keys:
+        value = row.get(key)
+        if value is not None and value != "":
+            return value
+    return None
+
+
+def _okx_row_price(row: dict[str, Any]) -> float | None:
+    price_raw = _first_present_value(
+        row,
+        ["markPx", "markPrice", "last", "lastPr", "askPx", "bidPx"],
+    )
+    price = pd.to_numeric(price_raw, errors="coerce")
+    if pd.isna(price):
+        return None
+    return float(price)
+
+
+def _okx_row_timestamp(row: dict[str, Any], now: pd.Timestamp) -> pd.Timestamp:
+    timestamp_raw = _first_present_value(row, ["ts", "uTime", "cTime"])
+    timestamp_numeric = pd.to_numeric(timestamp_raw, errors="coerce")
+    timestamp = pd.to_datetime(timestamp_numeric, unit="ms", utc=True, errors="coerce")
+    if pd.isna(timestamp):
+        return now
+    return timestamp
+
+
+def _okx_row_expiry_years(row: dict[str, Any], now: pd.Timestamp) -> float:
+    expiry_ts = pd.to_datetime(
+        pd.to_numeric(row.get("expTime"), errors="coerce"),
+        unit="ms",
+        utc=True,
+        errors="coerce",
+    )
+    if pd.isna(expiry_ts):
+        return 0.0
+    return max((expiry_ts - now).total_seconds(), 0.0) / (365.0 * 24.0 * 3600.0)
+
+
+def _okx_row_delta(row: dict[str, Any]) -> float:
+    delta = pd.to_numeric(row.get("delta"), errors="coerce")
+    if pd.isna(delta):
+        return 0.5
+    return float(delta)
+
+
 def _normalize_okx_option_row(
     *, row: dict[str, Any], now: pd.Timestamp, underlying: str
 ) -> dict[str, Any] | None:
     if not isinstance(row, dict):
         return None
-    price_raw = row.get("markPx") or row.get("markPrice") or row.get("last") or row.get("lastPr") or row.get("askPx") or row.get("bidPx")
-    price = pd.to_numeric(price_raw, errors="coerce")
-    if pd.isna(price):
+    price = _okx_row_price(row)
+    if price is None:
         return None
     symbol = str(row.get("instId") or row.get("instFamily") or underlying)
     option_type = _normalize_option_type(row.get("optType"), symbol)
-    timestamp_numeric = pd.to_numeric(row.get("ts") or row.get("uTime") or row.get("cTime"), errors="coerce"); timestamp = pd.to_datetime(timestamp_numeric, unit="ms", utc=True, errors="coerce")
-    if pd.isna(timestamp): timestamp = now
-    expiry_years = 0.0
-    expiry_ts = pd.to_datetime(
-        pd.to_numeric(row.get("expTime"), errors="coerce"), unit="ms", utc=True, errors="coerce"
-    )
-    if not pd.isna(expiry_ts):
-        expiry_years = max((expiry_ts - now).total_seconds(), 0.0) / (365.0 * 24.0 * 3600.0)
-    delta = pd.to_numeric(row.get("delta"), errors="coerce")
-    if pd.isna(delta): delta = 0.5
+    timestamp = _okx_row_timestamp(row, now)
+    expiry_years = _okx_row_expiry_years(row, now)
+    delta = _okx_row_delta(row)
     return {
         "timestamp": timestamp,
-        "price": float(price),
+        "price": price,
         "symbol": symbol,
         "option_type": option_type,
         "expiry_years": float(expiry_years),
-        "delta": float(delta),
+        "delta": delta,
         "venue": "okx",
     }
 
 
-def _align_cex_defi_quotes(cex: pd.DataFrame, defi: pd.DataFrame, *, align_tolerance_seconds: float = 60.0) -> pd.DataFrame:
+def _merge_quotes_by_bucket_keys(cex: pd.DataFrame, defi: pd.DataFrame) -> pd.DataFrame:
     join_cols = ["ts_bucket", "symbol", "option_type", "expiry_bucket", "delta_bucket"]
-    merged = cex.merge(defi, on=join_cols, suffixes=("_cex", "_defi"))
-    if merged.empty:
-        key_cols = ["symbol", "option_type", "expiry_bucket", "delta_bucket"]; tolerance = pd.Timedelta(seconds=max(float(align_tolerance_seconds), 0.0))
-        cex_asof = cex.sort_values([*key_cols, "timestamp"]); defi_asof = defi.sort_values([*key_cols, "timestamp"])
-        merged = pd.merge_asof(
-            cex_asof,
-            defi_asof,
-            on="timestamp",
-            by=key_cols,
-            direction="nearest",
-            tolerance=tolerance,
-            suffixes=("_cex", "_defi"),
-        )
-        merged = merged.dropna(subset=["price_defi"])
-        if not merged.empty:
-            merged["ts_bucket"] = merged["timestamp"].dt.floor("min")
-    if merged.empty: raise ValueError("No aligned CEX/DeFi rows after key-based merge")
-    out = pd.DataFrame(
+    return cex.merge(defi, on=join_cols, suffixes=("_cex", "_defi"))
+
+
+def _merge_quotes_by_nearest_timestamp(
+    cex: pd.DataFrame,
+    defi: pd.DataFrame,
+    *,
+    align_tolerance_seconds: float,
+) -> pd.DataFrame:
+    key_cols = ["symbol", "option_type", "expiry_bucket", "delta_bucket"]
+    tolerance = pd.Timedelta(seconds=max(float(align_tolerance_seconds), 0.0))
+    cex_asof = cex.sort_values([*key_cols, "timestamp"])
+    defi_asof = defi.sort_values([*key_cols, "timestamp"])
+    merged = pd.merge_asof(
+        cex_asof,
+        defi_asof,
+        on="timestamp",
+        by=key_cols,
+        direction="nearest",
+        tolerance=tolerance,
+        suffixes=("_cex", "_defi"),
+    )
+    merged = merged.dropna(subset=["price_defi"])
+    if not merged.empty:
+        merged["ts_bucket"] = merged["timestamp"].dt.floor("min")
+    return merged
+
+
+def _aligned_timestamp(merged: pd.DataFrame) -> pd.Series:
+    if "ts_bucket" in merged.columns:
+        return merged["ts_bucket"]
+    return merged["timestamp"]
+
+
+def _aligned_quotes_output(merged: pd.DataFrame) -> pd.DataFrame:
+    return pd.DataFrame(
         {
-            "timestamp": (merged["ts_bucket"] if "ts_bucket" in merged.columns else merged["timestamp"]),
+            "timestamp": _aligned_timestamp(merged),
             "symbol": merged["symbol"],
             "option_type": merged["option_type"],
             "maturity": merged["expiry_bucket"],
@@ -163,7 +270,24 @@ def _align_cex_defi_quotes(cex: pd.DataFrame, defi: pd.DataFrame, *, align_toler
             "venue": "cex_vs_defi",
         }
     )
-    return out.sort_values("timestamp")
+
+
+def _align_cex_defi_quotes(
+    cex: pd.DataFrame,
+    defi: pd.DataFrame,
+    *,
+    align_tolerance_seconds: float = 60.0,
+) -> pd.DataFrame:
+    merged = _merge_quotes_by_bucket_keys(cex, defi)
+    if merged.empty:
+        merged = _merge_quotes_by_nearest_timestamp(
+            cex,
+            defi,
+            align_tolerance_seconds=align_tolerance_seconds,
+        )
+    if merged.empty:
+        raise ValueError("No aligned CEX/DeFi rows after key-based merge")
+    return _aligned_quotes_output(merged).sort_values("timestamp")
 
 
 def build_cex_defi_deviation_dataset(

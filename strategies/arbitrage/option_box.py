@@ -63,6 +63,31 @@ def _annualized_box_return(
     return float(profit / capital_base / time_to_expiry)
 
 
+def _iter_strike_pairs(strikes: List[float]):
+    for index, low_k in enumerate(strikes):
+        for high_k in strikes[index + 1:]:
+            yield low_k, high_k
+
+
+def _box_leg_prices(
+    option_chain: Dict[float, Dict[str, float]],
+    *,
+    low_k: float,
+    high_k: float,
+) -> Optional[Dict[str, float]]:
+    low_chain = option_chain.get(low_k, {})
+    high_chain = option_chain.get(high_k, {})
+    prices = {
+        "call_low": low_chain.get("call", 0),
+        "put_low": low_chain.get("put", 0),
+        "call_high": high_chain.get("call", 0),
+        "put_high": high_chain.get("put", 0),
+    }
+    if any(price == 0 for price in prices.values()):
+        return None
+    return prices
+
+
 @dataclass
 class BoxSpread:
     """盒式套利组合。"""
@@ -234,26 +259,19 @@ class OptionBoxArbitrage:
     ) -> List[BoxOpportunity]:
         """扫描执行价组合并返回可交易盒式套利机会。"""
         opportunities = []
-        for i, low_k in enumerate(strikes):
-            for high_k in strikes[i+1:]:
-                low_chain = option_chain.get(low_k, {})
-                high_chain = option_chain.get(high_k, {})
-                prices = {
-                    'call_low': low_chain.get('call', 0),
-                    'put_low': low_chain.get('put', 0),
-                    'call_high': high_chain.get('call', 0),
-                    'put_high': high_chain.get('put', 0)
-                }
-                if any(p == 0 for p in prices.values()):
-                    continue
-                box = self.build_box(low_k, high_k, expiry, prices)
-                if box:
-                    liquidity_score = self._liquidity_score(option_chain, low_k, high_k)
-                    if liquidity_score <= 0:
-                        continue
-                    opp = self.find_arbitrage(box, underlying, liquidity_score=liquidity_score)
-                    if opp:
-                        opportunities.append(opp)
+        for low_k, high_k in _iter_strike_pairs(strikes):
+            prices = _box_leg_prices(option_chain, low_k=low_k, high_k=high_k)
+            if prices is None:
+                continue
+            box = self.build_box(low_k, high_k, expiry, prices)
+            if box is None:
+                continue
+            liquidity_score = self._liquidity_score(option_chain, low_k, high_k)
+            if liquidity_score <= 0:
+                continue
+            opp = self.find_arbitrage(box, underlying, liquidity_score=liquidity_score)
+            if opp is not None:
+                opportunities.append(opp)
         opportunities.sort(key=lambda x: x.annualized_return, reverse=True)
         return opportunities
 

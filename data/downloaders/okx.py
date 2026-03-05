@@ -30,6 +30,111 @@ OKX_STREAM_EXCEPTIONS = (
 )
 
 
+def _parse_term_structure_row(option_row: Dict[str, Any]) -> Optional[Dict[str, float | datetime | int]]:
+    """Parse one option row and keep only near-ATM, non-expired entries."""
+    expiry_ts = option_row.get("expTime")
+    strike = float(option_row.get("stk", 0))
+    mark_vol = float(option_row.get("markVol", 0))
+    uly_px = float(option_row.get("ulyPx", 0))
+    if not expiry_ts or not mark_vol or strike <= 0 or uly_px <= 0:
+        return None
+    expiry = datetime.fromtimestamp(int(expiry_ts) / 1000, tz=timezone.utc)
+    days_to_exp = (expiry - datetime.now(timezone.utc)).total_seconds() / (24 * 3600)
+    if days_to_exp <= 0:
+        return None
+    moneyness = abs(strike - uly_px) / uly_px
+    if moneyness >= 0.05:
+        return None
+    return {
+        "expiry_ts": int(expiry_ts),
+        "expiry": expiry,
+        "days_to_expiry": days_to_exp,
+        "atm_iv": mark_vol,
+        "moneyness": moneyness,
+        "strike": strike,
+    }
+
+
+def _parse_okx_option_contract(inst: Dict[str, Any]) -> Optional[OptionContract]:
+    if inst.get("state") != "live":
+        return None
+    parts = str(inst.get("instId", "")).split("-")
+    if len(parts) != 5:
+        return None
+    base, quote, expiry_str, strike_str, opt_type = parts
+    try:
+        expiry = datetime.strptime(f"20{expiry_str}", "%Y%m%d")
+        strike = float(strike_str)
+    except ValueError:
+        return None
+    return OptionContract(
+        underlying=f"{base}-{quote}",
+        strike=strike,
+        expiry=expiry,
+        option_type=OptionType.CALL if opt_type == "C" else OptionType.PUT,
+        exchange="okx",
+        symbol=inst["instId"],
+        inverse=True,
+        lot_size=float(inst.get("lotSz", 1)),
+        tick_size=float(inst.get("tickSz", 0.01)),
+    )
+
+
+def _okx_iv_history_params(
+    *,
+    iv_index: str,
+    period_days: int,
+    start: datetime,
+    end: datetime,
+) -> Dict[str, str | int]:
+    return {
+        "instId": iv_index,
+        "bar": "1D",
+        "limit": min(period_days, 100),
+        "before": str(int(end.timestamp() * 1000)),
+        "after": str(int(start.timestamp() * 1000)),
+    }
+
+
+def _okx_iv_history_frame(rows: list[Any]) -> pd.DataFrame:
+    df = pd.DataFrame(rows, columns=["timestamp", "open", "high", "low", "close"])
+    df["timestamp"] = pd.to_datetime(df["timestamp"].astype(float), unit="ms")
+    for col in ["open", "high", "low", "close"]:
+        df[col] = df[col].astype(float)
+    return df.sort_values("timestamp").reset_index(drop=True)
+
+
+async def _subscribe_okx_stream(
+    client: "OKXClient",
+    instruments: List[str],
+    callback: Callable[[Any], None],
+    stream_kind: str,
+) -> None:
+    """Create/connect an OKX stream and track it for lifecycle management."""
+    from data.streaming import OKXStream
+
+    stream_kwargs = {"order_book_callback": callback} if stream_kind == "order_book" else {"trade_callback": callback}
+    stream = OKXStream(instruments, **stream_kwargs)
+    try:
+        await stream.connect()
+        client._active_streams.append(stream)
+    except OKX_STREAM_EXCEPTIONS:
+        logger.exception(
+            "Failed to subscribe %s stream",
+            stream_kind,
+            extra=log_extra(count=len(instruments)),
+        )
+        try:
+            await stream.disconnect()
+        except OKX_STREAM_EXCEPTIONS as cleanup_exc:
+            logger.warning(
+                "Failed to clean up %s stream after connect failure",
+                stream_kind,
+                extra=log_extra(error=str(cleanup_exc)),
+            )
+        raise
+
+
 class OKXAPIError(Exception):
     """OKX API error."""
 
@@ -90,12 +195,10 @@ class OKXClient(ExchangeInterface):
         timeout: float = 30.0
     ) -> Dict:
         """Make API request with timeout and OKX error handling."""
-        if not self._session:
+        if self._session is None:
             await self.connect()
         url = f"{self.BASE_URL}{endpoint}"
-        headers = {}
-        if self.api_key:
-            headers["OK-ACCESS-KEY"] = self.api_key
+        headers = {"OK-ACCESS-KEY": self.api_key} if self.api_key else {}
         try:
             async with self._session.get(
                 url,
@@ -105,16 +208,12 @@ class OKXClient(ExchangeInterface):
             ) as response:
                 response.raise_for_status()
                 data = await response.json()
-
-                if data.get("code") != "0":
-                    raise OKXAPIError(
-                        data.get("msg", "Unknown error"),
-                        code=data.get("code")
-                    )
-                return data
         except asyncio.TimeoutError:
             logger.error(f"Request timeout: {endpoint}")
             raise
+        if data.get("code") == "0":
+            return data
+        raise OKXAPIError(data.get("msg", "Unknown error"), code=data.get("code"))
 
     async def get_instruments(
         self,
@@ -152,30 +251,14 @@ class OKXClient(ExchangeInterface):
             raise ValueError(
                 f"Only coin-margined options supported {self.VALID_UNDERLYINGS}, got: {underlying}"
             )
-        params = {"instType": "OPTION", "uly": underlying}; result = await self._request("/api/v5/public/instruments", params)
+        params = {"instType": "OPTION", "uly": underlying}
+        result = await self._request("/api/v5/public/instruments", params)
         contracts = []
         for inst in result.get("data", []):
-            if inst.get("state") != "live":
+            contract = _parse_okx_option_contract(inst)
+            if contract is None:
                 continue
-            parts = inst["instId"].split("-")
-            if len(parts) != 5: continue
-            base, quote, expiry_str, strike_str, opt_type = parts
-            try:
-                expiry = datetime.strptime(f"20{expiry_str}", "%Y%m%d")
-                strike = float(strike_str)
-            except ValueError:
-                continue
-            contracts.append(OptionContract(
-                underlying=f"{base}-{quote}",
-                strike=strike,
-                expiry=expiry,
-                option_type=OptionType.CALL if opt_type == "C" else OptionType.PUT,
-                exchange="okx",
-                symbol=inst["instId"],
-                inverse=True,
-                lot_size=float(inst.get("lotSz", 1)),
-                tick_size=float(inst.get("tickSz", 0.01))
-            ))
+            contracts.append(contract)
         return contracts
 
     async def get_order_book(
@@ -363,24 +446,19 @@ class OKXClient(ExchangeInterface):
         iv_index = f"{underlying}-IV"
         end = datetime.now(timezone.utc)
         start = end - timedelta(days=period_days)
-        params = {
-            "instId": iv_index,
-            "bar": "1D",
-            "limit": min(period_days, 100),
-            "before": str(int(end.timestamp() * 1000)),
-            "after": str(int(start.timestamp() * 1000))
-        }
+        params = _okx_iv_history_params(
+            iv_index=iv_index,
+            period_days=period_days,
+            start=start,
+            end=end,
+        )
         try:
             result = await self._request("/api/v5/market/index-candles", params)
             data = result.get("data", [])
             if not data:
                 logger.warning(f"No IV data available for {underlying}")
                 return pd.DataFrame()
-            df = pd.DataFrame(data, columns=["timestamp", "open", "high", "low", "close"])
-            df["timestamp"] = pd.to_datetime(df["timestamp"].astype(float), unit="ms")
-            for col in ["open", "high", "low", "close"]:
-                df[col] = df[col].astype(float)
-            return df.sort_values("timestamp").reset_index(drop=True)
+            return _okx_iv_history_frame(data)
         except OKXAPIError as e:
             logger.error(f"Failed to get IV history: {e}")
             return pd.DataFrame()
@@ -390,32 +468,17 @@ class OKXClient(ExchangeInterface):
         underlying: str = "BTC-USD"
     ) -> pd.DataFrame:
         """Get current ATM-implied-volatility term structure across expiries."""
-        from datetime import datetime
         market_data = await self.get_option_market_data(underlying)
-        if not market_data: return pd.DataFrame()
-        expiry_data = {}
+        if not market_data:
+            return pd.DataFrame()
+        expiry_data: Dict[str, Dict[str, float | datetime]] = {}
         for opt in market_data:
-            expiry_ts = opt.get("expTime")
-            strike = float(opt.get("stk", 0))
-            mark_vol = float(opt.get("markVol", 0))
-            uly_px = float(opt.get("ulyPx", 0))
-            if not expiry_ts or not mark_vol:
+            parsed = _parse_term_structure_row(opt)
+            if parsed is None:
                 continue
-            expiry = datetime.fromtimestamp(int(expiry_ts) / 1000, tz=timezone.utc); days_to_exp = (expiry - datetime.now(timezone.utc)).total_seconds() / (24 * 3600)
-            if days_to_exp <= 0:
-                continue
-            if strike > 0 and uly_px > 0:
-                moneyness = abs(strike - uly_px) / uly_px
-                if moneyness < 0.05:
-                    key = expiry_ts
-                    if key not in expiry_data or moneyness < expiry_data[key]["moneyness"]:
-                        expiry_data[key] = {
-                            "expiry": expiry,
-                            "days_to_expiry": days_to_exp,
-                            "atm_iv": mark_vol,
-                            "moneyness": moneyness,
-                            "strike": strike
-                        }
+            key = str(parsed.pop("expiry_ts"))
+            if key not in expiry_data or float(parsed["moneyness"]) < float(expiry_data[key]["moneyness"]):
+                expiry_data[key] = parsed
         if not expiry_data: return pd.DataFrame()
         df = pd.DataFrame(list(expiry_data.values()))
         return df.sort_values("days_to_expiry").drop(columns=["moneyness"]).reset_index(drop=True)
@@ -426,7 +489,8 @@ class OKXClient(ExchangeInterface):
         callback: Callable[[OrderBook], None]
     ) -> None:
         """Subscribe to real-time order book updates via WebSocket."""
-        await self._subscribe_stream(
+        await _subscribe_okx_stream(
+            client=self,
             instruments=instruments,
             callback=callback,
             stream_kind="order_book",
@@ -438,42 +502,9 @@ class OKXClient(ExchangeInterface):
         callback: Callable[[Trade], None]
     ) -> None:
         """Subscribe to real-time trade updates via WebSocket."""
-        await self._subscribe_stream(
+        await _subscribe_okx_stream(
+            client=self,
             instruments=instruments,
             callback=callback,
             stream_kind="trade",
         )
-
-    async def _subscribe_stream(
-        self,
-        instruments: List[str],
-        callback: Callable[[Any], None],
-        stream_kind: str,
-    ) -> None:
-        """Create/connect an OKX stream and track it for lifecycle management."""
-        from data.streaming import OKXStream
-
-        stream_kwargs = (
-            {"order_book_callback": callback}
-            if stream_kind == "order_book"
-            else {"trade_callback": callback}
-        )
-        stream = OKXStream(instruments, **stream_kwargs)
-        try:
-            await stream.connect()
-            self._active_streams.append(stream)
-        except OKX_STREAM_EXCEPTIONS:
-            logger.exception(
-                "Failed to subscribe %s stream",
-                stream_kind,
-                extra=log_extra(count=len(instruments)),
-            )
-            try:
-                await stream.disconnect()
-            except OKX_STREAM_EXCEPTIONS as cleanup_exc:
-                logger.warning(
-                    "Failed to clean up %s stream after connect failure",
-                    stream_kind,
-                    extra=log_extra(error=str(cleanup_exc)),
-                )
-            raise

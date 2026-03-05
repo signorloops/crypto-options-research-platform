@@ -38,6 +38,74 @@ HMM_RUNTIME_EXCEPTIONS = (
 )
 
 
+def _snapshot_hmm_training_returns(detector: object) -> Optional[np.ndarray]:
+    """Safely copy return buffer for background HMM training."""
+    with detector._buffer_lock:
+        if len(detector._returns_buffer) < detector.config.hmm_min_samples:
+            return None
+        return np.array(list(detector._returns_buffer)).reshape(-1, 1)
+
+
+def _fit_hmm_with_warning_suppression(detector: object, returns: np.ndarray) -> bool:
+    """Fit detector HMM model with convergence-warning suppression."""
+    detector._init_hmm()
+    if detector._hmm_model is None:
+        return False
+    with warnings.catch_warnings():
+        try:
+            from sklearn.exceptions import ConvergenceWarning
+
+            warnings.filterwarnings("ignore", category=ConvergenceWarning)
+        except ImportError:
+            warnings.filterwarnings("ignore", message=".*converge.*")
+        detector._hmm_model.fit(returns)
+    return True
+
+
+def _update_hmm_state_mapping(detector: object) -> None:
+    """Update sorted state mapping from fitted HMM means if available."""
+    if hasattr(detector._hmm_model, "means_"):
+        means = detector._hmm_model.means_
+        vol_order = np.argsort(np.abs(means[:, 0]))
+        detector._state_map = {int(old): int(new) for new, old in enumerate(vol_order)}
+
+
+def _train_hmm_worker(detector: object) -> None:
+    """Thread worker for asynchronous HMM retraining."""
+    try:
+        returns = _snapshot_hmm_training_returns(detector)
+        if returns is None:
+            return
+        if _fit_hmm_with_warning_suppression(detector, returns):
+            _update_hmm_state_mapping(detector)
+            detector._hmm_fitted = True
+            detector._hmm_last_train = detector._hmm_sample_count
+    except HMM_RUNTIME_EXCEPTIONS:
+        logger.exception("Fast HMM training failed; keeping previous regime model")
+    finally:
+        with detector._hmm_lock:
+            detector._hmm_training = False
+
+
+def _threshold_regime_switch_probability(returns_buffer: Deque[float]) -> float:
+    if len(returns_buffer) < 20:
+        return 0.0
+    returns = np.asarray(list(returns_buffer), dtype=float)
+    older_vol = float(np.std(returns[:10]))
+    if older_vol == 0:
+        return 0.0
+    recent_vol = float(np.std(returns[-10:]))
+    return float(min(abs(recent_vol - older_vol) / older_vol, 1.0))
+
+
+def _hmm_regime_switch_probability(detector: object) -> float:
+    current_idx = detector._mapped_state_to_raw_state(detector.current_regime)
+    transmat = detector._hmm_model.transmat_
+    if current_idx < 0 or current_idx >= transmat.shape[0]:
+        return 0.0
+    return float(1.0 - transmat[current_idx, current_idx])
+
+
 class RegimeState(Enum):
     """Volatility regime states."""
 
@@ -170,26 +238,50 @@ class FastVolatilityRegimeDetector:
         """Run HMM prediction with timeout and fallback."""
         if not self._hmm_fitted or self._hmm_model is None:
             return None
-        X = features.reshape(1, -1)
-        def _hmm_compute():
-            try:
-                hidden_state = self._hmm_model.predict(X)[0]
-                _, posteriors = self._hmm_model.score_samples(X)
-                return hidden_state, posteriors[0]
-            except HMM_RUNTIME_EXCEPTIONS as e:
-                return e
+        future = self._submit_hmm_future(features)
+        if future is None:
+            return None
+        result = self._resolve_hmm_future_result(future)
+        if result is None:
+            return None
+        hidden_state, posteriors = result
+        return self._map_hmm_prediction(hidden_state=hidden_state, posteriors=posteriors)
+
+    def _submit_hmm_future(self, features: np.ndarray) -> Optional[concurrent.futures.Future]:
         if self._inference_executor is None:
             return None
-        future = self._inference_executor.submit(_hmm_compute)
+        X = features.reshape(1, -1)
+        return self._inference_executor.submit(self._compute_hmm_prediction, X)
+
+    def _compute_hmm_prediction(
+        self, features_row: np.ndarray
+    ) -> Tuple[int, np.ndarray] | Exception:
+        try:
+            hidden_state = self._hmm_model.predict(features_row)[0]
+            _, posteriors = self._hmm_model.score_samples(features_row)
+            return int(hidden_state), posteriors[0]
+        except HMM_RUNTIME_EXCEPTIONS as exc:
+            return exc
+
+    def _resolve_hmm_future_result(
+        self, future: concurrent.futures.Future
+    ) -> Optional[Tuple[int, np.ndarray]]:
         try:
             result = future.result(timeout=self.config.hmm_timeout_ms / 1000.0)
-            if isinstance(result, Exception):
-                logger.debug("Fast HMM inference failed; fallback to threshold", extra={"error": str(result)})
-                return None
-            hidden_state, posteriors = result
         except concurrent.futures.TimeoutError:
             future.cancel()
             return None
+        if isinstance(result, Exception):
+            logger.debug(
+                "Fast HMM inference failed; fallback to threshold",
+                extra={"error": str(result)},
+            )
+            return None
+        return result
+
+    def _map_hmm_prediction(
+        self, *, hidden_state: int, posteriors: np.ndarray
+    ) -> Tuple[RegimeState, np.ndarray]:
         mapped_state = self._state_map.get(int(hidden_state), int(hidden_state))
         mapped_probs = np.zeros_like(posteriors)
         for old_idx, new_idx in self._state_map.items():
@@ -222,33 +314,8 @@ class FastVolatilityRegimeDetector:
             if self._hmm_training:
                 return
             self._hmm_training = True
-        def train():
-            try:
-                with self._buffer_lock:
-                    if len(self._returns_buffer) < self.config.hmm_min_samples:
-                        return
-                    returns = np.array(list(self._returns_buffer)).reshape(-1, 1)
-                self._init_hmm()
-                if self._hmm_model is not None:
-                    with warnings.catch_warnings():
-                        try:
-                            from sklearn.exceptions import ConvergenceWarning
-                            warnings.filterwarnings("ignore", category=ConvergenceWarning)
-                        except ImportError:
-                            warnings.filterwarnings("ignore", message=".*converge.*")
-                        self._hmm_model.fit(returns)
-                    if hasattr(self._hmm_model, 'means_'):
-                        means = self._hmm_model.means_
-                        vol_order = np.argsort(np.abs(means[:, 0]))
-                        self._state_map = {int(old): int(new) for new, old in enumerate(vol_order)}
-                    self._hmm_fitted = True
-                    self._hmm_last_train = self._hmm_sample_count
-            except HMM_RUNTIME_EXCEPTIONS:
-                logger.exception("Fast HMM training failed; keeping previous regime model")
-            finally:
-                with self._hmm_lock:
-                    self._hmm_training = False
-        self._hmm_thread = threading.Thread(target=train, daemon=True); self._hmm_thread.start()
+        self._hmm_thread = threading.Thread(target=_train_hmm_worker, args=(self,), daemon=True)
+        self._hmm_thread.start()
 
     def update(self, returns: float) -> RegimeState:
         """更新检测器并返回当前状态。"""
@@ -278,26 +345,9 @@ class FastVolatilityRegimeDetector:
     def predict_regime_switch_probability(self) -> float:
         """预测状态切换概率 (简化版)."""
         if not self._hmm_fitted or self._hmm_model is None:
-            # 基于波动率变化率估计
-            if len(self._returns_buffer) < 20:
-                return 0.0
-
-            recent_vol = np.std(list(self._returns_buffer)[-10:])
-            older_vol = np.std(list(self._returns_buffer)[:10])
-
-            if older_vol == 0:
-                return 0.0
-
-            vol_change = abs(recent_vol - older_vol) / older_vol
-            return min(vol_change, 1.0)
-
+            return _threshold_regime_switch_probability(self._returns_buffer)
         try:
-            current_idx = self._mapped_state_to_raw_state(self.current_regime)
-            transmat = self._hmm_model.transmat_
-            if current_idx < 0 or current_idx >= transmat.shape[0]:
-                return 0.0
-            stay_prob = transmat[current_idx, current_idx]
-            return 1.0 - stay_prob
+            return _hmm_regime_switch_probability(self)
         except (AttributeError, TypeError, ValueError, IndexError):
             return 0.0
 

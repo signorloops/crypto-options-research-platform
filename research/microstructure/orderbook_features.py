@@ -343,25 +343,29 @@ class FeaturePipeline:
             DataFrame with additional lag and rolling features
         """
         result = df.copy()
-
-        # Lag features
-        for col in ['mid_price', 'spread', 'depth_imbalance', 'microprice_bias']:
-            if col in result.columns:
-                for lag in [1, 5, 10]:
-                    result[f'{col}_lag_{lag}'] = result[col].shift(lag)
-
-        # Rolling statistics
-        for window in [10, 30, 60]:
-            result[f'spread_ma_{window}'] = result['spread'].rolling(window).mean()
-            result[f'imbalance_std_{window}'] = result['depth_imbalance'].rolling(window).std()
-            result[f'volume_imbalance_ma_{window}'] = result['depth_imbalance'].rolling(window).mean()
-
-        # Price momentum
-        result['returns'] = result['mid_price'].pct_change()
-        result['momentum_10'] = result['returns'].rolling(10).sum()
-        result['momentum_30'] = result['returns'].rolling(30).sum()
-
-        # Target: future return
-        result['target_return'] = result['mid_price'].shift(-lookahead) / result['mid_price'] - 1
-
+        _add_lag_features(result)
+        _add_rolling_features(result)
+        _add_momentum_and_target(result, lookahead=lookahead)
         return result.dropna()
+
+
+def _add_lag_features(result: pd.DataFrame) -> None:
+    for col in ["mid_price", "spread", "depth_imbalance", "microprice_bias"]:
+        if col not in result.columns:
+            continue
+        for lag in [1, 5, 10]:
+            result[f"{col}_lag_{lag}"] = result[col].shift(lag)
+
+
+def _add_rolling_features(result: pd.DataFrame) -> None:
+    for window in [10, 30, 60]:
+        result[f"spread_ma_{window}"] = result["spread"].rolling(window).mean()
+        result[f"imbalance_std_{window}"] = result["depth_imbalance"].rolling(window).std()
+        result[f"volume_imbalance_ma_{window}"] = result["depth_imbalance"].rolling(window).mean()
+
+
+def _add_momentum_and_target(result: pd.DataFrame, *, lookahead: int) -> None:
+    result["returns"] = result["mid_price"].pct_change()
+    result["momentum_10"] = result["returns"].rolling(10).sum()
+    result["momentum_30"] = result["returns"].rolling(30).sum()
+    result["target_return"] = result["mid_price"].shift(-lookahead) / result["mid_price"] - 1

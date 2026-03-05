@@ -48,6 +48,175 @@ class PPOConfig:
     inventory_limit: float = 10.0
 
 
+def _ppo_spread_offsets_and_size_scale(
+    *, action: np.ndarray, config: PPOConfig
+) -> tuple[float, float, float]:
+    bid_offset_bps = float(
+        np.clip(action[0], config.min_spread_bps / 2, config.max_spread_bps / 2)
+    )
+    ask_offset_bps = float(
+        np.clip(action[1], config.min_spread_bps / 2, config.max_spread_bps / 2)
+    )
+    size_scale = float(np.clip(action[2], 0.1, 2.0))
+    return bid_offset_bps, ask_offset_bps, size_scale
+
+
+def _ppo_inventory_skew_bps(*, position_size: float, config: PPOConfig) -> float:
+    raw_skew = -position_size * config.max_skew_bps / config.inventory_limit
+    return float(np.clip(raw_skew, -config.max_skew_bps, config.max_skew_bps))
+
+
+def _ppo_quote_prices(
+    *,
+    mid: float,
+    bid_offset_bps: float,
+    ask_offset_bps: float,
+    inventory_skew_bps: float,
+) -> tuple[float, float]:
+    bid_price = mid * (1 - bid_offset_bps / 10000 + inventory_skew_bps / 10000)
+    ask_price = mid * (1 + ask_offset_bps / 10000 + inventory_skew_bps / 10000)
+    return float(bid_price), float(ask_price)
+
+
+def _ppo_quote_sizes(
+    *,
+    position_size: float,
+    quote_size: float,
+    inventory_limit: float,
+) -> tuple[float, float]:
+    bid_size = quote_size if position_size < inventory_limit else 0.0
+    ask_size = quote_size if position_size > -inventory_limit else 0.0
+    return float(bid_size), float(ask_size)
+
+
+def _ppo_quote_metadata(
+    *,
+    strategy_name: str,
+    bid_offset_bps: float,
+    ask_offset_bps: float,
+    inventory_skew_bps: float,
+    size_scale: float,
+    value_estimate: float,
+    trained: bool,
+) -> Dict[str, float | bool | str]:
+    return {
+        "strategy": strategy_name,
+        "bid_offset_bps": bid_offset_bps,
+        "ask_offset_bps": ask_offset_bps,
+        "inventory_skew_bps": inventory_skew_bps,
+        "size_scale": size_scale,
+        "value_estimate": value_estimate,
+        "trained": trained,
+    }
+
+
+def _ppo_infer_action_and_value(
+    *, strategy: "PPOMarketMaker", state: MarketState, position: Position
+) -> tuple[float, np.ndarray, float]:
+    mid = state.order_book.mid_price
+    if mid is None:
+        raise ValueError("Cannot quote without valid order book")
+    state_vec = strategy._market_state_to_vector(state, position)
+    strategy.current_state = state_vec
+    strategy._state_sequence.append(state_vec)
+    strategy._init_network(len(state_vec))
+    state_tensor = strategy._build_policy_state_tensor(state_vec)
+    action, value, _ = strategy.network.get_action(state_tensor)
+    return float(mid), action, float(value)
+
+
+def _ppo_quote_from_action(
+    *,
+    strategy: "PPOMarketMaker",
+    position_size: float,
+    mid: float,
+    action: np.ndarray,
+    value: float,
+) -> QuoteAction:
+    bid_offset_bps, ask_offset_bps, size_scale, inventory_skew, bid_price, ask_price = (
+        _ppo_quote_price_terms(
+            strategy=strategy,
+            position_size=position_size,
+            mid=mid,
+            action=action,
+        )
+    )
+    bid_size, ask_size, metadata = _ppo_quote_size_and_metadata(
+        strategy=strategy,
+        position_size=position_size,
+        value=value,
+        bid_offset_bps=bid_offset_bps,
+        ask_offset_bps=ask_offset_bps,
+        size_scale=size_scale,
+        inventory_skew_bps=inventory_skew,
+    )
+    return QuoteAction(
+        bid_price=bid_price,
+        bid_size=bid_size,
+        ask_price=ask_price,
+        ask_size=ask_size,
+        metadata=metadata,
+    )
+
+
+def _ppo_quote_price_terms(
+    *,
+    strategy: "PPOMarketMaker",
+    position_size: float,
+    mid: float,
+    action: np.ndarray,
+) -> tuple[float, float, float, float, float, float]:
+    bid_offset_bps, ask_offset_bps, size_scale = _ppo_spread_offsets_and_size_scale(
+        action=action,
+        config=strategy.config,
+    )
+    inventory_skew = _ppo_inventory_skew_bps(
+        position_size=position_size,
+        config=strategy.config,
+    )
+    bid_price, ask_price = _ppo_quote_prices(
+        mid=mid,
+        bid_offset_bps=bid_offset_bps,
+        ask_offset_bps=ask_offset_bps,
+        inventory_skew_bps=inventory_skew,
+    )
+    return (
+        bid_offset_bps,
+        ask_offset_bps,
+        size_scale,
+        inventory_skew,
+        bid_price,
+        ask_price,
+    )
+
+
+def _ppo_quote_size_and_metadata(
+    *,
+    strategy: "PPOMarketMaker",
+    position_size: float,
+    value: float,
+    bid_offset_bps: float,
+    ask_offset_bps: float,
+    size_scale: float,
+    inventory_skew_bps: float,
+) -> tuple[float, float, Dict[str, float | bool | str]]:
+    quote_size = float(strategy.config.quote_size * size_scale)
+    bid_size, ask_size = _ppo_quote_sizes(
+        position_size=position_size,
+        quote_size=quote_size,
+        inventory_limit=strategy.config.inventory_limit,
+    )
+    return bid_size, ask_size, _ppo_quote_metadata(
+        strategy_name=strategy.name,
+        bid_offset_bps=bid_offset_bps,
+        ask_offset_bps=ask_offset_bps,
+        inventory_skew_bps=inventory_skew_bps,
+        size_scale=size_scale,
+        value_estimate=value,
+        trained=strategy.network is not None and strategy.optimizer is not None,
+    )
+
+
 class MarketMakingActorCritic(nn.Module):
     """Actor-critic network for market-making."""
 
@@ -398,37 +567,17 @@ class PPOMarketMaker(MarketMakingStrategy):
 
     def quote(self, state: MarketState, position: Position) -> QuoteAction:
         """Generate quote using PPO policy."""
-        mid = state.order_book.mid_price
-        if mid is None: raise ValueError("Cannot quote without valid order book")
-        state_vec = self._market_state_to_vector(state, position)
-        self.current_state = state_vec
-        self._state_sequence.append(state_vec)
-        self._init_network(len(state_vec))
-        state_tensor = self._build_policy_state_tensor(state_vec)
-        action, value, log_prob = self.network.get_action(state_tensor)
-        bid_offset_bps = np.clip(action[0], self.config.min_spread_bps/2, self.config.max_spread_bps/2)
-        ask_offset_bps = np.clip(action[1], self.config.min_spread_bps/2, self.config.max_spread_bps/2)
-        size_scale = np.clip(action[2], 0.1, 2.0)
-        inventory_skew = np.clip(-position.size * self.config.max_skew_bps / self.config.inventory_limit, -self.config.max_skew_bps, self.config.max_skew_bps)
-        bid_price = mid * (1 - bid_offset_bps / 10000 + inventory_skew / 10000)
-        ask_price = mid * (1 + ask_offset_bps / 10000 + inventory_skew / 10000)
-        quote_size = self.config.quote_size * size_scale
-        bid_size = quote_size if position.size < self.config.inventory_limit else 0
-        ask_size = quote_size if position.size > -self.config.inventory_limit else 0
-        return QuoteAction(
-            bid_price=bid_price,
-            bid_size=bid_size,
-            ask_price=ask_price,
-            ask_size=ask_size,
-            metadata={
-                "strategy": self.name,
-                "bid_offset_bps": bid_offset_bps,
-                "ask_offset_bps": ask_offset_bps,
-                "inventory_skew_bps": inventory_skew,
-                "size_scale": size_scale,
-                "value_estimate": value,
-                "trained": self.network is not None and self.optimizer is not None
-            }
+        mid, action, value = _ppo_infer_action_and_value(
+            strategy=self,
+            state=state,
+            position=position,
+        )
+        return _ppo_quote_from_action(
+            strategy=self,
+            position_size=position.size,
+            mid=mid,
+            action=action,
+            value=value,
         )
 
     def _market_state_to_vector(self, state: MarketState, position: Position) -> np.ndarray:
@@ -454,65 +603,149 @@ class PPOMarketMaker(MarketMakingStrategy):
     def train(self, historical_data: pd.DataFrame) -> None:
         """Train PPO agent on historical data."""
         logger.info("Training PPO agent", extra=log_extra(samples=len(historical_data)))
-        if self.config.random_seed is not None: torch.manual_seed(self.config.random_seed)
+        if self.config.random_seed is not None:
+            torch.manual_seed(self.config.random_seed)
         self.env = MarketMakingEnv(
             historical_data,
             episode_length=1000,
             random_seed=self.config.random_seed,
         )
-        sample_state = self.env.reset(); self._init_network(len(sample_state))
+        sample_state = self.env.reset()
+        self._init_network(len(sample_state))
         total_timesteps = self.config.total_timesteps
-        timestep = 0; episodes = 0
+        timestep = 0
+        episodes = 0
         while timestep < total_timesteps:
-            state = self.env.reset(); episode_reward = 0; done = False
-            while not done and timestep < total_timesteps:
-                state_tensor = torch.FloatTensor(state)
-                action, value, log_prob = self.network.get_action(state_tensor)
-                next_state, reward, done, info = self.env.step(action)
-                self.states.append(state)
-                self.actions.append(action)
-                self.rewards.append(reward)
-                self.values.append(value)
-                self.log_probs.append(log_prob)
-                self.dones.append(done)
-                state = next_state
-                episode_reward += reward
-                timestep += 1
-                if len(self.states) >= self.config.batch_size:
-                    self._update()
+            timestep, episode_reward = self._train_single_episode(
+                timestep=timestep,
+                total_timesteps=total_timesteps,
+            )
             episodes += 1
             if episodes % 10 == 0:
-                logger.info("Training progress", extra=log_extra(episode=episodes, timestep=timestep, reward=episode_reward))
+                logger.info(
+                    "Training progress",
+                    extra=log_extra(
+                        episode=episodes,
+                        timestep=timestep,
+                        reward=episode_reward,
+                    ),
+                )
         logger.info("Training complete", extra=log_extra(total_timesteps=timestep))
+
+    def _train_single_episode(
+        self,
+        *,
+        timestep: int,
+        total_timesteps: int,
+    ) -> tuple[int, float]:
+        state = self.env.reset()
+        episode_reward = 0.0
+        done = False
+        while not done and timestep < total_timesteps:
+            state, reward, done = self._step_training_transition(state)
+            episode_reward += reward
+            timestep += 1
+            if len(self.states) >= self.config.batch_size:
+                self._update()
+        return timestep, episode_reward
+
+    def _step_training_transition(
+        self, state: np.ndarray
+    ) -> tuple[np.ndarray, float, bool]:
+        state_tensor = torch.FloatTensor(state)
+        action, value, log_prob = self.network.get_action(state_tensor)
+        next_state, reward, done, _ = self.env.step(action)
+        self.states.append(state)
+        self.actions.append(action)
+        self.rewards.append(reward)
+        self.values.append(value)
+        self.log_probs.append(log_prob)
+        self.dones.append(done)
+        return next_state, reward, done
 
     def _update(self) -> None:
         """Perform PPO update on collected experiences."""
-        if len(self.states) < self.config.batch_size: return
-        states = torch.FloatTensor(np.array(self.states)); actions = torch.FloatTensor(np.array(self.actions))
-        old_log_probs, rewards, values, dones = torch.FloatTensor(self.log_probs), torch.FloatTensor(self.rewards), torch.FloatTensor(self.values), torch.FloatTensor(self.dones)
-        last_state = self.states[-1] if self.states else None; next_value = None
-        if last_state is not None and self.dones[-1] == 0:
-            with torch.no_grad():
-                state_tensor = torch.FloatTensor(last_state).unsqueeze(0)
-                _, last_value = self.network(state_tensor)
-                next_value = last_value.squeeze().item()
+        if len(self.states) < self.config.batch_size:
+            return
+        states, actions, old_log_probs, rewards, values, dones, next_value = (
+            self._prepare_update_batch()
+        )
         advantages = self._compute_gae(rewards, values, dones, next_value)
         returns = advantages + values
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         for _ in range(self.config.epochs):
-            dist, current_values = self.network(states)
-            current_log_probs = dist.log_prob(actions).sum(dim=-1)
-            ratio = torch.exp(current_log_probs - old_log_probs)
-            surr1 = ratio * advantages
-            surr2 = torch.clamp(ratio, 1 - self.config.clip_epsilon, 1 + self.config.clip_epsilon) * advantages
-            policy_loss = -torch.min(surr1, surr2).mean()
-            value_loss = nn.MSELoss()(current_values.squeeze(), returns)
-            entropy = dist.entropy().mean()
-            loss = policy_loss + self.config.value_coef * value_loss - self.config.entropy_coef * entropy
-            self.optimizer.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.network.parameters(), 0.5)
-            self.optimizer.step()
+            self._run_update_epoch(
+                states=states,
+                actions=actions,
+                old_log_probs=old_log_probs,
+                advantages=advantages,
+                returns=returns,
+            )
+        self._clear_update_buffers()
+
+    def _prepare_update_batch(
+        self,
+    ) -> tuple[
+        torch.FloatTensor,
+        torch.FloatTensor,
+        torch.FloatTensor,
+        torch.FloatTensor,
+        torch.FloatTensor,
+        torch.FloatTensor,
+        Optional[float],
+    ]:
+        states = torch.FloatTensor(np.array(self.states))
+        actions = torch.FloatTensor(np.array(self.actions))
+        old_log_probs = torch.FloatTensor(self.log_probs)
+        rewards = torch.FloatTensor(self.rewards)
+        values = torch.FloatTensor(self.values)
+        dones = torch.FloatTensor(self.dones)
+        next_value = self._bootstrap_next_value_for_gae()
+        return states, actions, old_log_probs, rewards, values, dones, next_value
+
+    def _bootstrap_next_value_for_gae(self) -> Optional[float]:
+        if not self.states or self.dones[-1] != 0:
+            return None
+        with torch.no_grad():
+            state_tensor = torch.FloatTensor(self.states[-1]).unsqueeze(0)
+            _, last_value = self.network(state_tensor)
+            return float(last_value.squeeze().item())
+
+    def _run_update_epoch(
+        self,
+        *,
+        states: torch.FloatTensor,
+        actions: torch.FloatTensor,
+        old_log_probs: torch.FloatTensor,
+        advantages: torch.FloatTensor,
+        returns: torch.FloatTensor,
+    ) -> None:
+        dist, current_values = self.network(states)
+        current_log_probs = dist.log_prob(actions).sum(dim=-1)
+        ratio = torch.exp(current_log_probs - old_log_probs)
+        surr1 = ratio * advantages
+        surr2 = (
+            torch.clamp(
+                ratio,
+                1 - self.config.clip_epsilon,
+                1 + self.config.clip_epsilon,
+            )
+            * advantages
+        )
+        policy_loss = -torch.min(surr1, surr2).mean()
+        value_loss = nn.MSELoss()(current_values.squeeze(), returns)
+        entropy = dist.entropy().mean()
+        loss = (
+            policy_loss
+            + self.config.value_coef * value_loss
+            - self.config.entropy_coef * entropy
+        )
+        self.optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.network.parameters(), 0.5)
+        self.optimizer.step()
+
+    def _clear_update_buffers(self) -> None:
         self.states = []
         self.actions = []
         self.rewards = []

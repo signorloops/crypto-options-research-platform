@@ -20,7 +20,7 @@
 - Black-Scholes with numeraire change for inverse contracts
 """
 from dataclasses import dataclass
-from typing import Literal, Tuple, Optional
+from typing import Callable, Literal, Tuple, Optional
 
 import numpy as np
 from scipy.stats import norm
@@ -61,6 +61,138 @@ class _GreeksComputationContext:
     n_d1: float
 
 
+def _raise_validation_error(
+    *,
+    condition: bool,
+    message: str,
+    field: str,
+    value,
+) -> None:
+    if condition:
+        raise ValidationError(message, field=field, value=value)
+
+
+def _run_inverse_input_checks(checks: list[tuple[bool, str, str, float]]) -> None:
+    for condition, message, field, value in checks:
+        _raise_validation_error(
+            condition=condition,
+            message=message,
+            field=field,
+            value=value,
+        )
+
+
+def _inverse_inputs_finite(*values: float) -> bool:
+    return all(np.isfinite(value) for value in values)
+
+
+def _inverse_validation_checks(
+    *, S: float, K: float, T: float, r: float, sigma: float
+) -> list[tuple[bool, str, str, float]]:
+    max_vol = InverseOptionPricer.MAX_REASONABLE_VOLATILITY
+    max_rate = InverseOptionPricer.MAX_REASONABLE_RATE
+    return [
+        (S <= 0, "Spot price must be positive", "S", S),
+        (K <= 0, "Strike price must be positive", "K", K),
+        (sigma <= 0, "Volatility must be positive", "sigma", sigma),
+        (
+            sigma > max_vol,
+            f"Volatility exceeds reasonable maximum ({max_vol})",
+            "sigma",
+            sigma,
+        ),
+        (T < 0, "Time to expiry must be non-negative", "T", T),
+        (
+            abs(r) > max_rate,
+            f"Risk-free rate exceeds reasonable range (-{max_rate}, {max_rate})",
+            "r",
+            r,
+        ),
+    ]
+
+
+def _inverse_iv_bracket_prices(
+    *,
+    price_fn: Callable[[float], float],
+) -> Tuple[float, float, float, float]:
+    sigma_low, sigma_high = 0.001, 5.0
+    price_low = float(price_fn(sigma_low))
+    price_high = float(price_fn(sigma_high))
+    return sigma_low, sigma_high, price_low, price_high
+
+
+def _inverse_iv_bisection_search(
+    *,
+    price_fn: Callable[[float], float],
+    target_price: float,
+    sigma_low: float,
+    sigma_high: float,
+    tol: float,
+    max_iter: int,
+) -> float:
+    for _ in range(max_iter):
+        sigma_mid = (sigma_low + sigma_high) / 2
+        price_mid = float(price_fn(sigma_mid))
+        if abs(price_mid - target_price) < tol:
+            return sigma_mid
+        if price_mid < target_price:
+            sigma_low = sigma_mid
+        else:
+            sigma_high = sigma_mid
+        if sigma_high - sigma_low < tol:
+            return (sigma_low + sigma_high) / 2
+    return (sigma_low + sigma_high) / 2
+
+
+def _iterate_newton_iv_solve(
+    *,
+    price: float,
+    S: float,
+    K: float,
+    T: float,
+    r: float,
+    option_type: Literal["call", "put"],
+    sigma: float,
+    rel_tol: float,
+    price_scale: float,
+    max_iter: int,
+    update_fn: Callable[..., tuple[Optional[float], bool, bool]],
+) -> Optional[float]:
+    base_kwargs = {"price": price, "S": S, "K": K, "T": T, "r": r, "option_type": option_type, "rel_tol": rel_tol, "price_scale": price_scale}
+    for _ in range(max_iter):
+        sigma_new, converged, use_bisection = update_fn(sigma=sigma, **base_kwargs)
+        if converged and sigma_new is not None:
+            return float(sigma_new)
+        if use_bisection or sigma_new is None:
+            return None
+        sigma = sigma_new
+    return None
+
+
+def _inverse_intrinsic_price(S: float, K: float, option_type: Literal["call", "put"]) -> float:
+    if option_type == "call":
+        return max(0.0, 1.0 / K - 1.0 / S)
+    return max(0.0, 1.0 / S - 1.0 / K)
+
+
+def _inverse_price_from_d(
+    *,
+    option_type: Literal["call", "put"],
+    inv_S: float,
+    inv_K: float,
+    discount: float,
+    d1: float,
+    d2: float,
+) -> float:
+    if option_type == "call":
+        return float(discount * inv_K * norm.cdf(-d2) - inv_S * norm.cdf(-d1))
+    return float(inv_S * norm.cdf(d1) - discount * inv_K * norm.cdf(d2))
+
+
+def _zero_inverse_greeks() -> InverseGreeks:
+    return InverseGreeks(delta=0.0, gamma=0.0, theta=0.0, vega=0.0, rho=0.0)
+
+
 class InverseOptionPricer:
     """
     币本位期权定价模型。
@@ -95,35 +227,15 @@ class InverseOptionPricer:
     @staticmethod
     def _validate_inputs(S: float, K: float, T: float, r: float, sigma: float) -> None:
         """验证输入参数的有效性。"""
-        # 检查NaN和Inf
-        if not (np.isfinite(S) and np.isfinite(K) and np.isfinite(T)
-                and np.isfinite(r) and np.isfinite(sigma)):
+        if not _inverse_inputs_finite(S, K, T, r, sigma):
             raise ValidationError(
                 "NaN or Inf detected in inputs",
                 field="inputs",
                 value=(S, K, T, r, sigma),
             )
-
-        if S <= 0:
-            raise ValidationError("Spot price must be positive", field="S", value=S)
-        if K <= 0:
-            raise ValidationError("Strike price must be positive", field="K", value=K)
-        if sigma <= 0:
-            raise ValidationError("Volatility must be positive", field="sigma", value=sigma)
-        if sigma > InverseOptionPricer.MAX_REASONABLE_VOLATILITY:
-            raise ValidationError(
-                f"Volatility exceeds reasonable maximum ({InverseOptionPricer.MAX_REASONABLE_VOLATILITY})",
-                field="sigma",
-                value=sigma,
-            )
-        if T < 0:
-            raise ValidationError("Time to expiry must be non-negative", field="T", value=T)
-        if abs(r) > InverseOptionPricer.MAX_REASONABLE_RATE:
-            raise ValidationError(
-                f"Risk-free rate exceeds reasonable range (-{InverseOptionPricer.MAX_REASONABLE_RATE}, {InverseOptionPricer.MAX_REASONABLE_RATE})",
-                field="r",
-                value=r,
-            )
+        _run_inverse_input_checks(
+            _inverse_validation_checks(S=S, K=K, T=T, r=r, sigma=sigma)
+        )
 
     @staticmethod
     def _calculate_d1_d2(S: float, K: float, T: float, r: float, sigma: float) -> Tuple[float, float]:
@@ -167,17 +279,18 @@ class InverseOptionPricer:
         InverseOptionPricer._validate_option_type(option_type)
         InverseOptionPricer._validate_inputs(S, K, T, r, sigma)
         if T < InverseOptionPricer.EPSILON:
-            if option_type == "call":
-                return max(0.0, 1.0 / K - 1.0 / S)
-            return max(0.0, 1.0 / S - 1.0 / K)
+            return _inverse_intrinsic_price(S, K, option_type)
         d1, d2 = InverseOptionPricer._calculate_d1_d2(S, K, T, r, sigma)
-        inv_S = 1.0 / S
-        inv_K = 1.0 / K
+        inv_S, inv_K = 1.0 / S, 1.0 / K
         discount = np.exp(-r * T)
-        if option_type == "call":
-            price = float(discount * inv_K * norm.cdf(-d2) - inv_S * norm.cdf(-d1))
-        else:
-            price = float(inv_S * norm.cdf(d1) - discount * inv_K * norm.cdf(d2))
+        price = _inverse_price_from_d(
+            option_type=option_type,
+            inv_S=inv_S,
+            inv_K=inv_K,
+            discount=discount,
+            d1=d1,
+            d2=d2,
+        )
         return max(0.0, price)
 
     @staticmethod
@@ -193,21 +306,23 @@ class InverseOptionPricer:
         InverseOptionPricer._validate_option_type(option_type)
         InverseOptionPricer._validate_inputs(S, K, T, r, sigma)
         if T < InverseOptionPricer.EPSILON:
-            if option_type == "call":
-                price = max(0.0, 1.0/K - 1.0/S) if S > K else 0.0
-            else:
-                price = max(0.0, 1.0/S - 1.0/K) if K > S else 0.0
-            return price, InverseGreeks(delta=0.0, gamma=0.0, theta=0.0, vega=0.0, rho=0.0)
+            return _inverse_intrinsic_price(S, K, option_type), _zero_inverse_greeks()
         d1, d2 = InverseOptionPricer._calculate_d1_d2(S, K, T, r, sigma)
         inv_S, inv_K = 1.0 / S, 1.0 / K
         discount = np.exp(-r * T)
         sqrt_T = np.sqrt(T)
         n_d1 = norm.pdf(d1)
-        if option_type == "call":
-            price = discount * inv_K * norm.cdf(-d2) - inv_S * norm.cdf(-d1)
-        else:
-            price = inv_S * norm.cdf(d1) - discount * inv_K * norm.cdf(d2)
-        price = max(0.0, price)
+        price = max(
+            0.0,
+            _inverse_price_from_d(
+                option_type=option_type,
+                inv_S=inv_S,
+                inv_K=inv_K,
+                discount=discount,
+                d1=d1,
+                d2=d2,
+            ),
+        )
         context = _GreeksComputationContext(inv_S=inv_S, inv_K=inv_K, discount=discount, sqrt_T=sqrt_T, n_d1=n_d1)
         greeks = InverseOptionPricer._calculate_greeks_from_d(d1, d2, S, K, T, r, sigma, option_type, context)
         return price, greeks
@@ -456,25 +571,19 @@ class InverseOptionPricer:
         """Attempt Newton IV solve, returning None when fallback is required."""
         sigma = InverseOptionPricer._initial_iv_guess(S, K)
         price_scale = max(abs(price), InverseOptionPricer.EPSILON)
-        rel_tol = tol
-        for _ in range(max_iter):
-            sigma_new, converged, use_bisection = InverseOptionPricer._newton_iv_update(
-                price=price,
-                S=S,
-                K=K,
-                T=T,
-                r=r,
-                option_type=option_type,
-                sigma=sigma,
-                rel_tol=rel_tol,
-                price_scale=price_scale,
-            )
-            if converged and sigma_new is not None:
-                return float(sigma_new)
-            if use_bisection or sigma_new is None:
-                return None
-            sigma = sigma_new
-        return None
+        return _iterate_newton_iv_solve(
+            price=price,
+            S=S,
+            K=K,
+            T=T,
+            r=r,
+            option_type=option_type,
+            sigma=sigma,
+            rel_tol=tol,
+            price_scale=price_scale,
+            max_iter=max_iter,
+            update_fn=InverseOptionPricer._newton_iv_update,
+        )
 
     @staticmethod
     def calculate_greeks(
@@ -551,9 +660,12 @@ class InverseOptionPricer:
         max_iter: int = 100
     ) -> float:
         """使用二分法计算隐含波动率（作为fallback）。"""
-        sigma_low, sigma_high = 0.001, 5.0
-        price_low = InverseOptionPricer.calculate_price(S, K, T, r, sigma_low, option_type)
-        price_high = InverseOptionPricer.calculate_price(S, K, T, r, sigma_high, option_type)
+        price_fn = lambda sigma: InverseOptionPricer.calculate_price(
+            S, K, T, r, sigma, option_type
+        )
+        sigma_low, sigma_high, price_low, price_high = _inverse_iv_bracket_prices(
+            price_fn=price_fn
+        )
         # 检查价格是否在合理范围内
         if price < price_low or price > price_high:
             # 价格超出范围，可能是输入有误
@@ -562,18 +674,14 @@ class InverseOptionPricer:
                 f"for {option_type} S={S}, K={K}, T={T}"
             )
             return sigma_low if price < price_low else sigma_high
-        for _ in range(max_iter):
-            sigma_mid = (sigma_low + sigma_high) / 2
-            price_mid = InverseOptionPricer.calculate_price(S, K, T, r, sigma_mid, option_type)
-            if abs(price_mid - price) < tol:
-                return sigma_mid
-            if price_mid < price:
-                sigma_low = sigma_mid
-            else:
-                sigma_high = sigma_mid
-            if sigma_high - sigma_low < tol:
-                return (sigma_low + sigma_high) / 2
-        return (sigma_low + sigma_high) / 2
+        return _inverse_iv_bisection_search(
+            price_fn=price_fn,
+            target_price=price,
+            sigma_low=sigma_low,
+            sigma_high=sigma_high,
+            tol=tol,
+            max_iter=max_iter,
+        )
 
     @staticmethod
     def calculate_pnl(
@@ -627,6 +735,24 @@ def inverse_option_parity(
     return lhs - rhs
 
 
+def _vanilla_option_price(
+    S: float,
+    K: float,
+    T: float,
+    r: float,
+    sigma: float,
+    option_type: Literal["call", "put"],
+) -> float:
+    if T <= InverseOptionPricer.EPSILON:
+        return max(0.0, S - K) if option_type == "call" else max(0.0, K - S)
+    sqrt_T = np.sqrt(T)
+    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * sqrt_T)
+    d2 = d1 - sigma * sqrt_T
+    if option_type == "call":
+        return float(S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2))
+    return float(K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1))
+
+
 def calculate_position_value(
     S: float,
     K: float,
@@ -641,21 +767,11 @@ def calculate_position_value(
     """Compute current option value, unrealized PnL, and market value for a position."""
     InverseOptionPricer._validate_option_type(option_type)
     InverseOptionPricer._validate_inputs(S, K, T, r, sigma)
-    if inverse:
-        current_option_value = InverseOptionPricer.calculate_price(S, K, T, r, sigma, option_type)
-        unrealized_pnl = size * (current_option_value - avg_entry_price_usd)
-        market_value = size * current_option_value
-    else:
-        from scipy.stats import norm
-        if T <= InverseOptionPricer.EPSILON:
-            current_option_value = max(0.0, S - K) if option_type == "call" else max(0.0, K - S)
-        else:
-            d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
-            d2 = d1 - sigma * np.sqrt(T)
-            if option_type == "call":
-                current_option_value = S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
-            else:
-                current_option_value = K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
-        unrealized_pnl = size * (current_option_value - avg_entry_price_usd)
-        market_value = size * current_option_value
+    current_option_value = (
+        InverseOptionPricer.calculate_price(S, K, T, r, sigma, option_type)
+        if inverse
+        else _vanilla_option_price(S, K, T, r, sigma, option_type)
+    )
+    market_value = size * current_option_value
+    unrealized_pnl = market_value - size * avg_entry_price_usd
     return current_option_value, unrealized_pnl, market_value

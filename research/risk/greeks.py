@@ -53,6 +53,23 @@ class PortfolioGreeks:
             'veta': self.veta
         }
 
+def _bs_directional_greeks(
+    *,
+    option_type: str,
+    nd1: float,
+    nd2: float,
+    d2: float,
+    K: float,
+    T: float,
+    r: float,
+    theta_core: float,
+) -> Tuple[float, float, float]:
+    discount = np.exp(-r * T)
+    if option_type == 'call':
+        return nd1, K * T * discount * nd2 / 100, (theta_core - r * K * discount * nd2) / 365
+    nd2_put = norm.cdf(-d2)
+    return nd1 - 1, -K * T * discount * nd2_put / 100, (theta_core + r * K * discount * nd2_put) / 365
+
 
 class BlackScholesGreeks:
     """
@@ -75,18 +92,54 @@ class BlackScholesGreeks:
         d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T)); d2 = d1 - sigma * np.sqrt(T)
         nd1, nd2 = norm.cdf(d1), norm.cdf(d2)
         n_prime_d1 = norm.pdf(d1)
-        if option_type == 'call':
-            delta = nd1
-            rho = K * T * np.exp(-r * T) * nd2 / 100  # Per 1% rate change
-        else:  # put
-            delta = nd1 - 1
-            rho = -K * T * np.exp(-r * T) * norm.cdf(-d2) / 100
         gamma = n_prime_d1 / (S * sigma * np.sqrt(T))
         theta_core = -S * n_prime_d1 * sigma / (2 * np.sqrt(T))
-        theta = (theta_core - r * K * np.exp(-r * T) * nd2) / 365 if option_type == 'call' else (theta_core + r * K * np.exp(-r * T) * norm.cdf(-d2)) / 365
+        delta, rho, theta = _bs_directional_greeks(option_type=option_type, nd1=nd1, nd2=nd2, d2=d2, K=K, T=T, r=r, theta_core=theta_core)
         vega = S * n_prime_d1 * np.sqrt(T) / 100
         vanna = -n_prime_d1 * d2 / sigma; charm = -n_prime_d1 * (2 * r * T - d2 * sigma * np.sqrt(T)) / (2 * T * sigma * np.sqrt(T))
         return Greeks(delta=delta, gamma=gamma, theta=theta, vega=vega, rho=rho, vanna=vanna, charm=charm)
+
+
+def _scaled_common_greeks(position_greeks: Greeks, fx_rate: float) -> Dict[str, float]:
+    """Scale non-delta/gamma Greeks into portfolio currency."""
+    return {
+        "theta": position_greeks.theta * fx_rate,
+        "vega": position_greeks.vega * fx_rate,
+        "rho": float(position_greeks.rho or 0.0) * fx_rate,
+        "vanna": float(position_greeks.vanna or 0.0) * fx_rate,
+        "charm": float(position_greeks.charm or 0.0) * fx_rate,
+    }
+
+
+def _inverse_delta_gamma_usd(
+    *,
+    position_greeks: Greeks,
+    contract: OptionContract,
+    spot: float,
+    iv: float,
+    as_of: datetime,
+    risk_free_rate: float,
+) -> Tuple[float, float]:
+    """Convert inverse contract delta/gamma to USD terms."""
+    spot_safe = max(float(spot), 1e-6)
+    iv_value = float(iv)
+    iv_safe = iv_value if np.isfinite(iv_value) and iv_value > 0 else 1e-6
+
+    from research.pricing.inverse_options import InverseOptionPricer
+
+    option_type = "call" if contract.option_type.value == "C" else "put"
+    price_btc = InverseOptionPricer.calculate_price(
+        spot_safe,
+        contract.strike,
+        contract.time_to_expiry(as_of),
+        risk_free_rate,
+        iv_safe,
+        option_type,
+    )
+    delta_usd_btc = price_btc + spot_safe * position_greeks.delta
+    delta_usd = delta_usd_btc * spot_safe
+    gamma_usd = position_greeks.gamma * (spot_safe ** 3)
+    return float(delta_usd), float(gamma_usd)
 
 
 class GreeksRiskAnalyzer:
@@ -119,31 +172,28 @@ class GreeksRiskAnalyzer:
         contract: OptionContract, spot: float, iv: float, as_of: datetime, fx_rate: float,
     ) -> PortfolioGreeks:
         """Convert a single-position Greeks vector into portfolio USD terms."""
+        scaled_common = _scaled_common_greeks(position_greeks, fx_rate)
         if contract.inverse:
-            spot_safe = max(spot, 1e-6); iv_value = float(iv); iv_safe = iv_value if np.isfinite(iv_value) and iv_value > 0 else 1e-6
-            from research.pricing.inverse_options import InverseOptionPricer
-            option_type = "call" if contract.option_type.value == "C" else "put"
-            price_btc = InverseOptionPricer.calculate_price(spot_safe, contract.strike, contract.time_to_expiry(as_of), self.risk_free_rate, iv_safe, option_type)
-            delta_usd_btc = price_btc + spot_safe * position_greeks.delta; delta_usd = delta_usd_btc * spot_safe
-            gamma_usd = position_greeks.gamma * (spot_safe ** 3)
-            return PortfolioGreeks(
-                delta=delta_usd,
-                gamma=gamma_usd,
-                theta=position_greeks.theta * fx_rate,
-                vega=position_greeks.vega * fx_rate,
-                rho=(position_greeks.rho or 0) * fx_rate,
-                vanna=(position_greeks.vanna or 0) * fx_rate,
-                charm=(position_greeks.charm or 0) * fx_rate,
-                veta=0,
+            delta_value, gamma_value = _inverse_delta_gamma_usd(
+                position_greeks=position_greeks,
+                contract=contract,
+                spot=spot,
+                iv=iv,
+                as_of=as_of,
+                risk_free_rate=self.risk_free_rate,
             )
+        else:
+            delta_value = position_greeks.delta * spot * fx_rate
+            gamma_value = position_greeks.gamma * (spot ** 2) * fx_rate
+
         return PortfolioGreeks(
-            delta=position_greeks.delta * spot * fx_rate,
-            gamma=position_greeks.gamma * (spot ** 2) * fx_rate,
-            theta=position_greeks.theta * fx_rate,
-            vega=position_greeks.vega * fx_rate,
-            rho=(position_greeks.rho or 0) * fx_rate,
-            vanna=(position_greeks.vanna or 0) * fx_rate,
-            charm=(position_greeks.charm or 0) * fx_rate,
+            delta=delta_value,
+            gamma=gamma_value,
+            theta=scaled_common["theta"],
+            vega=scaled_common["vega"],
+            rho=scaled_common["rho"],
+            vanna=scaled_common["vanna"],
+            charm=scaled_common["charm"],
             veta=0,
         )
 

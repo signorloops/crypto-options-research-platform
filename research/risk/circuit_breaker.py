@@ -1,12 +1,4 @@
-"""
-Circuit Breaker system for risk management.
-
-Implements a 4-tier circuit breaker system:
-- NORMAL: Normal trading allowed
-- WARNING: Reduced position sizing, tighter limits
-- RESTRICTED: Only hedging/liquidation allowed
-- HALTED: All trading suspended
-"""
+"""Circuit breaker system for portfolio risk management."""
 import asyncio
 from collections import deque
 from dataclasses import dataclass, field
@@ -96,6 +88,191 @@ def _build_threshold_violation(
             current_value=value,
             limit_value=warning_limit,
             message=f"{label} {value:.2%} exceeds warning {warning_limit:.2%}",
+        )
+    return None
+
+
+def _daily_loss_violation_for_portfolio(
+    *, portfolio: "PortfolioState", config: "CircuitBreakerConfig", now: datetime
+) -> Optional["Violation"]:
+    """Build daily-loss violation if daily PnL is negative and breaches thresholds."""
+    daily_pnl_pct = portfolio.daily_pnl_pct
+    if daily_pnl_pct >= 0:
+        return None
+    return _build_threshold_violation(
+        now=now,
+        violation_type="daily_loss",
+        value=abs(daily_pnl_pct),
+        critical_limit=config.daily_loss_limit_pct,
+        warning_limit=config.daily_loss_warning_pct,
+        label="Daily loss",
+    )
+
+
+def _drawdown_violation_for_portfolio(
+    *, portfolio: "PortfolioState", config: "CircuitBreakerConfig", now: datetime
+) -> Optional["Violation"]:
+    """Build drawdown violation if max drawdown is negative and breaches thresholds."""
+    max_dd = portfolio.max_drawdown
+    if max_dd >= 0:
+        return None
+    return _build_threshold_violation(
+        now=now,
+        violation_type="drawdown",
+        value=abs(max_dd),
+        critical_limit=config.max_drawdown_pct,
+        warning_limit=config.drawdown_warning_pct,
+        label="Drawdown",
+    )
+
+
+def _concentration_violation_for_portfolio(
+    *, portfolio: "PortfolioState", config: "CircuitBreakerConfig", now: datetime
+) -> Optional["Violation"]:
+    """Build concentration violation for largest instrument exposure."""
+    instrument, concentration = portfolio.get_position_concentration()
+    return _build_threshold_violation(
+        now=now,
+        violation_type="concentration",
+        value=concentration,
+        critical_limit=config.position_concentration_limit,
+        warning_limit=config.concentration_warning_pct,
+        label=f"Position {instrument} concentration",
+    )
+
+
+def _should_halt_from_critical(critical_count: int, state: "CircuitState") -> bool:
+    """Whether current critical violations imply an immediate HALTED state."""
+    return critical_count >= 2 or (critical_count >= 1 and state == CircuitState.RESTRICTED)
+
+
+def _should_restrict_from_warning(warning_count: int, state: "CircuitState") -> bool:
+    """Whether warning violations imply escalation to RESTRICTED."""
+    return warning_count >= 2 or (warning_count >= 1 and state == CircuitState.WARNING)
+
+
+def _portfolio_signed_notionals(portfolio: "PortfolioState") -> List[Tuple[str, float]]:
+    """Extract per-instrument signed notionals from a live portfolio snapshot."""
+    positions_data: List[Tuple[str, float]] = []
+    for instrument, position in portfolio.positions.items():
+        if abs(position.size) <= 1e-12 or position.avg_entry_price <= 0:
+            continue
+        signed_notional = float(position.size) * float(position.avg_entry_price)
+        positions_data.append((instrument, signed_notional))
+    return positions_data
+
+
+def _build_proxy_var_inputs(
+    portfolio: "PortfolioState",
+    positions_data: List[Tuple[str, float]],
+) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]:
+    """Build single-factor proxy inputs when no per-asset return matrix exists."""
+    pnl_returns = portfolio.pnl_series.diff().dropna()
+    if len(pnl_returns) < 30:
+        return None
+
+    base = max(abs(portfolio.initial_capital), 1e-12)
+    norm_returns = pnl_returns / base
+    proxy_value = float(sum(value for _, value in positions_data))
+    if abs(proxy_value) <= 1e-12:
+        return None
+
+    positions_df = pd.DataFrame({"value": [proxy_value]}, index=["_portfolio_proxy"])
+    returns_df = pd.DataFrame({"_portfolio_proxy": norm_returns.values})
+    return positions_df, returns_df
+
+
+def _build_instrument_var_inputs(
+    positions_data: List[Tuple[str, float]],
+    returns_df: pd.DataFrame,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    positions_df = pd.DataFrame(
+        {"value": [value for _, value in positions_data]},
+        index=[instrument for instrument, _ in positions_data],
+    )
+    return positions_df, returns_df
+
+
+def _evaluate_instrument_notional_limit(
+    *,
+    instrument: str,
+    position: "Position",
+    config: "CircuitBreakerConfig",
+    now: datetime,
+) -> Tuple["CircuitState", Optional["Violation"]]:
+    notional = abs(position.size) * max(position.avg_entry_price, 0.0)
+    if notional <= 0:
+        return CircuitState.NORMAL, None
+    critical_limit = config.per_instrument_notional_limits.get(instrument, config.per_instrument_notional_limit)
+    if not np.isfinite(critical_limit):
+        return CircuitState.NORMAL, None
+    warning_limit = min(config.per_instrument_warning_notional, critical_limit)
+    for severity, limit, state, label in (
+        ("critical", critical_limit, CircuitState.RESTRICTED, "limit"),
+        ("warning", warning_limit, CircuitState.WARNING, "warning"),
+    ):
+        if not np.isfinite(limit) or notional < limit:
+            continue
+        return state, Violation(timestamp=now, violation_type=f"instrument_notional:{instrument}", severity=severity, current_value=notional, limit_value=limit, message=f"Instrument {instrument} notional {notional:.2f} exceeds {label} {limit:.2f}")
+    return CircuitState.NORMAL, None
+
+
+def _select_var_result(
+    *,
+    calculator: VaRCalculator,
+    positions: pd.DataFrame,
+    returns: pd.DataFrame,
+    method: str,
+) -> VaRResult:
+    method_key = method.lower()
+    method_map = {
+        "parametric": calculator.parametric_var,
+        "cornish_fisher": calculator.cornish_fisher_var,
+        "evt": calculator.evt_var,
+        "fhs": calculator.filtered_historical_var,
+    }
+    selected = method_map.get(method_key)
+    if selected is not None:
+        return selected(positions, returns)
+    candidates = [
+        calculator.parametric_var(positions, returns),
+        calculator.cornish_fisher_var(positions, returns),
+        calculator.evt_var(positions, returns),
+        calculator.filtered_historical_var(positions, returns),
+    ]
+    return max(candidates, key=lambda result: result.var_95)
+
+
+def _var_percentages(var_result: VaRResult, portfolio_value: float) -> Tuple[float, float]:
+    if portfolio_value <= 0:
+        return 0.0, 0.0
+    return var_result.var_95 / portfolio_value, var_result.var_99 / portfolio_value
+
+
+def _var_limit_violation(
+    *,
+    config: "CircuitBreakerConfig",
+    var_95_pct: float,
+    var_99_pct: float,
+    now: datetime,
+) -> Optional["Violation"]:
+    if var_99_pct > config.var_99_limit_pct:
+        return Violation(
+            timestamp=now,
+            violation_type="var_99",
+            severity="critical",
+            current_value=var_99_pct,
+            limit_value=config.var_99_limit_pct,
+            message=f"VaR 99% {var_99_pct:.2%} exceeds limit {config.var_99_limit_pct:.2%}",
+        )
+    if var_95_pct > config.var_95_limit_pct:
+        return Violation(
+            timestamp=now,
+            violation_type="var_95",
+            severity="warning",
+            current_value=var_95_pct,
+            limit_value=config.var_95_limit_pct,
+            message=f"VaR 95% {var_95_pct:.2%} exceeds limit {config.var_95_limit_pct:.2%}",
         )
     return None
 
@@ -465,123 +642,67 @@ class CircuitBreaker:
     def _check_all_limits(self, portfolio: PortfolioState) -> List[Violation]:
         """Check all risk limits and return violations."""
         violations = []; now = datetime.now(timezone.utc)
-        if (daily_pnl_pct := portfolio.daily_pnl_pct) < 0:
-            daily_loss_violation = _build_threshold_violation(
-                now=now,
-                violation_type="daily_loss",
-                value=abs(daily_pnl_pct),
-                critical_limit=self.config.daily_loss_limit_pct, warning_limit=self.config.daily_loss_warning_pct,
-                label="Daily loss",
-            )
-            if daily_loss_violation is not None: violations.append(daily_loss_violation)
-        if (max_dd := portfolio.max_drawdown) < 0:
-            drawdown_violation = _build_threshold_violation(
-                now=now,
-                violation_type="drawdown",
-                value=abs(max_dd),
-                critical_limit=self.config.max_drawdown_pct,
-                warning_limit=self.config.drawdown_warning_pct,
-                label="Drawdown",
-            )
-            if drawdown_violation is not None: violations.append(drawdown_violation)
-        instrument, concentration = portfolio.get_position_concentration(); concentration_violation = _build_threshold_violation(
-            now=now,
-            violation_type="concentration",
-            value=concentration,
-            critical_limit=self.config.position_concentration_limit,
-            warning_limit=self.config.concentration_warning_pct,
-            label=f"Position {instrument} concentration",
-        )
-        if concentration_violation is not None: violations.append(concentration_violation)
+        for violation in (
+            _daily_loss_violation_for_portfolio(portfolio=portfolio, config=self.config, now=now),
+            _drawdown_violation_for_portfolio(portfolio=portfolio, config=self.config, now=now),
+            _concentration_violation_for_portfolio(portfolio=portfolio, config=self.config, now=now),
+        ):
+            if violation is not None:
+                violations.append(violation)
         if (var_violation := self._check_var_limit_from_portfolio(portfolio)) is not None: violations.append(var_violation)
         if self.config.enable_per_instrument_limits: violations.extend(self._check_per_instrument_limits(portfolio))
         return violations
 
     def _check_var_limit_from_portfolio(self, portfolio: PortfolioState) -> Optional[Violation]:
         """Construct VaR inputs from current portfolio snapshot."""
-        positions_data: List[Tuple[str, float]] = []
-        for instrument, position in portfolio.positions.items():
-            if abs(position.size) <= 1e-12 or position.avg_entry_price <= 0:
-                continue
-            signed_notional = float(position.size) * float(position.avg_entry_price)
-            positions_data.append((instrument, signed_notional))
-        if not positions_data: return None
+        positions_data = _portfolio_signed_notionals(portfolio)
+        if not positions_data:
+            return None
+
         returns_df = portfolio.asset_returns.copy()
         if returns_df.empty:
-            # Fallback proxy: use a single synthetic portfolio factor rather than
-            # duplicating identical returns across instruments.
-            pnl_returns = portfolio.pnl_series.diff().dropna()
-            if len(pnl_returns) < 30: return None
-            base = max(abs(portfolio.initial_capital), 1e-12)
-            norm_returns = pnl_returns / base
-            proxy_value = float(sum(v for _, v in positions_data))
-            if abs(proxy_value) <= 1e-12: return None
-            positions_df = pd.DataFrame(
-                {"value": [proxy_value]},
-                index=["_portfolio_proxy"],
-            )
-            returns_df = pd.DataFrame({"_portfolio_proxy": norm_returns.values})
+            proxy_inputs = _build_proxy_var_inputs(portfolio, positions_data)
+            if proxy_inputs is None:
+                return None
+            positions_df, returns_df = proxy_inputs
         else:
-            positions_df = pd.DataFrame(
-                {"value": [v for _, v in positions_data]},
-                index=[k for k, _ in positions_data],
-            )
+            positions_df, returns_df = _build_instrument_var_inputs(positions_data, returns_df)
+
         portfolio_value = max(abs(portfolio.total_value), 1e-12)
         return self.check_var_limit(positions_df, returns_df, portfolio_value)
 
     def _check_per_instrument_limits(self, portfolio: PortfolioState) -> List[Violation]:
-        now = datetime.now(timezone.utc); violations: List[Violation] = []
+        now = datetime.now(timezone.utc)
+        violations: List[Violation] = []
         for instrument, position in portfolio.positions.items():
-            if (notional := abs(position.size) * max(position.avg_entry_price, 0.0)) <= 0:
-                self._instrument_states[instrument] = CircuitState.NORMAL; continue
-            critical_limit = self.config.per_instrument_notional_limits.get(instrument, self.config.per_instrument_notional_limit); warning_limit = min(self.config.per_instrument_warning_notional, critical_limit)
-            if not np.isfinite(critical_limit):
-                self._instrument_states[instrument] = CircuitState.NORMAL; continue
-            if notional >= critical_limit:
-                self._instrument_states[instrument] = CircuitState.RESTRICTED
-                violations.append(Violation(
-                    timestamp=now,
-                    violation_type=f"instrument_notional:{instrument}",
-                    severity="critical",
-                    current_value=notional,
-                    limit_value=critical_limit,
-                    message=f"Instrument {instrument} notional {notional:.2f} exceeds limit {critical_limit:.2f}",
-                ))
-            elif np.isfinite(warning_limit) and notional >= warning_limit:
-                self._instrument_states[instrument] = CircuitState.WARNING
-                violations.append(Violation(
-                    timestamp=now,
-                    violation_type=f"instrument_notional:{instrument}",
-                    severity="warning",
-                    current_value=notional,
-                    limit_value=warning_limit,
-                    message=f"Instrument {instrument} notional {notional:.2f} exceeds warning {warning_limit:.2f}",
-                ))
-            else: self._instrument_states[instrument] = CircuitState.NORMAL
+            state, violation = _evaluate_instrument_notional_limit(
+                instrument=instrument,
+                position=position,
+                config=self.config,
+                now=now,
+            )
+            self._instrument_states[instrument] = state
+            if violation is not None:
+                violations.append(violation)
         return violations
 
     def _determine_state(self, violations: List[Violation]) -> CircuitState:
         """Determine appropriate state based on violations."""
         if not violations:
-            # No violations - check if we can recover
             if self.state != CircuitState.NORMAL and self._can_recover():
                 return self._get_recovery_state()
             return self.state
 
-        # Count severities
         critical_count = sum(1 for v in violations if v.severity == "critical")
         warning_count = sum(1 for v in violations if v.severity == "warning")
-
-        # State determination logic
-        if critical_count >= 2 or (critical_count >= 1 and self.state == CircuitState.RESTRICTED):
+        if _should_halt_from_critical(critical_count, self.state):
             return CircuitState.HALTED
-        elif critical_count >= 1:
+        if critical_count >= 1:
             return CircuitState.RESTRICTED
-        elif warning_count >= 2 or (warning_count >= 1 and self.state == CircuitState.WARNING):
+        if _should_restrict_from_warning(warning_count, self.state):
             return CircuitState.RESTRICTED
-        elif warning_count >= 1:
+        if warning_count >= 1:
             return CircuitState.WARNING
-
         return self.state
 
     def _can_recover(self) -> bool:
@@ -589,19 +710,16 @@ class CircuitBreaker:
         if self.is_in_cooldown:
             return False
 
-        # Check if enough time has passed since last violation
         if not self.violation_history:
             return True
 
         last_violation = self.violation_history[-1]
         time_since = datetime.now(timezone.utc) - last_violation.timestamp
 
-        # Require at least cooldown period since last violation
         return time_since.total_seconds() >= self.config.cooldown_period_seconds
 
     def _get_recovery_state(self) -> CircuitState:
         """Get the state to recover to."""
-        # Step down one level at a time
         if self.state == CircuitState.HALTED:
             return CircuitState.RESTRICTED
         elif self.state == CircuitState.RESTRICTED:
@@ -613,25 +731,15 @@ class CircuitBreaker:
     def _transition_state(self, new_state: CircuitState, violations: List[Violation]) -> None:
         """Transition to a new state."""
         now = datetime.now(timezone.utc)
-
-        # Record state change
         reason = "; ".join([v.message for v in violations]) if violations else "Recovery"
         self.state_history.append((now, new_state, reason))
-
-        # Update state
         old_state = self.state
         self.state = new_state
         self._last_state_change = now
-
-        # Set cooldown period
         self._cooldown_until = now + timedelta(seconds=self.config.cooldown_period_seconds)
-
-        # Reset warning counts on state improvement
         if _state_severity(new_state) < _state_severity(old_state):
             self._consecutive_warnings = 0
             self._warning_count = {}
-
-        # Send alert on state degradation
         if _state_severity(new_state) > _state_severity(old_state):
             self._send_alert(new_state, violations)
 
@@ -864,36 +972,19 @@ class CircuitBreaker:
         """Check configured VaR thresholds and return a violation when breached."""
         if len(returns) < 30:
             return None
-        if (method := self.config.var_method.lower()) == "parametric":
-            var_result = self._var_calculator.parametric_var(positions, returns)
-        elif method == "cornish_fisher":
-            var_result = self._var_calculator.cornish_fisher_var(positions, returns)
-        elif method == "evt":
-            var_result = self._var_calculator.evt_var(positions, returns)
-        elif method == "fhs":
-            var_result = self._var_calculator.filtered_historical_var(positions, returns)
-        else:
-            var_result = max([self._var_calculator.parametric_var(positions, returns), self._var_calculator.cornish_fisher_var(positions, returns), self._var_calculator.evt_var(positions, returns), self._var_calculator.filtered_historical_var(positions, returns)], key=lambda x: x.var_95)
-        var_95_pct, var_99_pct = (var_result.var_95 / portfolio_value, var_result.var_99 / portfolio_value) if portfolio_value > 0 else (0.0, 0.0)
-        if var_99_pct > self.config.var_99_limit_pct:
-            return Violation(
-                timestamp=datetime.now(timezone.utc),
-                violation_type="var_99",
-                severity="critical",
-                current_value=var_99_pct,
-                limit_value=self.config.var_99_limit_pct,
-                message=f"VaR 99% {var_99_pct:.2%} exceeds limit {self.config.var_99_limit_pct:.2%}",
-            )
-        if var_95_pct > self.config.var_95_limit_pct:
-            return Violation(
-                timestamp=datetime.now(timezone.utc),
-                violation_type="var_95",
-                severity="warning",
-                current_value=var_95_pct,
-                limit_value=self.config.var_95_limit_pct,
-                message=f"VaR 95% {var_95_pct:.2%} exceeds limit {self.config.var_95_limit_pct:.2%}",
-            )
-        return None
+        var_result = _select_var_result(
+            calculator=self._var_calculator,
+            positions=positions,
+            returns=returns,
+            method=self.config.var_method,
+        )
+        var_95_pct, var_99_pct = _var_percentages(var_result, portfolio_value)
+        return _var_limit_violation(
+            config=self.config,
+            var_95_pct=var_95_pct,
+            var_99_pct=var_99_pct,
+            now=datetime.now(timezone.utc),
+        )
 
 
 CircuitBreaker._schedule_webhook_alert = _schedule_webhook_alert_method

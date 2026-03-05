@@ -1,13 +1,4 @@
-"""
-Redis cache layer for real-time data and fast lookups.
-
-Features:
-- Greeks caching with TTL
-- IV term structure caching
-- Pub/Sub for real-time updates
-- Connection pooling
-- Async support
-"""
+"""Redis cache layer for real-time data and fast lookups."""
 import asyncio
 import json
 import os
@@ -25,17 +16,7 @@ logger = get_logger(__name__)
 
 
 class RedisCache:
-    """
-    Redis cache manager for real-time market data.
-
-    Key patterns:
-    - greeks:{instrument} -> Greeks data (30s TTL)
-    - iv:{instrument} -> Implied volatility (30s TTL)
-    - iv_term:{underlying} -> IV term structure (5min TTL)
-    - orderbook:{instrument} -> OrderBook snapshot (1s TTL)
-    - ticker:{instrument} -> Ticker data (5s TTL)
-    - config:{key} -> Configuration (no TTL)
-    """
+    """Redis cache manager for real-time market data."""
 
     def __init__(
         self,
@@ -113,22 +94,13 @@ class RedisCache:
             logger.warning("Redis health check failed", extra=log_extra(error=str(exc)))
             return False
 
-    # Greeks caching
-
     async def set_greeks(
         self,
         instrument: str,
         greeks: Dict[str, float],
         ttl_seconds: int = 30
     ) -> None:
-        """
-        Cache Greeks data.
-
-        Args:
-            instrument: Option instrument name
-            greeks: Dict with delta, gamma, theta, vega, rho
-            ttl_seconds: Time to live (default 30s for real-time data)
-        """
+        """Cache Greeks data."""
         self._check_connected()
         key = f"greeks:{instrument}"
         value = json.dumps(greeks)
@@ -169,8 +141,6 @@ class RedisCache:
             for inst, val in zip(instruments, values)
         }
 
-    # IV caching
-
     async def set_iv(
         self,
         instrument: str,
@@ -201,14 +171,7 @@ class RedisCache:
         term_structure: List[Dict[str, Any]],
         ttl_seconds: int = 300  # 5 minutes
     ) -> None:
-        """
-        Cache IV term structure.
-
-        Args:
-            underlying: e.g., "BTC-USD"
-            term_structure: List of {expiry, days_to_expiry, atm_iv, strike}
-            ttl_seconds: Longer TTL as this changes slowly
-        """
+        """Cache IV term structure."""
         self._check_connected()
         key = f"iv_term:{underlying}"
         value = json.dumps({
@@ -228,8 +191,6 @@ class RedisCache:
         if value:
             return json.loads(value)
         return None
-
-    # OrderBook caching
 
     async def set_orderbook(
         self,
@@ -252,8 +213,6 @@ class RedisCache:
             return json.loads(value)
         return None
 
-    # Ticker caching
-
     async def set_ticker(
         self,
         instrument: str,
@@ -274,8 +233,6 @@ class RedisCache:
         if value:
             return json.loads(value)
         return None
-
-    # Generic caching
 
     async def set(
         self,
@@ -312,8 +269,6 @@ class RedisCache:
         self._check_connected()
         return await self._pool.exists(key) > 0
 
-    # Pub/Sub for real-time updates
-
     async def publish(self, channel: str, message: Any) -> None:
         """Publish message to channel."""
         self._check_connected()
@@ -323,19 +278,7 @@ class RedisCache:
 
     @asynccontextmanager
     async def subscribe(self, *channels: str):
-        """
-        Subscribe to channels with automatic resource cleanup.
-
-        Yields:
-            PubSub object for listening
-
-        Example:
-            async with cache.subscribe("trades:deribit", "trades:okx") as pubsub:
-                async for message in pubsub.listen():
-                    if message["type"] == "message":
-                        data = json.loads(message["data"])
-                        print(f"Received: {data}")
-        """
+        """Subscribe to channels with automatic resource cleanup."""
         self._check_connected()
         pubsub = self._pool.pubsub()
         try:
@@ -347,10 +290,6 @@ class RedisCache:
             await pubsub.close()
             logger.info("Unsubscribed from channels", extra=log_extra(channels=list(channels)))
 
-    # Rate limiting
-
-    # Lua script for atomic rate limiting
-    # Returns: 1 if allowed, 0 if rate limited
     _RATE_LIMIT_SCRIPT = """
     local key = KEYS[1]
     local max_requests = tonumber(ARGV[1])
@@ -358,19 +297,16 @@ class RedisCache:
 
     local current = redis.call('GET', key)
     if current == false then
-        -- Key doesn't exist, create it
         redis.call('SET', key, 1, 'EX', window_seconds)
         return 1
     end
 
     local count = tonumber(current)
     if count >= max_requests then
-        -- Refresh expiry even when rate limited for sliding window
         redis.call('EXPIRE', key, window_seconds)
         return 0
     end
 
-    -- INCR and refresh expiry for sliding window behavior
     redis.call('INCR', key)
     redis.call('EXPIRE', key, window_seconds)
     return 1
@@ -382,22 +318,9 @@ class RedisCache:
         max_requests: int,
         window_seconds: int
     ) -> bool:
-        """
-        Check if rate limit is exceeded using fixed window with atomic Lua script.
-
-        Uses atomic Lua script to avoid race conditions between INCR and EXPIRE.
-
-        Args:
-            key: Rate limit key (e.g., "api:deribit:user123")
-            max_requests: Maximum requests allowed
-            window_seconds: Time window
-
-        Returns:
-            True if rate limited, False otherwise
-        """
+        """Check whether a key is currently rate limited."""
         self._check_connected()
 
-        # Use Lua script for atomic operation
         result = await self._pool.eval(
             self._RATE_LIMIT_SCRIPT,
             1,  # numkeys
@@ -406,8 +329,6 @@ class RedisCache:
             str(window_seconds)
         )
         return result == 0
-
-    # Cache statistics
 
     async def get_stats(self) -> Dict[str, Any]:
         """Get Redis statistics."""
@@ -424,18 +345,7 @@ class RedisCache:
         }
 
     async def clear_pattern(self, pattern: str, batch_size: int = 1000) -> int:
-        """
-        Clear all keys matching pattern.
-
-        Uses batch deletion to avoid blocking Redis with large key sets.
-
-        Args:
-            pattern: Redis key pattern (e.g., "greeks:*")
-            batch_size: Number of keys to delete per batch
-
-        Returns:
-            Number of keys deleted
-        """
+        """Clear all keys matching pattern."""
         self._check_connected()
         total_deleted = 0
         batch = []
@@ -462,8 +372,6 @@ class RedisCache:
         self._check_connected()
         return await self._pool.ttl(key)
 
-    # Context managers
-
     async def __aenter__(self) -> 'RedisCache':
         await self.connect()
         return self
@@ -472,13 +380,32 @@ class RedisCache:
         await self.disconnect()
 
 
-class GreeksCacheManager:
-    """
-    High-level manager for Greeks caching with automatic refresh.
+def _schedule_greeks_refresh(
+    manager: "GreeksCacheManager",
+    instrument: str,
+    fetch_func: Callable[[str], Any],
+) -> None:
+    task = asyncio.create_task(manager._refresh_greeks(instrument, fetch_func))
+    manager._refresh_tasks.add(task)
+    task.add_done_callback(lambda t: manager._refresh_tasks.discard(t))
 
-    Uses singleflight pattern to prevent cache stampede - concurrent requests
-    for the same missing key will share the same fetch operation.
-    """
+
+async def _fetch_and_store_greeks(
+    manager: "GreeksCacheManager",
+    instrument: str,
+    fetch_func: Callable[[str], Any],
+) -> Dict[str, float]:
+    logger.debug("Greeks cache miss", extra=log_extra(instrument=instrument))
+    greeks = await fetch_func(instrument)
+    if greeks:
+        await manager.redis.set_greeks(instrument, greeks)
+        manager._fetch_cache[instrument] = greeks
+        asyncio.get_event_loop().call_later(5.0, manager._fetch_cache.pop, instrument, None)
+    return greeks
+
+
+class GreeksCacheManager:
+    """High-level manager for Greeks caching with automatic refresh."""
 
     def __init__(
         self,
@@ -488,10 +415,8 @@ class GreeksCacheManager:
         self.redis = redis_cache
         self.refresh_threshold = refresh_threshold_seconds
         self._refresh_tasks: set = set()
-        # Singleflight locks to prevent cache stampede
         self._fetch_locks: Dict[str, asyncio.Lock] = {}
-        self._locks_lock = asyncio.Lock()  # Protects _fetch_locks
-        # Cache for in-flight fetch results
+        self._locks_lock = asyncio.Lock()
         self._fetch_cache: Dict[str, Any] = {}
         self._lock_last_used: Dict[str, float] = {}
 
@@ -504,19 +429,15 @@ class GreeksCacheManager:
 
     async def _get_fetch_lock(self, instrument: str) -> asyncio.Lock:
         """Get or create a lock for the given instrument."""
-        # Cleanup old locks periodically if we have many locks
-        # Lower threshold for more aggressive cleanup
         if len(self._fetch_locks) > 100:
             await self._cleanup_old_locks()
 
         if instrument not in self._fetch_locks:
             async with self._locks_lock:
-                # Double-check after acquiring lock
                 if instrument not in self._fetch_locks:
                     self._fetch_locks[instrument] = asyncio.Lock()
                     self._lock_last_used[instrument] = asyncio.get_event_loop().time()
         else:
-            # Update last used time
             self._lock_last_used[instrument] = asyncio.get_event_loop().time()
         return self._fetch_locks[instrument]
 
@@ -542,22 +463,17 @@ class GreeksCacheManager:
             ttl = await self.redis.get_ttl(f"greeks:{instrument}")
             if ttl < self.refresh_threshold:
                 logger.debug("Greeks stale, refreshing", extra=log_extra(instrument=instrument, ttl=ttl))
-                task = asyncio.create_task(self._refresh_greeks(instrument, fetch_func))
-                self._refresh_tasks.add(task)
-                task.add_done_callback(lambda t: self._refresh_tasks.discard(t))
+                _schedule_greeks_refresh(self, instrument, fetch_func)
             return greeks
         lock = await self._get_fetch_lock(instrument)
         async with lock:
             greeks = await self.redis.get_greeks(instrument)
-            if greeks is not None: return greeks
-            if instrument in self._fetch_cache: return self._fetch_cache[instrument]
-            logger.debug("Greeks cache miss", extra=log_extra(instrument=instrument))
+            if greeks is not None:
+                return greeks
+            if instrument in self._fetch_cache:
+                return self._fetch_cache[instrument]
             try:
-                greeks = await fetch_func(instrument)
-                if greeks:
-                    await self.redis.set_greeks(instrument, greeks)
-                    self._fetch_cache[instrument] = greeks
-                    asyncio.get_event_loop().call_later(5.0, self._fetch_cache.pop, instrument, None)
+                greeks = await _fetch_and_store_greeks(self, instrument, fetch_func)
             except Exception as e:
                 logger.error(
                     "Failed to fetch Greeks",
@@ -577,29 +493,18 @@ class GreeksCacheManager:
             if greeks:
                 await self.redis.set_greeks(instrument, greeks)
         except Exception as e:
-            # Background refresh must not crash caller control flow on fetch callback failures.
             logger.warning(
                 "Greeks refresh failed",
                 extra=log_extra(instrument=instrument, error=str(e))
             )
 
 
-# Convenience function for creating cache from config
 def create_redis_cache(
     host: Optional[str] = None,
     port: Optional[int] = None,
     db: Optional[int] = None
 ) -> RedisCache:
-    """
-    Create RedisCache from environment or defaults.
-
-    Environment variables:
-    - REDIS_HOST (default: localhost)
-    - REDIS_PORT (default: 6379)
-    - REDIS_DB (default: 0)
-    """
-    import os
-
+    """Create RedisCache from environment or defaults."""
     return RedisCache(
         host=host or os.getenv("REDIS_HOST", "localhost"),
         port=port or int(os.getenv("REDIS_PORT", "6379")),

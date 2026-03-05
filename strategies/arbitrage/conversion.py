@@ -48,6 +48,77 @@ def _strategy_and_profit_from_deviation(
     return None
 
 
+def _annualized_conversion_return(
+    *, profit: float, spot_price: float, time_to_expiry: float
+) -> float | None:
+    if spot_price <= 0 or time_to_expiry <= 0:
+        return None
+    return float((profit / spot_price) / time_to_expiry)
+
+
+def _conversion_outcome_from_parity(
+    *,
+    strategy: "ConversionArbitrage",
+    spot_price: float,
+    parity: Dict[str, float],
+) -> Optional[tuple[Literal["conversion", "reversal"], float, float, float]]:
+    deviation = parity["deviation"]
+    time_to_expiry = parity["time_to_expiry"]
+    if spot_price <= 0 or time_to_expiry <= 0:
+        return None
+    total_cost = 3 * strategy.transaction_cost * spot_price
+    strategy_profit = _strategy_and_profit_from_deviation(
+        deviation=deviation,
+        total_cost=total_cost,
+    )
+    if strategy_profit is None:
+        return None
+    trade_side, profit = strategy_profit
+    if profit / spot_price < strategy.min_profit:
+        return None
+    annualized_return = _annualized_conversion_return(
+        profit=profit,
+        spot_price=spot_price,
+        time_to_expiry=time_to_expiry,
+    )
+    if annualized_return is None:
+        return None
+    return trade_side, float(profit), float(annualized_return), float(deviation)
+
+
+def _opportunity_from_resolved_inputs(
+    *,
+    strategy: "ConversionArbitrage",
+    underlying: str,
+    resolved: tuple[float, float, float, float, datetime],
+) -> Optional["ConversionOpportunity"]:
+    call_price, put_price, spot_price, strike, expiry = resolved
+    parity = strategy.calculate_parity_deviation(
+        call_price, put_price, spot_price, strike, expiry
+    )
+    outcome = _conversion_outcome_from_parity(
+        strategy=strategy,
+        spot_price=spot_price,
+        parity=parity,
+    )
+    if outcome is None:
+        return None
+    trade_side, profit, annualized_return, deviation = outcome
+    return _build_conversion_opportunity(
+        underlying=underlying,
+        strike=strike,
+        expiry=expiry,
+        call_price=call_price,
+        put_price=put_price,
+        spot_price=spot_price,
+        strategy=trade_side,
+        parity=parity,
+        deviation=deviation,
+        profit=profit,
+        annualized_return=annualized_return,
+    )
+
+
 @dataclass
 class ConversionOpportunity:
     """转换/反转套利机会。"""
@@ -173,29 +244,21 @@ class ConversionArbitrage:
         expiry: Optional[datetime] = None
     ) -> Optional[ConversionOpportunity]:
         """检查是否存在转换/反转套利机会。"""
-        resolved = _resolve_opportunity_inputs(strategy=self, underlying=underlying, call_price=call_price, put_price=put_price, spot_price=spot_price, strike=strike, expiry=expiry)
-        if resolved is None: return None
-        call_price, put_price, spot_price, strike, expiry = resolved
-        parity = self.calculate_parity_deviation(call_price, put_price, spot_price, strike, expiry)
-        deviation, T = parity['deviation'], parity['time_to_expiry']
-        if spot_price <= 0 or T <= 0: return None
-        total_cost = 3 * self.transaction_cost * spot_price
-        if (strategy_profit := _strategy_and_profit_from_deviation(deviation=deviation, total_cost=total_cost)) is None: return None
-        strategy, profit = strategy_profit
-        if profit / spot_price < self.min_profit: return None
-        annualized_return = (profit / spot_price) / T
-        return _build_conversion_opportunity(
+        resolved = _resolve_opportunity_inputs(
+            strategy=self,
             underlying=underlying,
-            strike=strike,
-            expiry=expiry,
             call_price=call_price,
             put_price=put_price,
             spot_price=spot_price,
-            strategy=strategy,
-            parity=parity,
-            deviation=deviation,
-            profit=profit,
-            annualized_return=annualized_return,
+            strike=strike,
+            expiry=expiry,
+        )
+        if resolved is None:
+            return None
+        return _opportunity_from_resolved_inputs(
+            strategy=self,
+            underlying=underlying,
+            resolved=resolved,
         )
 
     def get_hedge_position(self, opp: ConversionOpportunity) -> Dict[str, float]:

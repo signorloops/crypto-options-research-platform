@@ -242,7 +242,7 @@ class VPINCalculator:
         if n_buckets == 0: return _empty_bucket_arrays()
         is_buy = sides == 'buy'; buy_trade_vol, sell_trade_vol = np.where(is_buy, volumes, 0.0), np.where(is_buy, 0.0, volumes)
         cum_buy, cum_sell = np.cumsum(buy_trade_vol), np.cumsum(sell_trade_vol)
-        full_components = _full_bucket_components(
+        full_buy, full_sell, full_timestamps, full_totals, cum_buy_at_boundaries, cum_sell_at_boundaries = _full_bucket_components(
             cum_total=cum_total,
             volumes=volumes,
             is_buy=is_buy,
@@ -252,7 +252,6 @@ class VPINCalculator:
             bucket_size=bucket_size,
             n_full=n_full,
         )
-        full_buy, full_sell, full_timestamps, full_totals, cum_buy_at_boundaries, cum_sell_at_boundaries = full_components
         return _append_partial_bucket(
             include_partial=include_partial,
             n_full=n_full,

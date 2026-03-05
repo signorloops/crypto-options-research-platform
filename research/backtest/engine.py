@@ -70,6 +70,178 @@ def _trade_side_counts(trades: List[Fill]) -> Tuple[int, int]:
     return buys, sells
 
 
+def _result_series_bundle(engine: object) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    pnl_series = _history_to_series(engine._pnl_history)
+    inventory_series = _history_to_series(engine._inventory_history)
+    crypto_balance_series = _history_to_series(engine._crypto_balance_history)
+    return pnl_series, inventory_series, crypto_balance_series
+
+
+def _result_risk_bundle(
+    engine: object,
+    pnl_series: pd.Series,
+) -> Tuple[float, float, Tuple[float, float], Tuple[float, float], float]:
+    sharpe = engine._calculate_sharpe_ratio(pnl_series)
+    max_dd = _calculate_max_drawdown(pnl_series)
+    returns_for_ci = (
+        pnl_series.diff().dropna() / max(engine.initial_crypto_balance, 1e-12)
+        if len(pnl_series) > 1
+        else pd.Series(dtype=float)
+    )
+    sharpe_ci, drawdown_ci = engine._bootstrap_risk_ci(returns_for_ci)
+    deflated_trials = max(
+        2,
+        int(getattr(engine.strategy, "multiple_testing_trials", 2)),
+    )
+    deflated_sharpe = engine._deflated_sharpe_ratio(
+        float(sharpe),
+        n_obs=len(returns_for_ci),
+        n_trials=deflated_trials,
+    )
+    return sharpe, max_dd, sharpe_ci, drawdown_ci, deflated_sharpe
+
+
+def _trade_summary(
+    trades: List[Fill], total_pnl_crypto: float
+) -> Tuple[int, int, float, float]:
+    buys, sells = _trade_side_counts(trades)
+    avg_trade_size = np.mean([t.size for t in trades]) if trades else 0
+    avg_trade_pnl_crypto = total_pnl_crypto / len(trades) if trades else 0
+    return buys, sells, avg_trade_size, avg_trade_pnl_crypto
+
+
+def _result_core_fields(
+    *,
+    strategy_name: str,
+    total_pnl_crypto: float,
+    total_pnl_usd: float,
+    realized_pnl: float,
+    unrealized_pnl: float,
+    sharpe: float,
+    deflated_sharpe: float,
+    max_dd: float,
+    pnl_series: pd.Series,
+    sharpe_ci: Tuple[float, float],
+    drawdown_ci: Tuple[float, float],
+) -> dict[str, object]:
+    return {
+        "strategy_name": strategy_name,
+        "total_pnl_crypto": total_pnl_crypto,
+        "total_pnl_usd": total_pnl_usd,
+        "realized_pnl": realized_pnl,
+        "unrealized_pnl": unrealized_pnl,
+        "inventory_pnl": unrealized_pnl,
+        "sharpe_ratio": sharpe,
+        "deflated_sharpe_ratio": deflated_sharpe,
+        "max_drawdown": max_dd,
+        "volatility": pnl_series.std() if len(pnl_series) > 1 else 0,
+        "sharpe_ci_95": sharpe_ci,
+        "drawdown_ci_95": drawdown_ci,
+    }
+
+
+def _result_trade_fields(
+    *,
+    trades: List[Fill],
+    buys: int,
+    sells: int,
+    avg_trade_size: float,
+    avg_trade_pnl_crypto: float,
+    execution_cost: float,
+    adverse_selection_cost: float,
+) -> dict[str, object]:
+    return {
+        "trade_count": len(trades),
+        "buy_count": buys,
+        "sell_count": sells,
+        "avg_trade_size": avg_trade_size,
+        "avg_trade_pnl_crypto": avg_trade_pnl_crypto,
+        "total_spread_captured": 0,
+        "avg_spread_captured_bps": 0,
+        "inventory_cost": execution_cost,
+        "adverse_selection_cost": adverse_selection_cost,
+    }
+
+
+def _result_series_fields(
+    *,
+    crypto_balance: float,
+    crypto_balance_series: pd.Series,
+    pnl_series: pd.Series,
+    inventory_series: pd.Series,
+) -> dict[str, object]:
+    return {
+        "crypto_balance": crypto_balance,
+        "crypto_balance_series": crypto_balance_series,
+        "pnl_series": pnl_series,
+        "inventory_series": inventory_series,
+    }
+
+
+def _result_core_metrics(
+    *,
+    engine: object,
+    current_price: Optional[float],
+    pnl_series: pd.Series,
+) -> tuple[dict[str, object], float]:
+    total_pnl_crypto = float(pnl_series.iloc[-1]) if len(pnl_series) > 0 else 0.0
+    total_pnl_usd = total_pnl_crypto * (
+        float(current_price) if current_price is not None else 0.0
+    )
+    realized_pnl, unrealized_pnl = engine._calculate_crypto_pnl_components(current_price)
+    sharpe, max_dd, sharpe_ci, drawdown_ci, deflated_sharpe = _result_risk_bundle(
+        engine,
+        pnl_series,
+    )
+    core = _result_core_fields(
+        strategy_name=engine.strategy.name,
+        total_pnl_crypto=total_pnl_crypto,
+        total_pnl_usd=total_pnl_usd,
+        realized_pnl=realized_pnl,
+        unrealized_pnl=unrealized_pnl,
+        sharpe=sharpe,
+        deflated_sharpe=deflated_sharpe,
+        max_dd=max_dd,
+        pnl_series=pnl_series,
+        sharpe_ci=sharpe_ci,
+        drawdown_ci=drawdown_ci,
+    )
+    return core, total_pnl_crypto
+
+
+def _result_trade_metrics(
+    *,
+    engine: object,
+    total_pnl_crypto: float,
+) -> dict[str, object]:
+    buys, sells, avg_trade_size, avg_trade_pnl_crypto = _trade_summary(
+        engine.trades,
+        total_pnl_crypto,
+    )
+    execution_cost, adverse_selection_cost = engine._execution_costs()
+    return _result_trade_fields(
+        trades=engine.trades,
+        buys=buys,
+        sells=sells,
+        avg_trade_size=avg_trade_size,
+        avg_trade_pnl_crypto=avg_trade_pnl_crypto,
+        execution_cost=execution_cost,
+        adverse_selection_cost=adverse_selection_cost,
+    )
+
+
+def _compose_result_payload(
+    *,
+    core_fields: dict[str, object],
+    trade_fields: dict[str, object],
+    series_fields: dict[str, object],
+) -> dict[str, object]:
+    payload = dict(core_fields)
+    payload.update(trade_fields)
+    payload.update(series_fields)
+    return payload
+
+
 @dataclass
 class BacktestResult:
     """Results from a backtest run (coin-margined)."""
@@ -202,20 +374,10 @@ class BacktestEngine:
         """Try to fill previous quote against synthetic trades and update position."""
         if previous_quote is None or self.fill_simulator is None:
             return position
-        synthetic_trades = self._generate_synthetic_trades(
-            market_state,
-            volume=event_volume,
-            start_timestamp=quote_timestamp,
-        )
+        synthetic_trades = self._generate_synthetic_trades(market_state, volume=event_volume, start_timestamp=quote_timestamp)
         if not synthetic_trades:
             return position
-        fill = self.fill_simulator.simulate_fill(
-            previous_quote,
-            market_state,
-            synthetic_trades,
-            quote_timestamp=quote_timestamp,
-            transaction_cost_bps=self.transaction_cost_bps,
-        )
+        fill = self.fill_simulator.simulate_fill(previous_quote, market_state, synthetic_trades, quote_timestamp=quote_timestamp, transaction_cost_bps=self.transaction_cost_bps)
         if fill is None:
             return position
         self._process_fill(fill, position, current_price)
@@ -247,14 +409,7 @@ class BacktestEngine:
             current_ob = self._update_order_book(current_ob, price)
             market_state = _build_market_state_snapshot(timestamp=timestamp, price=price, order_book=current_ob)
             position = self.positions.get("SYNTHETIC", Position("SYNTHETIC", 0, 0))
-            position = self._maybe_process_previous_quote(
-                previous_quote=previous_quote,
-                quote_timestamp=previous_quote_timestamp,
-                market_state=market_state,
-                position=position,
-                event_volume=float(event_volumes[i]),
-                current_price=price,
-            )
+            position = self._maybe_process_previous_quote(previous_quote=previous_quote, quote_timestamp=previous_quote_timestamp, market_state=market_state, position=position, event_volume=float(event_volumes[i]), current_price=price)
             quote_state = previous_market_state if previous_market_state is not None else market_state
             new_quote = self._quote_with_lagged_snapshot(quote_state=quote_state, position=position)
             self.quotes.append(new_quote)
@@ -309,28 +464,16 @@ class BacktestEngine:
         arrival_intensity = float(max(volume, 0.0))
         max_trades = int(np.clip(np.ceil(arrival_intensity) + 2, 1, 50))
         num_trades = int(np.clip(self.rng.poisson(arrival_intensity), 0, max_trades))
+        imbalance = market_state.order_book.imbalance() if hasattr(market_state.order_book, "imbalance") else 0
+        side_bias = 0.5 + imbalance * 0.2
+        mid = market_state.spot_price
         for _ in range(num_trades):
-            imbalance = (
-                market_state.order_book.imbalance()
-                if hasattr(market_state.order_book, "imbalance")
-                else 0
-            )
-            side_bias = 0.5 + imbalance * 0.2
             side = OrderSide.BUY if self.rng.random() < side_bias else OrderSide.SELL
-            mid = market_state.spot_price
             price_offset = self.rng.normal(0, mid * 0.0001)
             trade_price = mid + price_offset
             trade_size = volume * self.rng.random() * 0.3
             trade_timestamp = self._sample_trade_timestamp(start_timestamp, end_timestamp)
-            trades.append(
-                Trade(
-                    timestamp=trade_timestamp,
-                    instrument=market_state.instrument,
-                    price=abs(trade_price),
-                    size=abs(trade_size),
-                    side=side,
-                )
-            )
+            trades.append(Trade(timestamp=trade_timestamp, instrument=market_state.instrument, price=abs(trade_price), size=abs(trade_size), side=side))
         return trades
 
     def _sample_trade_timestamp(self, start_timestamp, end_timestamp):
@@ -444,15 +587,13 @@ class BacktestEngine:
 
         lo = alpha / 2
         hi = 1 - alpha / 2
-        sharpe_ci = (
+        return (
             float(np.quantile(sharpe_samples, lo)),
             float(np.quantile(sharpe_samples, hi)),
-        )
-        drawdown_ci = (
+        ), (
             float(np.quantile(dd_samples, lo)),
             float(np.quantile(dd_samples, hi)),
         )
-        return sharpe_ci, drawdown_ci
 
     @staticmethod
     def _deflated_sharpe_ratio(sharpe: float, n_obs: int, n_trials: int = 1) -> float:
@@ -493,35 +634,25 @@ class BacktestEngine:
 
     def _compute_result(self, current_price: Optional[float] = None) -> BacktestResult:
         """Compute final backtest metrics (coin-margined)."""
-        pnl_series, inventory_series, crypto_balance_series = _history_to_series(self._pnl_history), _history_to_series(self._inventory_history), _history_to_series(self._crypto_balance_history)
-        total_pnl_crypto = float(pnl_series.iloc[-1]) if len(pnl_series) > 0 else 0.0
-        total_pnl_usd = total_pnl_crypto * (float(current_price) if current_price is not None else 0.0); realized_pnl, unrealized_pnl = self._calculate_crypto_pnl_components(current_price)
-        sharpe = self._calculate_sharpe_ratio(pnl_series); max_dd = _calculate_max_drawdown(pnl_series); buys, sells = _trade_side_counts(self.trades)
-        returns_for_ci = pnl_series.diff().dropna() / max(self.initial_crypto_balance, 1e-12) if len(pnl_series) > 1 else pd.Series(dtype=float)
-        sharpe_ci, drawdown_ci = self._bootstrap_risk_ci(returns_for_ci); deflated_trials = max(2, int(getattr(self.strategy, "multiple_testing_trials", 2)))
-        deflated_sharpe = self._deflated_sharpe_ratio(float(sharpe), n_obs=len(returns_for_ci), n_trials=deflated_trials); execution_cost, adverse_selection_cost = self._execution_costs()
-        return BacktestResult(strategy_name=self.strategy.name, total_pnl_crypto=total_pnl_crypto,
-            total_pnl_usd=total_pnl_usd,
-            realized_pnl=realized_pnl,
-            unrealized_pnl=unrealized_pnl,
-            inventory_pnl=unrealized_pnl,
-            sharpe_ratio=sharpe,
-            deflated_sharpe_ratio=deflated_sharpe,
-            max_drawdown=max_dd,
-            volatility=pnl_series.std() if len(pnl_series) > 1 else 0,
-            sharpe_ci_95=sharpe_ci,
-            drawdown_ci_95=drawdown_ci,
-            trade_count=len(self.trades),
-            buy_count=buys,
-            sell_count=sells,
-            avg_trade_size=np.mean([t.size for t in self.trades]) if self.trades else 0,
-            avg_trade_pnl_crypto=total_pnl_crypto / len(self.trades) if self.trades else 0,
-            total_spread_captured=0,
-            avg_spread_captured_bps=0,
-            inventory_cost=execution_cost,
-            adverse_selection_cost=adverse_selection_cost,
+        pnl_series, inventory_series, crypto_balance_series = _result_series_bundle(self)
+        core_fields, total_pnl_crypto = _result_core_metrics(
+            engine=self,
+            current_price=current_price,
+            pnl_series=pnl_series,
+        )
+        trade_fields = _result_trade_metrics(
+            engine=self,
+            total_pnl_crypto=total_pnl_crypto,
+        )
+        series_fields = _result_series_fields(
             crypto_balance=self.crypto_balance,
             crypto_balance_series=crypto_balance_series,
             pnl_series=pnl_series,
             inventory_series=inventory_series,
         )
+        payload = _compose_result_payload(
+            core_fields=core_fields,
+            trade_fields=trade_fields,
+            series_fields=series_fields,
+        )
+        return BacktestResult(**payload)

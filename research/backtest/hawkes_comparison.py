@@ -37,6 +37,102 @@ HISTORICAL_LOAD_EXCEPTIONS = (
     pd.errors.ParserError,
 )
 
+_HISTORICAL_TIMESTAMP_COLUMNS = ["timestamp", "ts", "time", "datetime", "date"]
+_HISTORICAL_PRICE_COLUMNS = ["price", "mid_price", "close", "last", "mark_price"]
+_HISTORICAL_VOLUME_COLUMNS = ["volume", "size", "qty", "trade_size"]
+
+
+def _historical_column_lookup(frame: pd.DataFrame) -> Dict[str, Any]:
+    return {str(column).lower(): column for column in frame.columns}
+
+
+def _pick_first_column(columns: Dict[str, Any], candidates: List[str]) -> Optional[Any]:
+    for candidate in candidates:
+        column = columns.get(candidate)
+        if column is not None:
+            return column
+    return None
+
+
+def _historical_timestamps(frame: pd.DataFrame, timestamp_col: Optional[Any]) -> Optional[pd.Index]:
+    if timestamp_col is not None:
+        return pd.to_datetime(frame[timestamp_col], utc=True, errors="coerce")
+    if isinstance(frame.index, pd.DatetimeIndex):
+        return pd.to_datetime(frame.index, utc=True, errors="coerce")
+    return None
+
+
+def _historical_volumes(frame: pd.DataFrame, volume_col: Optional[Any]) -> np.ndarray:
+    if volume_col is None:
+        return np.full(len(frame), 1.0, dtype=float)
+    return pd.to_numeric(frame[volume_col], errors="coerce").to_numpy()
+
+
+def _collect_period_frames(
+    *,
+    data_path: Path,
+    start_ts: pd.Timestamp,
+    end_ts: pd.Timestamp,
+    read_historical_file_fn: Callable[[Path], Optional[pd.DataFrame]],
+    normalize_historical_frame_fn: Callable[[pd.DataFrame, pd.Timestamp, pd.Timestamp], Optional[pd.DataFrame]],
+) -> List[pd.DataFrame]:
+    frames: List[pd.DataFrame] = []
+    if not data_path.exists() or not data_path.is_dir():
+        return frames
+    for path in sorted(data_path.rglob("*")):
+        if not path.is_file():
+            continue
+        raw = read_historical_file_fn(path)
+        if raw is None:
+            continue
+        normalized = normalize_historical_frame_fn(raw, start_ts, end_ts)
+        if normalized is None or normalized.empty:
+            continue
+        frames.append(normalized)
+    return frames
+
+
+def _merge_period_frames(frames: List[pd.DataFrame]) -> pd.DataFrame:
+    merged = pd.concat(frames, axis=0).sort_index()
+    merged = merged.groupby(level=0).agg({"price": "mean", "volume": "sum"})
+    merged["intensity"] = merged["volume"].ewm(span=20, adjust=False, min_periods=1).mean()
+    merged["scenario_source"] = "historical"
+    return merged
+
+
+def _collect_hawkes_metrics(
+    *,
+    strategies: List[MarketMakingStrategy],
+    extract_metrics_fn: Callable[[MarketMakingStrategy], Optional[Dict[str, float]]],
+) -> Dict[str, Dict[str, float]]:
+    hawkes_metrics: Dict[str, Dict[str, float]] = {}
+    for strategy in strategies:
+        if "Hawkes" not in strategy.name:
+            continue
+        metrics = extract_metrics_fn(strategy)
+        if metrics:
+            hawkes_metrics[strategy.name] = metrics
+    return hawkes_metrics
+
+
+def _build_comparison_result(
+    *,
+    scenario_name: str,
+    scenario_type: "ScenarioType",
+    scorecards: Dict[str, "StrategyScorecard"],
+    comparison_df: pd.DataFrame,
+    hawkes_metrics: Dict[str, Dict[str, float]],
+    jump_risk_summary: Optional[Dict[str, float]],
+) -> "ComparisonResult":
+    return ComparisonResult(
+        scenario_name=scenario_name,
+        scenario_type=scenario_type,
+        scorecards=scorecards,
+        hawkes_metrics=hawkes_metrics if hawkes_metrics else None,
+        jump_risk_summary=jump_risk_summary,
+        comparison_df=comparison_df,
+    )
+
 
 class ScenarioType(Enum):
     """Types of test scenarios."""
@@ -71,6 +167,42 @@ class HawkesScenarioConfig:
             return "high"
         else:
             return "critical"
+
+
+def _hawkes_intensity_sequence(
+    events: List[float], config: HawkesScenarioConfig
+) -> List[float]:
+    if not events:
+        return []
+    intensities = [config.mu]
+    intensities.extend(
+        config.mu + config.alpha * np.exp(-config.beta * (events[i] - events[i - 1]))
+        for i in range(1, len(events))
+    )
+    return [float(value) for value in intensities]
+
+
+def _hawkes_timestamps(events: List[float], *, base_time: datetime) -> List[datetime]:
+    return [base_time + timedelta(seconds=seconds) for seconds in events]
+
+
+def _simulate_prices_and_volumes_from_intensity(
+    *,
+    intensities: List[float],
+    base_price: float,
+    price_volatility: float,
+    rng: np.random.Generator,
+) -> Tuple[List[float], List[float]]:
+    prices: List[float] = []
+    volumes: List[float] = []
+    current_price = float(base_price)
+    for intensity in intensities:
+        local_vol = price_volatility * (1 + intensity)
+        price_change = float(rng.normal(0, local_vol * current_price / 100))
+        current_price += price_change
+        prices.append(current_price)
+        volumes.append(max(0.1, float(rng.exponential(intensity * 10))))
+    return prices, volumes
 
 
 class ScenarioGenerator:
@@ -172,28 +304,25 @@ class ScenarioGenerator:
         """Convert Hawkes events to market DataFrame with price and volume."""
         if not events:
             return pd.DataFrame()
-        if rng is None: rng = np.random.default_rng()
+        if rng is None:
+            rng = np.random.default_rng()
         base_time = datetime(2024, 1, 1)
-        timestamps = [base_time + timedelta(seconds=t) for t in events]
-        prices = []; volumes = []
-        current_price = self.base_price
-        for i, t in enumerate(events):
-            intensity = config.mu + config.alpha * np.exp(-config.beta * (t - events[i-1])) if i > 0 else config.mu
-            local_vol = self.price_volatility * (1 + intensity)
-            price_change = float(rng.normal(0, local_vol * current_price / 100))
-            current_price += price_change
-            prices.append(current_price)
-            volume = max(0.1, float(rng.exponential(intensity * 10)))
-            volumes.append(volume)
-        return pd.DataFrame({
-            'timestamp': timestamps,
-            'price': prices,
-            'volume': volumes,
-            'intensity': [config.mu] + [
-                config.mu + config.alpha * np.exp(-config.beta * (events[i] - events[i-1]))
-                for i in range(1, len(events))
-            ]
-        }).set_index('timestamp')
+        intensities = _hawkes_intensity_sequence(events, config)
+        timestamps = _hawkes_timestamps(events, base_time=base_time)
+        prices, volumes = _simulate_prices_and_volumes_from_intensity(
+            intensities=intensities,
+            base_price=self.base_price,
+            price_volatility=self.price_volatility,
+            rng=rng,
+        )
+        return pd.DataFrame(
+            {
+                "timestamp": timestamps,
+                "price": prices,
+                "volume": volumes,
+                "intensity": intensities,
+            }
+        ).set_index("timestamp")
 
     def load_real_scenarios(
         self,
@@ -234,24 +363,18 @@ class ScenarioGenerator:
     ) -> pd.DataFrame:
         """Load data for a specific period with explicit synthetic fallback labeling."""
         logger.info(f"Loading historical data for {start} to {end} from {data_dir}")
-        start_ts = self._to_utc_timestamp(start); end_ts = self._to_utc_timestamp(end)
+        start_ts = self._to_utc_timestamp(start)
+        end_ts = self._to_utc_timestamp(end)
         data_path = Path(data_dir)
-        frames: List[pd.DataFrame] = []
-        if data_path.exists() and data_path.is_dir():
-            for path in sorted(data_path.rglob("*")):
-                if not path.is_file():
-                    continue
-                raw = self._read_historical_file(path)
-                if raw is None:
-                    continue
-                normalized = self._normalize_historical_frame(raw, start_ts, end_ts)
-                if normalized is not None and not normalized.empty: frames.append(normalized)
+        frames = _collect_period_frames(
+            data_path=data_path,
+            start_ts=start_ts,
+            end_ts=end_ts,
+            read_historical_file_fn=self._read_historical_file,
+            normalize_historical_frame_fn=self._normalize_historical_frame,
+        )
         if frames:
-            merged = pd.concat(frames, axis=0).sort_index()
-            merged = merged.groupby(level=0).agg({"price": "mean", "volume": "sum"})
-            merged["intensity"] = merged["volume"].ewm(span=20, adjust=False, min_periods=1).mean()
-            merged["scenario_source"] = "historical"
-            return merged
+            return _merge_period_frames(frames)
         logger.warning("No usable historical files found in period range; falling back to synthetic proxy")
         days = (end - start).days
         config = HawkesScenarioConfig(name="real_proxy", mu=0.1, alpha=0.4, beta=0.8, T=max(days, 1) * 86400.0)
@@ -292,32 +415,27 @@ class ScenarioGenerator:
         """Normalize heterogeneous historical market files into price/volume schema."""
         if frame is None or frame.empty:
             return None
-        columns = {str(col).lower(): col for col in frame.columns}
-        def _pick(candidates: List[str]) -> Optional[str]:
-            for candidate in candidates:
-                if candidate in columns:
-                    return columns[candidate]
+
+        columns = _historical_column_lookup(frame)
+        timestamp_col = _pick_first_column(columns, _HISTORICAL_TIMESTAMP_COLUMNS)
+        price_col = _pick_first_column(columns, _HISTORICAL_PRICE_COLUMNS)
+        volume_col = _pick_first_column(columns, _HISTORICAL_VOLUME_COLUMNS)
+        if price_col is None:
             return None
-        timestamp_col = _pick(["timestamp", "ts", "time", "datetime", "date"])
-        price_col = _pick(["price", "mid_price", "close", "last", "mark_price"])
-        volume_col = _pick(["volume", "size", "qty", "trade_size"])
-        if price_col is None: return None
-        if timestamp_col is not None:
-            timestamps = pd.to_datetime(frame[timestamp_col], utc=True, errors="coerce")
-        elif isinstance(frame.index, pd.DatetimeIndex):
-            timestamps = pd.to_datetime(frame.index, utc=True, errors="coerce")
-        else: return None
+
+        timestamps = _historical_timestamps(frame, timestamp_col)
+        if timestamps is None:
+            return None
+
         prices = pd.to_numeric(frame[price_col], errors="coerce").to_numpy()
-        if volume_col is not None:
-            volumes = pd.to_numeric(frame[volume_col], errors="coerce").to_numpy()
-        else:
-            volumes = np.full(len(frame), 1.0, dtype=float)
+        volumes = _historical_volumes(frame, volume_col)
         out = pd.DataFrame({"price": prices, "volume": volumes}, index=timestamps)
         out = out.dropna(subset=["price"])
         out = out[out["price"] > 0]
         out["volume"] = out["volume"].fillna(0.0).clip(lower=0.0)
         out = out[(out.index >= start_ts) & (out.index <= end_ts)]
-        if out.empty: return None
+        if out.empty:
+            return None
         return out
 
     def generate_stress_scenarios(self) -> Dict[str, pd.DataFrame]:
@@ -603,33 +721,18 @@ class ComprehensiveHawkesComparison:
         scenarios: Optional[Dict[str, pd.DataFrame]] = None,
         verbose: bool = True
     ) -> Dict[str, ComparisonResult]:
-        """Run complete comparison across all scenarios.
-
-        Args:
-            strategies: List of strategies to compare
-            scenarios: Optional pre-generated scenarios. If None, generates default set.
-            verbose: Whether to print progress
-
-        Returns:
-            Dictionary of scenario names to ComparisonResults
-        """
-        if scenarios is None:
-            scenarios = self._generate_default_scenarios()
-
+        """Run the comparison across all scenarios."""
+        scenarios = self._generate_default_scenarios() if scenarios is None else scenarios
         self.results = {}
-
         for scenario_name, market_data in scenarios.items():
             if verbose:
                 logger.info(f"Running comparison for scenario: {scenario_name}")
-
-            result = self._run_single_scenario(
+            self.results[scenario_name] = self._run_single_scenario(
                 scenario_name,
                 market_data,
                 strategies,
-                verbose
+                verbose,
             )
-            self.results[scenario_name] = result
-
         return self.results
 
     def _generate_default_scenarios(self) -> Dict[str, pd.DataFrame]:
@@ -660,23 +763,19 @@ class ComprehensiveHawkesComparison:
         )
         # Run tournament
         comparison_df = arena.run_tournament(strategies, verbose=verbose)
-        # Collect Hawkes-specific metrics for Hawkes strategies
-        hawkes_metrics = {}
-        for strategy in strategies:
-            if 'Hawkes' in strategy.name:
-                metrics = self._extract_hawkes_metrics(strategy)
-                if metrics:
-                    hawkes_metrics[strategy.name] = metrics
-        # Determine scenario type
+        hawkes_metrics = _collect_hawkes_metrics(
+            strategies=strategies,
+            extract_metrics_fn=self._extract_hawkes_metrics,
+        )
         scenario_type = self._classify_scenario(scenario_name)
         jump_risk_summary = self._build_jump_risk_summary(market_data_enriched)
-        return ComparisonResult(
+        return _build_comparison_result(
             scenario_name=scenario_name,
             scenario_type=scenario_type,
             scorecards=arena.scorecards,
-            hawkes_metrics=hawkes_metrics if hawkes_metrics else None,
+            comparison_df=comparison_df,
+            hawkes_metrics=hawkes_metrics,
             jump_risk_summary=jump_risk_summary,
-            comparison_df=comparison_df
         )
 
     def _attach_jump_risk_premia_signals(self, market_data: pd.DataFrame) -> pd.DataFrame:

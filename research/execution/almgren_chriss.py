@@ -35,6 +35,101 @@ class ExecutionReport:
     simulated_cost_std: float
 
 
+def _validate_executor_config(config: "AlmgrenChrissConfig") -> None:
+    """Validate static configuration constraints for executor initialization."""
+    checks = (
+        (config.n_steps <= 0, "n_steps must be positive"),
+        (config.horizon <= 0, "horizon must be positive"),
+        (config.temporary_impact_eta <= 0, "temporary_impact_eta must be positive"),
+        (config.volatility < 0, "volatility must be non-negative"),
+        (config.total_quantity < 0, "total_quantity must be non-negative"),
+        (
+            config.max_participation_rate is not None and not (0 < config.max_participation_rate <= 1.0),
+            "max_participation_rate must be in (0, 1]",
+        ),
+    )
+    for failed, message in checks:
+        if failed:
+            raise ValueError(message)
+
+
+def _validate_expected_market_volume(config: "AlmgrenChrissConfig") -> None:
+    """Validate optional expected-step market volume vector."""
+    if config.expected_step_market_volume is None:
+        return
+    volume = np.asarray(config.expected_step_market_volume, dtype=float)
+    if volume.ndim != 1 or len(volume) != config.n_steps:
+        raise ValueError("expected_step_market_volume must be 1D with length n_steps")
+    if np.any(volume <= 0):
+        raise ValueError("expected_step_market_volume must be strictly positive")
+
+
+def _resolve_execution_schedule(
+    *,
+    schedule: Optional[np.ndarray],
+    n_steps: int,
+    default_schedule_fn,
+) -> np.ndarray:
+    if schedule is None:
+        return np.asarray(default_schedule_fn(), dtype=float)
+    resolved = np.asarray(schedule, dtype=float)
+    if len(resolved) != n_steps:
+        raise ValueError("schedule length must equal n_steps")
+    return resolved
+
+
+def _simulate_single_execution_path_cost(
+    *,
+    schedule: np.ndarray,
+    s0: float,
+    sigma: float,
+    tau: float,
+    eta: float,
+    gamma: float,
+    rng: np.random.Generator,
+) -> float:
+    mid = s0
+    cost = 0.0
+    for u in schedule:
+        noise = sigma * np.sqrt(tau) * float(rng.normal())
+        exec_price = mid - eta * (u / tau)
+        cost += u * (s0 - exec_price)
+        mid = mid + noise - gamma * u
+    return float(cost)
+
+
+def _clip_schedule_to_participation_cap(
+    schedule: np.ndarray, cap: np.ndarray
+) -> tuple[np.ndarray, float]:
+    clipped = np.minimum(np.maximum(schedule, 0.0), cap)
+    residual = float(np.sum(schedule) - np.sum(clipped))
+    return clipped, residual
+
+
+def _redistribute_residual_to_slack(
+    *,
+    clipped: np.ndarray,
+    cap: np.ndarray,
+    residual: float,
+) -> np.ndarray:
+    if residual <= 1e-12:
+        return clipped
+    slack = cap - clipped
+    slack_total = float(np.sum(slack))
+    if slack_total + 1e-12 < residual:
+        raise ValueError("Participation cap too tight: cannot execute parent order within horizon")
+    if slack_total > 1e-12:
+        clipped = clipped + residual * (slack / slack_total)
+    return clipped
+
+
+def _normalize_schedule_total(clipped: np.ndarray, target: float) -> np.ndarray:
+    total = float(np.sum(clipped))
+    if total > 0:
+        clipped = clipped * (target / total)
+    return clipped
+
+
 class AlmgrenChrissExecutor:
     """
     Optimal execution under linear temporary/permanent market impact.
@@ -44,26 +139,10 @@ class AlmgrenChrissExecutor:
     """
 
     def __init__(self, config: AlmgrenChrissConfig):
-        if config.n_steps <= 0:
-            raise ValueError("n_steps must be positive")
-        if config.horizon <= 0:
-            raise ValueError("horizon must be positive")
-        if config.temporary_impact_eta <= 0:
-            raise ValueError("temporary_impact_eta must be positive")
-        if config.volatility < 0:
-            raise ValueError("volatility must be non-negative")
-        if config.total_quantity < 0:
-            raise ValueError("total_quantity must be non-negative")
-        if config.max_participation_rate is not None and not (0 < config.max_participation_rate <= 1.0):
-            raise ValueError("max_participation_rate must be in (0, 1]")
+        _validate_executor_config(config)
         self.config = config
         self._tau = float(config.horizon / config.n_steps)
-        if config.expected_step_market_volume is not None:
-            volume = np.asarray(config.expected_step_market_volume, dtype=float)
-            if volume.ndim != 1 or len(volume) != config.n_steps:
-                raise ValueError("expected_step_market_volume must be 1D with length n_steps")
-            if np.any(volume <= 0):
-                raise ValueError("expected_step_market_volume must be strictly positive")
+        _validate_expected_market_volume(config)
 
     def _kappa(self) -> float:
         """Discrete-time decay parameter."""
@@ -171,24 +250,13 @@ class AlmgrenChrissExecutor:
         if len(schedule) != self.config.n_steps:
             raise ValueError("schedule length must be n_steps")
         cap = rate * np.asarray(market_volume, dtype=float)
-        clipped = np.minimum(np.maximum(schedule, 0.0), cap)
-        residual = float(np.sum(schedule) - np.sum(clipped))
-        if residual <= 1e-12:
-            return clipped
-
-        slack = cap - clipped
-        slack_total = float(np.sum(slack))
-        if slack_total + 1e-12 < residual:
-            raise ValueError("Participation cap too tight: cannot execute parent order within horizon")
-        if slack_total > 1e-12:
-            clipped += residual * (slack / slack_total)
-
-        # Final normalization for numerical drift.
-        target = float(np.sum(schedule))
-        total = float(np.sum(clipped))
-        if total > 0:
-            clipped *= target / total
-        return clipped
+        clipped, residual = _clip_schedule_to_participation_cap(schedule, cap)
+        clipped = _redistribute_residual_to_slack(
+            clipped=clipped,
+            cap=cap,
+            residual=residual,
+        )
+        return _normalize_schedule_total(clipped, target=float(np.sum(schedule)))
 
     def _inventory_from_schedule(self, schedule: np.ndarray) -> np.ndarray:
         """Convert schedule to inventory path."""
@@ -212,26 +280,23 @@ class AlmgrenChrissExecutor:
         if n_paths <= 0:
             raise ValueError("n_paths must be positive")
         gen = rng or np.random.default_rng(self.config.random_seed)
-
-        if schedule is None:
-            schedule = self.optimal_trading_schedule()
-        else:
-            schedule = np.asarray(schedule, dtype=float)
-            if len(schedule) != self.config.n_steps: raise ValueError("schedule length must equal n_steps")
+        schedule = _resolve_execution_schedule(schedule=schedule, n_steps=self.config.n_steps, default_schedule_fn=self.optimal_trading_schedule)
         costs = np.zeros(n_paths, dtype=float)
-        sigma, eta, gamma, s0, tau = self.config.volatility, self.config.temporary_impact_eta, self.config.permanent_impact_gamma, self.config.initial_price, self._tau
-
+        sigma = self.config.volatility
+        eta = self.config.temporary_impact_eta
+        gamma = self.config.permanent_impact_gamma
+        s0 = self.config.initial_price
+        tau = self._tau
         for i in range(n_paths):
-            mid = s0
-            cost = 0.0
-            for u in schedule:
-                noise = sigma * np.sqrt(tau) * float(gen.normal())
-                # Execution price penalized by temporary impact.
-                exec_price = mid - eta * (u / tau)
-                cost += u * (s0 - exec_price)
-                # Mid-price evolves with noise and permanent impact.
-                mid = mid + noise - gamma * u
-            costs[i] = cost
+            costs[i] = _simulate_single_execution_path_cost(
+                schedule=schedule,
+                s0=s0,
+                sigma=sigma,
+                tau=tau,
+                eta=eta,
+                gamma=gamma,
+                rng=gen,
+            )
         return costs
 
     def build_report(

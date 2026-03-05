@@ -32,6 +32,68 @@ class ASConfig:
     max_k: float = 12.0
 
 
+def _extract_trade_intensity(state: MarketState) -> float:
+    """Prefer explicit intensity feature; fall back to recent trade count."""
+    intensity_feature = state.features.get("trade_intensity")
+    if intensity_feature is None:
+        return float(len(state.recent_trades))
+    return float(max(0.0, intensity_feature))
+
+
+def _estimate_sigma_from_returns(returns_window: deque, annualization_periods: float) -> float | None:
+    """Estimate annualized sigma when enough returns are available."""
+    if len(returns_window) < 5:
+        return None
+    sigma_raw = float(np.std(returns_window, ddof=1)) * np.sqrt(max(annualization_periods, 1.0))
+    if not np.isfinite(sigma_raw):
+        return None
+    return sigma_raw
+
+
+def _estimate_inventory_adjusted_k(
+    intensity_window: deque,
+    inventory: float,
+    inventory_limit: float,
+) -> float | None:
+    """Estimate k from average intensity with inventory-utilization adjustment."""
+    if len(intensity_window) < 3:
+        return None
+    avg_intensity = float(np.mean(intensity_window))
+    inventory_util = abs(float(inventory)) / max(inventory_limit, 1e-12)
+    k_raw = avg_intensity / (1.0 + 0.5 * inventory_util)
+    if not np.isfinite(k_raw):
+        return None
+    return k_raw
+
+
+def _log_return(new_mid: float, previous_mid: float) -> float | None:
+    if previous_mid <= 0:
+        return None
+    ret = float(np.log(new_mid / previous_mid))
+    if not np.isfinite(ret):
+        return None
+    return ret
+
+
+def _apply_online_sigma(config: ASConfig, sigma_raw: float | None) -> None:
+    if sigma_raw is None:
+        return
+    config.sigma = float(np.clip(sigma_raw, config.min_sigma, config.max_sigma))
+
+
+def _apply_online_k(config: ASConfig, k_raw: float | None) -> None:
+    if k_raw is None:
+        return
+    config.k = float(np.clip(k_raw, config.min_k, config.max_k))
+
+
+def _online_calibration_metadata(config: ASConfig) -> Dict[str, float]:
+    return {
+        "calibrated_sigma": float(config.sigma),
+        "calibrated_k": float(config.k),
+    }
+
+
 class AvellanedaStoikov(MarketMakingStrategy):
     """
     Implementation of the Avellaneda-Stoikov optimal market making model.
@@ -71,33 +133,24 @@ class AvellanedaStoikov(MarketMakingStrategy):
         mid = state.order_book.mid_price
         if mid is None or mid <= 0:
             return {}
-        if self._last_mid_price > 0:
-            ret = float(np.log(mid / self._last_mid_price))
-            if np.isfinite(ret):
-                self._returns_window.append(ret)
+
+        ret = _log_return(float(mid), self._last_mid_price)
+        if ret is not None:
+            self._returns_window.append(ret)
         self._last_mid_price = float(mid)
-        intensity_feature = state.features.get("trade_intensity")
-        if intensity_feature is not None:
-            intensity = float(max(0.0, intensity_feature))
-        else:
-            intensity = float(len(state.recent_trades))
-        self._trade_intensity_window.append(intensity)
-        if len(self._returns_window) >= 5:
-            sigma_raw = float(np.std(self._returns_window, ddof=1)) * np.sqrt(
-                max(self.config.annualization_periods, 1.0)
-            )
-            if np.isfinite(sigma_raw):
-                self.config.sigma = float(np.clip(sigma_raw, self.config.min_sigma, self.config.max_sigma))
-        if len(self._trade_intensity_window) >= 3:
-            avg_intensity = float(np.mean(self._trade_intensity_window))
-            inventory_util = abs(float(inventory)) / max(self.config.inventory_limit, 1e-12)
-            k_raw = avg_intensity / (1.0 + 0.5 * inventory_util)
-            if np.isfinite(k_raw):
-                self.config.k = float(np.clip(k_raw, self.config.min_k, self.config.max_k))
-        return {
-            "calibrated_sigma": float(self.config.sigma),
-            "calibrated_k": float(self.config.k),
-        }
+        self._trade_intensity_window.append(_extract_trade_intensity(state))
+
+        sigma_raw = _estimate_sigma_from_returns(
+            self._returns_window, self.config.annualization_periods
+        )
+        _apply_online_sigma(self.config, sigma_raw)
+        k_raw = _estimate_inventory_adjusted_k(
+            self._trade_intensity_window,
+            inventory,
+            self.config.inventory_limit,
+        )
+        _apply_online_k(self.config, k_raw)
+        return _online_calibration_metadata(self.config)
 
     def _compute_time_remaining(self, state: MarketState) -> float:
         """Compute remaining horizon in years from market-state timestamps."""

@@ -25,6 +25,14 @@ IV_INVERSION_EXCEPTIONS = (
     RuntimeError,
 )
 
+MODEL_PRICER_DISPATCH: dict[str, tuple[str, bool]] = {
+    "black_scholes": ("_price_black_scholes", False),
+    "merton_jump_diffusion": ("_price_merton_jump_diffusion", True),
+    "kou_jump": ("_price_kou_approx", True),
+    "heston": ("_price_heston_approx", True),
+    "bates": ("_price_bates_approx", True),
+}
+
 
 @dataclass
 class OptionQuote:
@@ -75,22 +83,55 @@ def _benchmark_row(
 ) -> Dict[str, float]:
     abs_err, sq_err, iv_abs_err = [], [], []
     for quote in quotes:
-        predicted = zoo.price_option(
+        err, iv_err = _benchmark_quote_errors(
+            zoo=zoo,
             model=model,
-            spot=quote.spot,
-            strike=quote.strike,
-            maturity=quote.maturity,
-            rate=quote.rate,
+            quote=quote,
             sigma=sigma,
-            is_call=quote.is_call,
             model_params=model_params,
         )
-        err = float(predicted - quote.market_price)
         abs_err.append(abs(err))
         sq_err.append(err * err)
-        iv_err = _safe_iv_abs_error(quote, predicted)
         if iv_err is not None:
             iv_abs_err.append(iv_err)
+    return _benchmark_summary(
+        model=model,
+        abs_err=abs_err,
+        sq_err=sq_err,
+        iv_abs_err=iv_abs_err,
+    )
+
+
+def _benchmark_quote_errors(
+    *,
+    zoo: "CryptoOptionModelZoo",
+    model: str,
+    quote: OptionQuote,
+    sigma: float,
+    model_params: Optional[Dict[str, float]],
+) -> tuple[float, Optional[float]]:
+    predicted = zoo.price_option(
+        model=model,
+        spot=quote.spot,
+        strike=quote.strike,
+        maturity=quote.maturity,
+        rate=quote.rate,
+        sigma=sigma,
+        is_call=quote.is_call,
+        model_params=model_params,
+    )
+    err = float(predicted - quote.market_price)
+    iv_err = _safe_iv_abs_error(quote, predicted)
+    return err, iv_err
+
+
+def _benchmark_summary(
+    *,
+    model: str,
+    abs_err: list[float],
+    sq_err: list[float],
+    iv_abs_err: list[float],
+) -> Dict[str, float]:
     return {
         "model": model,
         "rmse": float(np.sqrt(np.mean(sq_err))) if sq_err else np.nan,
@@ -291,20 +332,15 @@ class CryptoOptionModelZoo:
         model_id = str(model).lower()
         params = model_params or {}
         sigma = float(np.clip(sigma, 0.001, 5.0))
-
-        if model_id == "black_scholes":
-            px = self._price_black_scholes(spot, strike, maturity, rate, sigma, is_call)
-        elif model_id == "merton_jump_diffusion":
-            px = self._price_merton_jump_diffusion(spot, strike, maturity, rate, sigma, is_call, **params)
-        elif model_id == "kou_jump":
-            px = self._price_kou_approx(spot, strike, maturity, rate, sigma, is_call, **params)
-        elif model_id == "heston":
-            px = self._price_heston_approx(spot, strike, maturity, rate, sigma, is_call, **params)
-        elif model_id == "bates":
-            px = self._price_bates_approx(spot, strike, maturity, rate, sigma, is_call, **params)
-        else:
+        dispatch = MODEL_PRICER_DISPATCH.get(model_id)
+        if dispatch is None:
             raise ValueError(f"Unknown model '{model}'")
-
+        method_name, accepts_params = dispatch
+        pricer = getattr(self, method_name)
+        if accepts_params:
+            px = pricer(spot, strike, maturity, rate, sigma, is_call, **params)
+        else:
+            px = pricer(spot, strike, maturity, rate, sigma, is_call)
         return self._safe_price(px)
 
     def benchmark(

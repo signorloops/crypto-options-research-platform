@@ -35,6 +35,36 @@ class ReconstructionState:
     gap_detected: bool = False
 
 
+def _expected_sequence_gap(state: ReconstructionState, sequence: int) -> Optional[Tuple[int, int]]:
+    if state.last_sequence is None:
+        return None
+    expected_seq = state.last_sequence + 1
+    if sequence == expected_seq:
+        return None
+    return expected_seq, sequence
+
+
+def _notify_gap_callbacks(
+    callbacks: List[Callable[[int, int], None]],
+    previous_sequence: int,
+    current_sequence: int,
+) -> None:
+    for callback in callbacks:
+        try:
+            callback(previous_sequence, current_sequence)
+        except Exception as e:
+            # Gap callbacks are external hooks; preserve reconstruction control flow.
+            logger.error(f"Gap callback error: {e}")
+
+
+def _apply_delta_to_side(state: ReconstructionState, delta: OrderBookDelta) -> None:
+    target_side = state.bids if delta.side == 'bid' else state.asks
+    if delta.size <= 0:
+        target_side.pop(delta.price, None)
+        return
+    target_side[delta.price] = delta.size
+
+
 class OrderBookReconstructor:
     """
     订单簿重建器
@@ -68,29 +98,22 @@ class OrderBookReconstructor:
 
     def apply_delta(self, delta: OrderBookDelta) -> bool:
         """应用增量更新并在序列跳跃时标记失步。"""
-        if self.state.last_sequence is not None:
-            expected_seq = self.state.last_sequence + 1
-            if delta.sequence != expected_seq:
-                logger.error(
-                    f"{self.instrument}: 序列号间隙 detected! "
-                    f"期望: {expected_seq}, 实际: {delta.sequence}"
-                )
-                self.state.gap_detected = True
-                self.state.is_synchronized = False
-
-                # 触发回调
-                for callback in self._on_gap_callbacks:
-                    try:
-                        callback(self.state.last_sequence, delta.sequence)
-                    except Exception as e:
-                        # Gap callbacks are external hooks; preserve reconstruction control flow.
-                        logger.error(f"Gap callback error: {e}")
-                return False
-        target_side = self.state.bids if delta.side == 'bid' else self.state.asks
-        if delta.size <= 0:
-            target_side.pop(delta.price, None)
-        else:
-            target_side[delta.price] = delta.size
+        gap = _expected_sequence_gap(self.state, delta.sequence)
+        if gap is not None:
+            expected_seq, current_seq = gap
+            logger.error(
+                f"{self.instrument}: 序列号间隙 detected! "
+                f"期望: {expected_seq}, 实际: {current_seq}"
+            )
+            self.state.gap_detected = True
+            self.state.is_synchronized = False
+            _notify_gap_callbacks(
+                self._on_gap_callbacks,
+                previous_sequence=self.state.last_sequence,
+                current_sequence=current_seq,
+            )
+            return False
+        _apply_delta_to_side(self.state, delta)
         self._trim_price_levels()
         self.state.last_sequence = delta.sequence
         self.state.last_timestamp = delta.timestamp

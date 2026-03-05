@@ -70,6 +70,164 @@ def _option_price_bounds(
     return max(0.0, K * discount - S), K * discount
 
 
+def _resolve_risk_free_rate(r: float | None) -> float:
+    if r is None:
+        return float(os.getenv("RISK_FREE_RATE", "0.05"))
+    return float(r)
+
+
+def _ensure_price_within_bounds(
+    *,
+    market_price: float,
+    S: float,
+    K: float,
+    T: float,
+    r: float,
+    is_call: bool,
+) -> None:
+    lower_bound, upper_bound = _option_price_bounds(S, K, T, r, is_call)
+    if market_price < lower_bound - 1e-10 or market_price > upper_bound + 1e-10:
+        raise ValueError(
+            f"Option price {market_price} violates no-arbitrage bounds [{lower_bound}, {upper_bound}]"
+        )
+
+
+def _bisection_sigma_search(
+    *,
+    market_price: float,
+    S: float,
+    K: float,
+    T: float,
+    r: float,
+    is_call: bool,
+    tol: float,
+    max_iter: int,
+) -> float:
+    sigma_low, sigma_high = 0.001, 5.0
+    for _ in range(max_iter):
+        sigma_mid = (sigma_low + sigma_high) / 2
+        price_mid = black_scholes_price(S, K, T, r, sigma_mid, is_call)
+        if abs(price_mid - market_price) < tol:
+            return float(sigma_mid)
+        if price_mid < market_price:
+            sigma_low = sigma_mid
+        else:
+            sigma_high = sigma_mid
+    return float((sigma_low + sigma_high) / 2)
+
+
+def _lbr_halley_refinement(
+    *,
+    market_price: float,
+    S: float,
+    K: float,
+    T: float,
+    r: float,
+    is_call: bool,
+    sigma: float,
+    tol: float,
+    max_iter: int,
+) -> float | None:
+    for _ in range(max_iter):
+        price = black_scholes_price(S, K, T, r, sigma, is_call)
+        diff = price - market_price
+        if abs(diff) < tol:
+            return float(sigma)
+        sigma_new = _halley_sigma_update(S=S, K=K, T=T, r=r, sigma=sigma, diff=diff)
+        if sigma_new is None:
+            return None
+        if abs(sigma_new - sigma) < tol:
+            return sigma_new
+        sigma = sigma_new
+    return None
+
+
+def _iv_trivial_solution(market_price: float, T: float) -> float | None:
+    if market_price <= 0 or T <= 0:
+        return 0.0
+    return None
+
+
+def _lbr_bisection_fallback(
+    *,
+    market_price: float,
+    S: float,
+    K: float,
+    T: float,
+    r: float,
+    is_call: bool,
+) -> float:
+    return implied_volatility_bisection(
+        market_price=market_price,
+        S=S,
+        K=K,
+        T=T,
+        r=r,
+        is_call=is_call,
+        tol=1e-8,
+        max_iter=200,
+    )
+
+
+def _prepare_lbr_problem(
+    *,
+    market_price: float,
+    S: float,
+    K: float,
+    T: float,
+    r: float | None,
+    is_call: bool,
+) -> Tuple[float, float | None]:
+    resolved_r = _resolve_risk_free_rate(r)
+    trivial = _iv_trivial_solution(market_price, T)
+    if trivial is not None:
+        return resolved_r, trivial
+    _ensure_price_within_bounds(
+        market_price=market_price,
+        S=S,
+        K=K,
+        T=T,
+        r=resolved_r,
+        is_call=is_call,
+    )
+    return resolved_r, None
+
+
+def _solve_lbr_with_fallback(
+    *,
+    market_price: float,
+    S: float,
+    K: float,
+    T: float,
+    r: float,
+    is_call: bool,
+    tol: float,
+    max_iter: int,
+) -> float:
+    sigma = _initial_sigma_guess(market_price=market_price, S=S, T=T)
+    refined = _lbr_halley_refinement(
+        market_price=market_price,
+        S=S,
+        K=K,
+        T=T,
+        r=r,
+        is_call=is_call,
+        sigma=sigma,
+        tol=tol,
+        max_iter=max_iter,
+    )
+    if refined is not None:
+        return refined
+    return _lbr_bisection_fallback(
+        market_price=market_price,
+        S=S,
+        K=K,
+        T=T,
+        r=r,
+        is_call=is_call,
+    )
+
+
 def _bisection_bracket_outcome(
     *,
     market_price: float,
@@ -87,6 +245,62 @@ def _bisection_bracket_outcome(
     if market_price > price_high:
         return sigma_high
     return None
+
+
+def _prepare_bisection_problem(
+    *,
+    market_price: float,
+    S: float,
+    K: float,
+    T: float,
+    r: float | None,
+    is_call: bool,
+) -> Tuple[float, float | None]:
+    resolved_r = _resolve_risk_free_rate(r)
+    if market_price <= 0:
+        return resolved_r, 0.0
+    _ensure_price_within_bounds(
+        market_price=market_price,
+        S=S,
+        K=K,
+        T=T,
+        r=resolved_r,
+        is_call=is_call,
+    )
+    return resolved_r, None
+
+
+def _solve_bisection_with_bracket(
+    *,
+    market_price: float,
+    S: float,
+    K: float,
+    T: float,
+    r: float,
+    is_call: bool,
+    tol: float,
+    max_iter: int,
+) -> float:
+    bracket_outcome = _bisection_bracket_outcome(
+        market_price=market_price,
+        S=S,
+        K=K,
+        T=T,
+        r=r,
+        is_call=is_call,
+    )
+    if bracket_outcome is not None:
+        return float(bracket_outcome)
+    return _bisection_sigma_search(
+        market_price=market_price,
+        S=S,
+        K=K,
+        T=T,
+        r=r,
+        is_call=is_call,
+        tol=tol,
+        max_iter=max_iter,
+    )
 
 
 def _initial_sigma_guess(*, market_price: float, S: float, T: float) -> float:
@@ -127,29 +341,26 @@ def implied_volatility_bisection(
     max_iter: int = 100,
 ) -> float:
     """Solve implied volatility with bisection."""
-    if r is None:
-        r = float(os.getenv("RISK_FREE_RATE", "0.05"))
-    if market_price <= 0:
-        return 0.0
-    lower_bound, upper_bound = _option_price_bounds(S, K, T, r, is_call)
-    if market_price < lower_bound - 1e-10 or market_price > upper_bound + 1e-10:
-        raise ValueError(f"Option price {market_price} violates no-arbitrage bounds [{lower_bound}, {upper_bound}]")
-    sigma_low, sigma_high = 0.001, 5.0
-    bracket_outcome = _bisection_bracket_outcome(
-        market_price=market_price, S=S, K=K, T=T, r=r, is_call=is_call
+    r, trivial = _prepare_bisection_problem(
+        market_price=market_price,
+        S=S,
+        K=K,
+        T=T,
+        r=r,
+        is_call=is_call,
     )
-    if bracket_outcome is not None:
-        return float(bracket_outcome)
-    for _ in range(max_iter):
-        sigma_mid = (sigma_low + sigma_high) / 2
-        price_mid = black_scholes_price(S, K, T, r, sigma_mid, is_call)
-        if abs(price_mid - market_price) < tol:
-            return float(sigma_mid)
-        if price_mid < market_price:
-            sigma_low = sigma_mid
-        else:
-            sigma_high = sigma_mid
-    return float((sigma_low + sigma_high) / 2)
+    if trivial is not None:
+        return trivial
+    return _solve_bisection_with_bracket(
+        market_price=market_price,
+        S=S,
+        K=K,
+        T=T,
+        r=r,
+        is_call=is_call,
+        tol=tol,
+        max_iter=max_iter,
+    )
 
 
 def implied_volatility_newton(
@@ -192,25 +403,84 @@ def _implied_volatility_lbr_fallback(
     tol: float = 1e-8, max_iter: int = 20,
 ) -> float:
     """近似 Let's-Be-Rational 风格 IV 回退求解器。"""
-    if r is None: r = float(os.getenv("RISK_FREE_RATE", "0.05"))
-    if market_price <= 0 or T <= 0:
-        return 0.0
-    lower_bound, upper_bound = _option_price_bounds(S, K, T, r, is_call)
-    if market_price < lower_bound - 1e-10 or market_price > upper_bound + 1e-10:
-        raise ValueError(f"Option price {market_price} violates no-arbitrage bounds [{lower_bound}, {upper_bound}]")
-    sigma = _initial_sigma_guess(market_price=market_price, S=S, T=T)
-    for _ in range(max_iter):
-        price = black_scholes_price(S, K, T, r, sigma, is_call)
-        diff = price - market_price
-        if abs(diff) < tol:
-            return float(sigma)
-        sigma_new = _halley_sigma_update(S=S, K=K, T=T, r=r, sigma=sigma, diff=diff)
-        if sigma_new is None:
-            break
-        if abs(sigma_new - sigma) < tol:
-            return sigma_new
-        sigma = sigma_new
-    return implied_volatility_bisection(market_price=market_price, S=S, K=K, T=T, r=r, is_call=is_call, tol=1e-8, max_iter=200)
+    r, trivial = _prepare_lbr_problem(
+        market_price=market_price,
+        S=S,
+        K=K,
+        T=T,
+        r=r,
+        is_call=is_call,
+    )
+    if trivial is not None:
+        return trivial
+    return _solve_lbr_with_fallback(
+        market_price=market_price,
+        S=S,
+        K=K,
+        T=T,
+        r=r,
+        is_call=is_call,
+        tol=tol,
+        max_iter=max_iter,
+    )
+
+
+def _try_jaeckel_solver(
+    *,
+    market_price: float,
+    S: float,
+    K: float,
+    T: float,
+    r: float,
+    is_call: bool,
+) -> float | None:
+    if not HAS_JAECKEL_SOLVER:
+        return None
+    flag = "c" if is_call else "p"
+    try:
+        iv = _jaeckel_iv(market_price, S, K, T, r, flag)
+    except JAECKEL_FALLBACK_EXCEPTIONS as exc:  # pragma: no cover - fallback path
+        logger.debug(
+            "Jaeckel solver failed, fallback to local LBR",
+            extra=log_extra(error=str(exc), strike=K, expiry=T),
+        )
+        return None
+    if np.isfinite(iv):
+        return float(np.clip(iv, 0.0, 5.0))
+    return None
+
+
+def _solve_jaeckel_or_lbr(
+    *,
+    market_price: float,
+    S: float,
+    K: float,
+    T: float,
+    r: float,
+    is_call: bool,
+    tol: float,
+    max_iter: int,
+) -> float:
+    jaeckel_iv = _try_jaeckel_solver(
+        market_price=market_price,
+        S=S,
+        K=K,
+        T=T,
+        r=r,
+        is_call=is_call,
+    )
+    if jaeckel_iv is not None:
+        return jaeckel_iv
+    return _solve_lbr_with_fallback(
+        market_price=market_price,
+        S=S,
+        K=K,
+        T=T,
+        r=r,
+        is_call=is_call,
+        tol=tol,
+        max_iter=max_iter,
+    )
 
 
 def implied_volatility_jaeckel(
@@ -223,24 +493,26 @@ def implied_volatility_jaeckel(
     tol: float = 1e-8, max_iter: int = 20,
 ) -> float:
     """Prefer Jaeckel LBR solver when available, otherwise use local fallback."""
-    if r is None: r = float(os.getenv("RISK_FREE_RATE", "0.05"))
-    if market_price <= 0 or T <= 0:
-        return 0.0
-    lower_bound, upper_bound = _option_price_bounds(S, K, T, r, is_call)
-    if market_price < lower_bound - 1e-10 or market_price > upper_bound + 1e-10:
-        raise ValueError(f"Option price {market_price} violates no-arbitrage bounds [{lower_bound}, {upper_bound}]")
-    if HAS_JAECKEL_SOLVER:
-        flag = "c" if is_call else "p"
-        try:
-            iv = _jaeckel_iv(market_price, S, K, T, r, flag)
-            if np.isfinite(iv):
-                return float(np.clip(iv, 0.0, 5.0))
-        except JAECKEL_FALLBACK_EXCEPTIONS as exc:  # pragma: no cover - fallback path
-            logger.debug(
-                "Jaeckel solver failed, fallback to local LBR",
-                extra=log_extra(error=str(exc), strike=K, expiry=T),
-            )
-    return _implied_volatility_lbr_fallback(market_price=market_price, S=S, K=K, T=T, r=r, is_call=is_call, tol=tol, max_iter=max_iter)
+    r, trivial = _prepare_lbr_problem(
+        market_price=market_price,
+        S=S,
+        K=K,
+        T=T,
+        r=r,
+        is_call=is_call,
+    )
+    if trivial is not None:
+        return trivial
+    return _solve_jaeckel_or_lbr(
+        market_price=market_price,
+        S=S,
+        K=K,
+        T=T,
+        r=r,
+        is_call=is_call,
+        tol=tol,
+        max_iter=max_iter,
+    )
 
 
 def implied_volatility_lbr(

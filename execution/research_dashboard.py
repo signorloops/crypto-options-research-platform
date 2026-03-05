@@ -178,27 +178,16 @@ def _load_results_dataframe(
     candidates = available_result_files(results_dir)
     if not candidates:
         raise HTTPException(status_code=404, detail="No results files found")
-
-    if file_name:
-        selected = results_dir / file_name
-        if selected not in candidates:
-            raise HTTPException(status_code=404, detail=f"File not found: {file_name}")
-    else:
-        selected = candidates[0]
-
-    if selected.suffix == ".parquet":
-        df = pd.read_parquet(selected)
-    else:
-        df = pd.read_csv(selected)
-
+    selected = (results_dir / file_name) if file_name else candidates[0]
+    if file_name and selected not in candidates:
+        raise HTTPException(status_code=404, detail=f"File not found: {file_name}")
+    df = pd.read_parquet(selected) if selected.suffix == ".parquet" else pd.read_csv(selected)
     if df.empty:
         raise HTTPException(status_code=422, detail=f"Result file is empty: {selected.name}")
-
     time_col = _find_time_column(df)
     if time_col:
         df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
         df = df.sort_values(time_col)
-
     return df, selected
 
 
@@ -220,16 +209,18 @@ def _build_summary_rows(summary: Dict[str, Any]) -> str:
     )
 
 
-def _build_deviation_section(df: pd.DataFrame) -> str:
-    try:
-        deviation_report = build_cross_market_deviation_report(df, threshold_bps=300.0)
-    except HTTPException:
-        return ""
+def _render_deviation_alerts_table(alerts: List[Dict[str, Any]]) -> str:
+    if not alerts:
+        return "<p>No alerts over 300 bps.</p>"
+    header = "".join(f"<th>{key}</th>" for key in alerts[0].keys())
+    rows = "".join(
+        "<tr>" + "".join(f"<td>{value}</td>" for value in row.values()) + "</tr>"
+        for row in alerts[:20]
+    )
+    return f"<table><thead><tr>{header}</tr></thead><tbody>{rows}</tbody></table>"
 
-    heatmap_df = pd.DataFrame(deviation_report["heatmap_records"])
-    if heatmap_df.empty:
-        return ""
 
+def _render_deviation_heatmap_html(heatmap_df: pd.DataFrame) -> str:
     heatmap_fig = px.density_heatmap(
         heatmap_df,
         x="delta_bucket",
@@ -239,19 +230,22 @@ def _build_deviation_section(df: pd.DataFrame) -> str:
         color_continuous_scale="RdBu_r",
         title="Cross-Market Deviation Heatmap (abs bps)",
     )
-    alerts = deviation_report["alerts"]
-    if alerts:
-        header = "".join(f"<th>{k}</th>" for k in alerts[0].keys())
-        rows = "".join(
-            "<tr>" + "".join(f"<td>{v}</td>" for v in row.values()) + "</tr>"
-            for row in alerts[:20]
-        )
-        alerts_table = f"<table><thead><tr>{header}</tr></thead><tbody>{rows}</tbody></table>"
-    else:
-        alerts_table = "<p>No alerts over 300 bps.</p>"
+    return heatmap_fig.to_html(full_html=False, include_plotlyjs=False)
+
+
+def _build_deviation_section(df: pd.DataFrame) -> str:
+    try:
+        deviation_report = build_cross_market_deviation_report(df, threshold_bps=300.0)
+    except HTTPException:
+        return ""
+
+    heatmap_df = pd.DataFrame(deviation_report["heatmap_records"])
+    if heatmap_df.empty:
+        return ""
+    alerts_table = _render_deviation_alerts_table(deviation_report["alerts"])
 
     return (
-        f'<div class="card">{heatmap_fig.to_html(full_html=False, include_plotlyjs=False)}</div>'
+        f'<div class="card">{_render_deviation_heatmap_html(heatmap_df)}</div>'
         f'<div class="card"><h2>Deviation Alerts</h2>{alerts_table}</div>'
     )
 
@@ -355,29 +349,122 @@ async def _build_live_deviation_report(
     underlying: str,
     defi_file: Optional[str],
 ) -> dict:
-    """Build live/file-based CEX-DEFI deviation report payload."""
-    cex_source = cex_file or os.getenv("CEX_QUOTES_FILE", ""); provider = cex_provider or os.getenv("CEX_QUOTES_PROVIDER", ""); defi_source = defi_file or os.getenv("DEFI_QUOTES_FILE", "")
-    if not defi_source: raise HTTPException(status_code=422, detail="defi_file is required (query or env)")
-    if not cex_source and not provider: raise HTTPException(status_code=422, detail="Either cex_file or cex_provider is required (query or env)")
+    cex_source, provider, defi_source = _resolve_live_deviation_sources(
+        cex_file=cex_file,
+        cex_provider=cex_provider,
+        defi_file=defi_file,
+    )
+    dataset, source_meta = await _load_live_deviation_dataset_and_meta(
+        cex_source=cex_source,
+        provider=provider,
+        defi_source=defi_source,
+        underlying=underlying,
+        align_tolerance_seconds=align_tolerance_seconds,
+    )
+    report = build_cross_market_deviation_report(dataset, threshold_bps=float(threshold_bps))
+    _attach_live_source_metadata(
+        report=report,
+        source_meta=source_meta,
+        align_tolerance_seconds=align_tolerance_seconds,
+        rows_aligned=len(dataset),
+    )
+    return report
+
+
+def _resolve_live_deviation_sources(
+    *,
+    cex_file: Optional[str],
+    cex_provider: Optional[str],
+    defi_file: Optional[str],
+) -> Tuple[str, str, str]:
+    cex_source = cex_file or os.getenv("CEX_QUOTES_FILE", "")
+    provider = cex_provider or os.getenv("CEX_QUOTES_PROVIDER", "")
+    defi_source = defi_file or os.getenv("DEFI_QUOTES_FILE", "")
+    if not defi_source:
+        raise HTTPException(status_code=422, detail="defi_file is required (query or env)")
+    if not cex_source and not provider:
+        raise HTTPException(
+            status_code=422,
+            detail="Either cex_file or cex_provider is required (query or env)",
+        )
+    return cex_source, provider, defi_source
+
+
+async def _load_live_deviation_dataset_and_meta(
+    *,
+    cex_source: str,
+    provider: str,
+    defi_source: str,
+    underlying: str,
+    align_tolerance_seconds: float,
+) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    """Load aligned CEX/DEFI dataset plus source metadata for report payload."""
     try:
         if cex_source:
-            dataset = build_cex_defi_deviation_dataset(Path(cex_source), Path(defi_source), align_tolerance_seconds=align_tolerance_seconds)
-            source_meta = {"mode": "file", "cex_file": cex_source, "defi_file": defi_source}
-        else:
-            dataset = await build_cex_defi_deviation_dataset_live(
-                provider,
-                Path(defi_source),
-                underlying=underlying,
+            return _load_live_dataset_from_file(
+                cex_source=cex_source,
+                defi_source=defi_source,
                 align_tolerance_seconds=align_tolerance_seconds,
             )
-            source_meta = {"mode": "provider", "cex_provider": provider, "underlying": underlying, "defi_file": defi_source}
-    except (FileNotFoundError, ValueError) as exc: raise HTTPException(status_code=422, detail=str(exc))
-    report = build_cross_market_deviation_report(dataset, threshold_bps=float(threshold_bps)); report["sources"] = {
+        return await _load_live_dataset_from_provider(
+            provider=provider,
+            defi_source=defi_source,
+            underlying=underlying,
+            align_tolerance_seconds=align_tolerance_seconds,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+def _load_live_dataset_from_file(
+    *,
+    cex_source: str,
+    defi_source: str,
+    align_tolerance_seconds: float,
+) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    dataset = build_cex_defi_deviation_dataset(
+        Path(cex_source),
+        Path(defi_source),
+        align_tolerance_seconds=align_tolerance_seconds,
+    )
+    source_meta = {"mode": "file", "cex_file": cex_source, "defi_file": defi_source}
+    return dataset, source_meta
+
+
+async def _load_live_dataset_from_provider(
+    *,
+    provider: str,
+    defi_source: str,
+    underlying: str,
+    align_tolerance_seconds: float,
+) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    dataset = await build_cex_defi_deviation_dataset_live(
+        provider,
+        Path(defi_source),
+        underlying=underlying,
+        align_tolerance_seconds=align_tolerance_seconds,
+    )
+    source_meta = {
+        "mode": "provider",
+        "cex_provider": provider,
+        "underlying": underlying,
+        "defi_file": defi_source,
+    }
+    return dataset, source_meta
+
+
+def _attach_live_source_metadata(
+    *,
+    report: Dict[str, Any],
+    source_meta: Dict[str, Any],
+    align_tolerance_seconds: float,
+    rows_aligned: int,
+) -> None:
+    report["sources"] = {
         **source_meta,
         "align_tolerance_seconds": float(align_tolerance_seconds),
-        "rows_aligned": int(len(dataset)),
+        "rows_aligned": int(rows_aligned),
     }
-    return report
 
 
 def _register_basic_routes(app: FastAPI, directory: Path) -> None:

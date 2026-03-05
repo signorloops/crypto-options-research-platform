@@ -17,23 +17,21 @@ from utils.logging_config import get_logger, log_extra
 logger = get_logger(__name__)
 
 
-def _pairwise_p_value(returns1: pd.Series, returns2: pd.Series) -> float:
-    """Robust pairwise p-value with deterministic handling for degenerate samples."""
+def _finite_values(series: pd.Series) -> np.ndarray:
+    """Convert series to finite float numpy values."""
+    values = series.to_numpy(dtype=float)
+    return values[np.isfinite(values)]
+
+
+def _degenerate_pairwise_p_value(values1: np.ndarray, values2: np.ndarray) -> Optional[float]:
+    """Return deterministic p-value for near-constant samples, else None."""
     from scipy import stats
-    values1 = returns1.to_numpy(dtype=float)
-    values2 = returns2.to_numpy(dtype=float)
-    values1 = values1[np.isfinite(values1)]
-    values2 = values2[np.isfinite(values2)]
-    if len(values1) < 2 or len(values2) < 2:
-        return 1.0
-    if np.allclose(values1, values2, rtol=1e-10, atol=1e-12):
-        return 1.0
+
     std1 = float(np.std(values1, ddof=1))
     std2 = float(np.std(values2, ddof=1))
     mean_diff = abs(float(np.mean(values1) - np.mean(values2)))
     mean_scale = max(abs(float(np.mean(values1))), abs(float(np.mean(values2))), 1.0)
     tol = 1e-12 * mean_scale
-    # Degenerate distributions with effectively zero variance.
     if std1 <= 1e-12 and std2 <= 1e-12:
         return 1.0 if mean_diff <= tol else 0.0
     if std1 <= 1e-12 or std2 <= 1e-12:
@@ -41,6 +39,20 @@ def _pairwise_p_value(returns1: pd.Series, returns2: pd.Series) -> float:
             return 1.0
         _, p_value = stats.mannwhitneyu(values1, values2, alternative="two-sided")
         return float(p_value)
+    return None
+
+
+def _pairwise_p_value(returns1: pd.Series, returns2: pd.Series) -> float:
+    """Robust pairwise p-value with deterministic handling for degenerate samples."""
+    from scipy import stats
+    values1 = _finite_values(returns1)
+    values2 = _finite_values(returns2)
+    if len(values1) < 2 or len(values2) < 2:
+        return 1.0
+    if np.allclose(values1, values2, rtol=1e-10, atol=1e-12):
+        return 1.0
+    if (degenerate_p_value := _degenerate_pairwise_p_value(values1, values2)) is not None:
+        return degenerate_p_value
 
     with warnings.catch_warnings():
         warnings.simplefilter("error", RuntimeWarning)
@@ -248,10 +260,76 @@ def _build_scorecard_from_result(
         daily_pnl_std=metrics["daily_pnl_std"],
         worst_day=metrics["worst_day"],
         best_day=metrics["best_day"],
-        pnl_series=pnl_series,
-        drawdown_series=drawdown_series,
-        inventory_series=result.inventory_series,
+        pnl_series=pnl_series, drawdown_series=drawdown_series, inventory_series=result.inventory_series,
     )
+
+
+def _collect_pairwise_p_values(
+    scorecards: Dict[str, StrategyScorecard],
+    names: List[str],
+) -> tuple[np.ndarray, list[tuple[int, int, float]]]:
+    n = len(names)
+    p_values = np.ones((n, n))
+    entries: list[tuple[int, int, float]] = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            sc1 = scorecards[names[i]]
+            sc2 = scorecards[names[j]]
+            if len(sc1.pnl_series) <= 10 or len(sc2.pnl_series) <= 10:
+                continue
+            returns1 = sc1.pnl_series.diff().dropna()
+            returns2 = sc2.pnl_series.diff().dropna()
+            p_value = _pairwise_p_value(returns1, returns2)
+            p_values[i, j] = p_value
+            p_values[j, i] = p_value
+            entries.append((i, j, p_value))
+    return p_values, entries
+
+
+def _apply_bonferroni_correction(
+    p_values: np.ndarray,
+    entries: list[tuple[int, int, float]],
+) -> None:
+    n_tests = len(entries)
+    if n_tests <= 1:
+        return
+    for i, j, p in entries:
+        corrected_p = min(p * n_tests, 1.0)
+        p_values[i, j] = corrected_p
+        p_values[j, i] = corrected_p
+
+
+def _arena_report_header_lines(arena: "StrategyArena") -> List[str]:
+    lines = [
+        "=" * 70,
+        "STRATEGY ARENA - BACKTEST REPORT",
+        "=" * 70,
+        f"\nBacktest Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"Initial Capital: ${arena.initial_capital:,.2f}",
+        f"Transaction Cost: {arena.transaction_cost_bps} bps",
+    ]
+    if len(arena.market_data) > 0:
+        start_date = arena.market_data.index[0]
+        end_date = arena.market_data.index[-1]
+        lines.append(f"Data Period: {start_date} to {end_date}")
+    else:
+        lines.append("Data Period: No data")
+    lines.append(f"Number of Strategies: {len(arena.scorecards)}")
+    return lines
+
+
+def _arena_report_rankings_lines(arena: "StrategyArena") -> List[str]:
+    lines = [
+        "\n" + "=" * 70,
+        "STRATEGY RANKINGS",
+        "=" * 70,
+    ]
+    metrics = ["total_pnl", "sharpe_ratio", "sortino_ratio", "calmar_ratio"]
+    for metric in metrics:
+        winner = arena.get_winner(metric)
+        value = getattr(arena.scorecards[winner], metric)
+        lines.append(f"\nBest by {metric}: {winner} ({value:.4f})")
+    return lines
 
 
 class StrategyArena:
@@ -554,61 +632,24 @@ class StrategyArena:
 
     def statistical_comparison(self, correction: str = "bonferroni") -> pd.DataFrame:
         """Perform pairwise statistical tests between strategies."""
-        names = list(self.scorecards.keys()); n = len(names)
+        names = list(self.scorecards.keys())
+        n = len(names)
         if n < 2:
             return pd.DataFrame()
-        p_values = np.ones((n, n)); raw_p_values = []; indices = []
-        for i in range(n):
-            for j in range(i + 1, n):
-                sc1 = self.scorecards[names[i]]
-                sc2 = self.scorecards[names[j]]
-                if len(sc1.pnl_series) > 10 and len(sc2.pnl_series) > 10:
-                    returns1 = sc1.pnl_series.diff().dropna()
-                    returns2 = sc2.pnl_series.diff().dropna()
-                    p_value = _pairwise_p_value(returns1, returns2)
-                    p_values[i, j] = p_value
-                    p_values[j, i] = p_value
-                    raw_p_values.append(p_value)
-                    indices.append((i, j))
-
-        n_tests = len(raw_p_values)
-        if n_tests > 1 and correction == "bonferroni":
-            for (i, j), p in zip(indices, raw_p_values):
-                corrected_p = min(p * n_tests, 1.0)
-                p_values[i, j] = corrected_p
-                p_values[j, i] = corrected_p
-
+        p_values, entries = _collect_pairwise_p_values(self.scorecards, names)
+        if correction == "bonferroni":
+            _apply_bonferroni_correction(p_values, entries)
         return pd.DataFrame(p_values, index=names, columns=names)
 
     def generate_report(self, output_file: Optional[str] = None) -> str:
         """Generate a text report and optionally persist it to disk."""
-        lines = []
-        lines.append("=" * 70)
-        lines.append("STRATEGY ARENA - BACKTEST REPORT")
-        lines.append("=" * 70)
-        lines.append(f"\nBacktest Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        lines.append(f"Initial Capital: ${self.initial_capital:,.2f}")
-        lines.append(f"Transaction Cost: {self.transaction_cost_bps} bps")
-        if len(self.market_data) > 0:
-            start_date = self.market_data.index[0]
-            end_date = self.market_data.index[-1]
-            lines.append(f"Data Period: {start_date} to {end_date}")
-        else:
-            lines.append("Data Period: No data")
-        lines.append(f"Number of Strategies: {len(self.scorecards)}")
+        lines = _arena_report_header_lines(self)
         lines.append("\n" + "=" * 70)
         lines.append("INDIVIDUAL STRATEGY RESULTS")
         lines.append("=" * 70)
         for name, sc in self.scorecards.items():
             lines.append(sc.summary())
-        lines.append("\n" + "=" * 70)
-        lines.append("STRATEGY RANKINGS")
-        lines.append("=" * 70)
-        metrics = ["total_pnl", "sharpe_ratio", "sortino_ratio", "calmar_ratio"]
-        for metric in metrics:
-            winner = self.get_winner(metric)
-            value = getattr(self.scorecards[winner], metric)
-            lines.append(f"\nBest by {metric}: {winner} ({value:.4f})")
+        lines.extend(_arena_report_rankings_lines(self))
         report = "\n".join(lines)
         if output_file:
             with open(output_file, "w") as f:

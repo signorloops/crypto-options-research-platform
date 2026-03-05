@@ -17,6 +17,51 @@ from utils.logging_config import get_logger, log_extra
 logger = get_logger(__name__)
 
 
+def _last_series_value(frame: pd.DataFrame, column: str, default: float) -> float:
+    """Return last value of optional series column with a numeric default."""
+    series = frame.get(column)
+    if series is None or len(series) == 0:
+        return float(default)
+    return float(series.iloc[-1])
+
+
+def _annualized_volatility(
+    returns: pd.Series,
+    *,
+    window: int,
+    default: float = 0.5,
+) -> float:
+    if len(returns) < window:
+        return float(default)
+    return float(returns.tail(window).std() * np.sqrt(365 * 24))
+
+
+def _pct_change_over(series: pd.Series, periods: int) -> float:
+    if len(series) < periods:
+        return 0.0
+    return float(series.iloc[-1] / series.iloc[-periods] - 1.0)
+
+
+def _delta_over(series: pd.Series, periods: int) -> float:
+    if len(series) < periods:
+        return 0.0
+    return float(series.iloc[-1] - series.iloc[-periods])
+
+
+def _spread_percentile(current_spread_bps: float, spread_series: pd.Series) -> float:
+    spread_min = float(spread_series.min())
+    spread_max = float(spread_series.max())
+    return float((current_spread_bps - spread_min) / (spread_max - spread_min + 1e-8))
+
+
+def _volume_ratio(bid_volume: float, ask_volume: float) -> float:
+    return float(bid_volume / (ask_volume + 1e-8))
+
+
+def _volume_imbalance(bid_volume: float, ask_volume: float) -> float:
+    return float((bid_volume - ask_volume) / (bid_volume + ask_volume + 1e-8))
+
+
 @dataclass
 class XGBoostSpreadConfig:
     """Configuration for XGBoost spread strategy."""
@@ -68,30 +113,24 @@ class FeatureEngineer:
             return self._default_features()
 
         df = pd.DataFrame(self._history)
-
-        # Price-based features
         returns = df['mid_price'].pct_change().dropna()
+        spread_series = df['spread_bps']
+        latest_spread = float(spread_series.iloc[-1])
+        latest_imbalance = float(df['imbalance'].iloc[-1])
+        bid_vol = float(df['bid_volume_5'].iloc[-1])
+        ask_vol = float(df['ask_volume_5'].iloc[-1])
 
         features = {
-            # Current state
-            'current_spread_bps': df['spread_bps'].iloc[-1],
-            'current_imbalance': df['imbalance'].iloc[-1],
-            'volume_ratio': df['bid_volume_5'].iloc[-1] / (df['ask_volume_5'].iloc[-1] + 1e-8),
-
-            # Recent volatility
-            'volatility_5': returns.tail(5).std() * np.sqrt(365 * 24) if len(returns) >= 5 else 0.5,
-            'volatility_20': returns.tail(20).std() * np.sqrt(365 * 24) if len(returns) >= 20 else 0.5,
-
-            # Trend
-            'price_change_5': (df['mid_price'].iloc[-1] / df['mid_price'].iloc[-5] - 1) if len(df) >= 5 else 0,
-            'price_change_10': (df['mid_price'].iloc[-1] / df['mid_price'].iloc[-10] - 1) if len(df) >= 10 else 0,
-
-            # Order book dynamics
-            'imbalance_change': df['imbalance'].iloc[-1] - df['imbalance'].iloc[-5] if len(df) >= 5 else 0,
-            'spread_percentile': (df['spread_bps'].iloc[-1] - df['spread_bps'].min()) / (df['spread_bps'].max() - df['spread_bps'].min() + 1e-8),
-
-            # Microstructure
-            'volume_imbalance': (df['bid_volume_5'].iloc[-1] - df['ask_volume_5'].iloc[-1]) / (df['bid_volume_5'].iloc[-1] + df['ask_volume_5'].iloc[-1] + 1e-8),
+            'current_spread_bps': latest_spread,
+            'current_imbalance': latest_imbalance,
+            'volume_ratio': _volume_ratio(bid_vol, ask_vol),
+            'volatility_5': _annualized_volatility(returns, window=5),
+            'volatility_20': _annualized_volatility(returns, window=20),
+            'price_change_5': _pct_change_over(df['mid_price'], 5),
+            'price_change_10': _pct_change_over(df['mid_price'], 10),
+            'imbalance_change': _delta_over(df['imbalance'], 5),
+            'spread_percentile': _spread_percentile(latest_spread, spread_series),
+            'volume_imbalance': _volume_imbalance(bid_vol, ask_vol),
         }
 
         return features
@@ -144,10 +183,7 @@ class XGBoostSpreadStrategy(MarketMakingStrategy):
             raise ValueError("Cannot quote without valid order book")
         self.feature_engineer.update(state)
         features = self.feature_engineer.get_features()
-        if self.model is not None:
-            spread_bps = self._predict_spread(features)
-        else:
-            spread_bps = self._heuristic_spread(features)
+        spread_bps = self._predict_spread(features) if self.model is not None else self._heuristic_spread(features)
         q = position.size
         gamma = 0.1
         sigma = features.get('volatility_20', 0.5)
@@ -155,8 +191,10 @@ class XGBoostSpreadStrategy(MarketMakingStrategy):
         half_spread = mid * spread_bps / 10000 / 2
         bid_price = reservation_price - half_spread
         ask_price = reservation_price + half_spread
-        bid_size = self.config.quote_size if q < self.config.inventory_limit else 0
-        ask_size = self.config.quote_size if q > -self.config.inventory_limit else 0
+        bid_size, ask_size = (
+            self.config.quote_size if q < self.config.inventory_limit else 0,
+            self.config.quote_size if q > -self.config.inventory_limit else 0,
+        )
         return QuoteAction(
             bid_price=bid_price,
             bid_size=bid_size,
@@ -251,31 +289,30 @@ class XGBoostSpreadStrategy(MarketMakingStrategy):
 
     def _compute_features_from_window(self, window: pd.DataFrame) -> Dict[str, float]:
         """Compute train-time features aligned with runtime FeatureEngineer schema."""
+        n = len(window)
         returns = window['price'].pct_change().dropna()
-        recent_spread_bps = float(window.get('spread_bps', pd.Series([20.0])).iloc[-1]) if len(window) > 0 else 20.0
-        current_imbalance = float(window.get('imbalance', pd.Series([0.0])).iloc[-1]) if len(window) > 0 else 0.0
-
-        bid_vol = float(window.get('bid_volume_5', pd.Series([1.0])).iloc[-1]) if len(window) > 0 else 1.0
-        ask_vol = float(window.get('ask_volume_5', pd.Series([1.0])).iloc[-1]) if len(window) > 0 else 1.0
-
-        spread_series = window.get('spread_bps', pd.Series(np.full(len(window), recent_spread_bps)))
-        spread_min = float(spread_series.min()) if len(spread_series) > 0 else recent_spread_bps
-        spread_max = float(spread_series.max()) if len(spread_series) > 0 else recent_spread_bps
+        recent_spread_bps = _last_series_value(window, 'spread_bps', 20.0)
+        current_imbalance = _last_series_value(window, 'imbalance', 0.0)
+        bid_vol = _last_series_value(window, 'bid_volume_5', 1.0)
+        ask_vol = _last_series_value(window, 'ask_volume_5', 1.0)
+        spread_series = window.get('spread_bps')
+        if spread_series is None or len(spread_series) == 0:
+            spread_series = pd.Series(np.full(max(n, 1), recent_spread_bps))
+        imbalance_series = window.get('imbalance')
+        if imbalance_series is None or len(imbalance_series) == 0:
+            imbalance_series = pd.Series(np.zeros(max(n, 1)))
 
         return {
             'current_spread_bps': recent_spread_bps,
             'current_imbalance': current_imbalance,
-            'volume_ratio': bid_vol / (ask_vol + 1e-8),
-            'volatility_5': returns.tail(5).std() * np.sqrt(365 * 24) if len(returns) >= 5 else 0.5,
-            'volatility_20': returns.tail(20).std() * np.sqrt(365 * 24) if len(returns) >= 20 else 0.5,
-            'price_change_5': (window['price'].iloc[-1] / window['price'].iloc[-5] - 1) if len(window) >= 5 else 0.0,
-            'price_change_10': (window['price'].iloc[-1] / window['price'].iloc[-10] - 1) if len(window) >= 10 else 0.0,
-            'imbalance_change': (
-                float(window.get('imbalance', pd.Series([0.0] * len(window))).iloc[-1]) -
-                float(window.get('imbalance', pd.Series([0.0] * len(window))).iloc[-5])
-            ) if len(window) >= 5 else 0.0,
-            'spread_percentile': (recent_spread_bps - spread_min) / (spread_max - spread_min + 1e-8),
-            'volume_imbalance': (bid_vol - ask_vol) / (bid_vol + ask_vol + 1e-8),
+            'volume_ratio': _volume_ratio(bid_vol, ask_vol),
+            'volatility_5': _annualized_volatility(returns, window=5),
+            'volatility_20': _annualized_volatility(returns, window=20),
+            'price_change_5': _pct_change_over(window['price'], 5),
+            'price_change_10': _pct_change_over(window['price'], 10),
+            'imbalance_change': _delta_over(imbalance_series, 5),
+            'spread_percentile': _spread_percentile(recent_spread_bps, spread_series),
+            'volume_imbalance': _volume_imbalance(bid_vol, ask_vol),
         }
 
     def _simulate_cost(self, historical_window: pd.DataFrame, spread: float, outcome_window: pd.DataFrame) -> float:

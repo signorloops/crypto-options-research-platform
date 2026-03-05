@@ -52,6 +52,92 @@ def _build_hawkes_quote_action(
     )
 
 
+def _is_valid_hawkes_candidate(mu: float, alpha: float, beta: float) -> bool:
+    return mu > 0 and alpha >= 0 and beta > 0 and alpha < beta
+
+
+def _marked_hawkes_nll(
+    x: np.ndarray,
+    shifted_times: np.ndarray,
+    marks: np.ndarray,
+    horizon: float,
+) -> float:
+    mu, alpha, beta = map(float, x)
+    if not _is_valid_hawkes_candidate(mu, alpha, beta):
+        return 1e12
+    A, last_t, log_like = 0.0, 0.0, 0.0
+    for t_i, mark_i in zip(shifted_times, marks):
+        dt = max(0.0, float(t_i - last_t))
+        A *= np.exp(-beta * dt)
+        lam = mu + alpha * A
+        if lam <= 1e-12 or not np.isfinite(lam):
+            return 1e12
+        log_like += np.log(lam)
+        A += float(mark_i)
+        last_t = float(t_i)
+    integral = mu * horizon + (alpha / beta) * np.sum(marks * (1.0 - np.exp(-beta * (horizon - shifted_times))))
+    nll = integral - log_like
+    if not np.isfinite(nll):
+        return 1e12
+    return float(nll)
+
+
+def _optimize_marked_hawkes_params(
+    init: HawkesParameters,
+    shifted_times: np.ndarray,
+    marks: np.ndarray,
+    horizon: float,
+) -> Optional[np.ndarray]:
+    x0 = np.array([init.mu, init.alpha, init.beta], dtype=float)
+    bounds = [(1e-5, 20.0), (1e-5, 10.0), (1e-4, 20.0)]
+    result = minimize(
+        _marked_hawkes_nll,
+        x0,
+        args=(shifted_times, marks, horizon),
+        method="L-BFGS-B",
+        bounds=bounds,
+    )
+    if not result.success:
+        return None
+    return np.array(result.x, dtype=float)
+
+
+def _intensity_size_multiplier(
+    intensity: float, low_threshold: float, high_threshold: float
+) -> float:
+    if intensity > high_threshold:
+        return 1.2
+    if intensity < low_threshold:
+        return 0.8
+    return 1.0
+
+
+def _inventory_size_bias(inventory: float, inventory_limit: float) -> Tuple[float, float]:
+    half_limit = inventory_limit * 0.5
+    if inventory > half_limit:
+        return 0.7, 1.3
+    if inventory < -half_limit:
+        return 1.3, 0.7
+    return 1.0, 1.0
+
+
+def _adverse_selection_size_bias(adverse_selection: bool, imbalance: float) -> Tuple[float, float]:
+    if not adverse_selection:
+        return 1.0, 1.0
+    if imbalance > 0:
+        return 1.0, 0.7
+    if imbalance < 0:
+        return 0.7, 1.0
+    return 1.0, 1.0
+
+
+def _validated_hawkes_parameters(mu: float, alpha: float, beta: float) -> Optional[HawkesParameters]:
+    try:
+        return HawkesParameters(mu=float(mu), alpha=float(alpha), beta=float(beta))
+    except ValueError:
+        return None
+
+
 @dataclass
 class HawkesMMConfig:
     """Configuration for Hawkes-based market maker."""
@@ -179,65 +265,36 @@ class HawkesIntensityMonitor:
         """Method-of-moments fallback estimator."""
         if len(self.trade_times) < 20:
             return None
-
         times = np.array(self.trade_times, dtype=float)
         iet = np.diff(times)
         if len(iet) < 2:
             return None
-
         mean_iet = np.mean(iet)
         var_iet = np.var(iet)
         cv = np.sqrt(var_iet) / mean_iet if mean_iet > 0 else 1.0
-
-        if cv > 1.2:
-            branching_ratio = min(0.8, (cv - 1) / cv)
-        else:
-            branching_ratio = 0.1
-
+        branching_ratio = min(0.8, (cv - 1) / cv) if cv > 1.2 else 0.1
         T = times[-1] - times[0]
-        n = len(times)
-        mu_est = (n / T) * (1 - branching_ratio) if T > 0 else self.params.mu
+        mu_est = (len(times) / T) * (1 - branching_ratio) if T > 0 else self.params.mu
         beta_est = self.params.beta
         alpha_est = branching_ratio * beta_est
-
-        try:
-            return HawkesParameters(mu=float(mu_est), alpha=float(alpha_est), beta=float(beta_est))
-        except ValueError:
-            return None
+        return _validated_hawkes_parameters(mu_est, alpha_est, beta_est)
 
     def _estimate_parameters_mle(self, init: HawkesParameters) -> Optional[HawkesParameters]:
         """Marked Hawkes MLE using log-likelihood minimization."""
         if not HAS_SCIPY_OPT or len(self.trade_times) < 30:
             return None
-        times = np.array(self.trade_times, dtype=float); marks = np.maximum(np.array(self.trade_sizes, dtype=float), 1e-8) ** self.mark_power
-        T = max(times[-1] - times[0], 1e-8); shifted_times = times - times[0]
-        def neg_log_likelihood(x: np.ndarray) -> float:
-            mu, alpha, beta = float(x[0]), float(x[1]), float(x[2])
-            if mu <= 0 or alpha < 0 or beta <= 0 or alpha >= beta:
-                return 1e12
-            A = 0.0
-            last_t = 0.0
-            log_like = 0.0
-            for t_i, mark_i in zip(shifted_times, marks):
-                dt = max(0.0, float(t_i - last_t))
-                A *= np.exp(-beta * dt)
-                lam = mu + alpha * A
-                if lam <= 1e-12 or not np.isfinite(lam):
-                    return 1e12
-                log_like += np.log(lam)
-                A += mark_i
-                last_t = float(t_i)
-            integral = mu * T + (alpha / beta) * np.sum(marks * (1.0 - np.exp(-beta * (T - shifted_times))))
-            nll = integral - log_like
-            if not np.isfinite(nll): return 1e12
-            return float(nll)
-        x0 = np.array([init.mu, init.alpha, init.beta], dtype=float); bounds = [(1e-5, 20.0), (1e-5, 10.0), (1e-4, 20.0)]
-        result = minimize(neg_log_likelihood, x0, method="L-BFGS-B", bounds=bounds)
-        if not result.success: return None
-        mu, alpha, beta = map(float, result.x)
+        times = np.array(self.trade_times, dtype=float)
+        marks = np.maximum(np.array(self.trade_sizes, dtype=float), 1e-8) ** self.mark_power
+        horizon = max(times[-1] - times[0], 1e-8)
+        shifted_times = times - times[0]
+
+        mle_solution = _optimize_marked_hawkes_params(init, shifted_times, marks, horizon)
+        if mle_solution is None:
+            return None
+
+        mu, alpha, beta = map(float, mle_solution)
         alpha = min(alpha, beta * 0.95)
-        try: return HawkesParameters(mu=mu, alpha=alpha, beta=beta)
-        except ValueError: return None
+        return _validated_hawkes_parameters(mu, alpha, beta)
 
     def estimate_parameters_online(self, use_mle: bool = False) -> Optional[HawkesParameters]:
         """Update Hawkes parameters using recent trade history."""
@@ -383,24 +440,17 @@ class HawkesMarketMaker(MarketMakingStrategy):
         skew_bps = skew * max_skew_bps
         adjusted_mid = mid * (1 + skew_bps / 10000)
         half_spread = mid * spread_bps / 10000 / 2
-        imbalance = 0.0
-        total_int = buy_int + sell_int
-        if total_int > 0:
-            imbalance = (buy_int - sell_int) / total_int
+        imbalance = _flow_imbalance(buy_int, sell_int)
         asym_factor = np.clip(abs(imbalance), 0.0, 1.0) * 0.5
         bid_half = half_spread
         ask_half = half_spread
-        if adverse_selection:
-            if imbalance > 0:
-                ask_half *= (1.0 + asym_factor)
-                bid_half *= (1.0 - 0.3 * asym_factor)
-            elif imbalance < 0:
-                bid_half *= (1.0 + asym_factor)
-                ask_half *= (1.0 - 0.3 * asym_factor)
-
-        bid_price = adjusted_mid - bid_half
-        ask_price = adjusted_mid + ask_half
-        return bid_price, ask_price, imbalance, adjusted_mid
+        if adverse_selection and imbalance != 0:
+            widen = 1.0 + asym_factor
+            tighten = 1.0 - 0.3 * asym_factor
+            bid_mult, ask_mult = (tighten, widen) if imbalance > 0 else (widen, tighten)
+            bid_half *= bid_mult
+            ask_half *= ask_mult
+        return adjusted_mid - bid_half, adjusted_mid + ask_half, imbalance, adjusted_mid
 
     def _compute_quote_sizes(
         self,
@@ -411,29 +461,27 @@ class HawkesMarketMaker(MarketMakingStrategy):
         imbalance: float,
     ) -> Tuple[float, float]:
         """Compute quote sizes with activity, inventory, and adverse-selection controls."""
-        if intensity > self.config.high_intensity_threshold:
-            bid_size = self.config.quote_size * 1.2
-            ask_size = self.config.quote_size * 1.2
-        elif intensity < self.config.low_intensity_threshold:
-            bid_size = self.config.quote_size * 0.8
-            ask_size = self.config.quote_size * 0.8
-        else:
-            bid_size = self.config.quote_size
-            ask_size = self.config.quote_size
+        base_multiplier = _intensity_size_multiplier(
+            intensity=intensity,
+            low_threshold=self.config.low_intensity_threshold,
+            high_threshold=self.config.high_intensity_threshold,
+        )
+        bid_size = self.config.quote_size * base_multiplier
+        ask_size = self.config.quote_size * base_multiplier
 
-        if inventory > self.config.inventory_limit * 0.5:
-            bid_size *= 0.7
-            ask_size *= 1.3
-        elif inventory < -self.config.inventory_limit * 0.5:
-            bid_size *= 1.3
-            ask_size *= 0.7
+        inv_bid_mult, inv_ask_mult = _inventory_size_bias(
+            inventory=inventory,
+            inventory_limit=self.config.inventory_limit,
+        )
+        bid_size *= inv_bid_mult
+        ask_size *= inv_ask_mult
 
-        if adverse_selection:
-            if imbalance > 0:
-                ask_size *= 0.7
-            elif imbalance < 0:
-                bid_size *= 0.7
-
+        adv_bid_mult, adv_ask_mult = _adverse_selection_size_bias(
+            adverse_selection=adverse_selection,
+            imbalance=imbalance,
+        )
+        bid_size *= adv_bid_mult
+        ask_size *= adv_ask_mult
         return bid_size, ask_size
 
     def _compute_quote_context(

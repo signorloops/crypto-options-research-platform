@@ -222,6 +222,57 @@ class Fill:
     quote_id: Optional[str] = None
 
 
+def _signed_fill_size(fill: Fill) -> float:
+    return fill.size if fill.side == OrderSide.BUY else -fill.size
+
+
+def _same_direction_position(size: float, signed_fill: float) -> bool:
+    return size == 0 or np.sign(size) == np.sign(signed_fill)
+
+
+def _avg_entry_after_same_direction(
+    *, current_size: float, current_avg: float, signed_fill: float, fill_price: float, new_size: float
+) -> float:
+    if np.isclose(new_size, 0.0):
+        return 0.0
+    cost = current_size * current_avg + signed_fill * fill_price
+    return float(cost / new_size)
+
+
+def _avg_entry_after_reduction_or_close(
+    *, current_size: float, current_avg: float, new_size: float
+) -> float | None:
+    if np.sign(current_size) == np.sign(new_size) or np.isclose(new_size, 0.0):
+        return 0.0 if np.isclose(new_size, 0.0) else current_avg
+    return None
+
+
+def _next_average_entry(
+    *,
+    current_size: float,
+    current_avg: float,
+    signed_fill: float,
+    fill_price: float,
+    new_size: float,
+) -> float:
+    if _same_direction_position(current_size, signed_fill):
+        return _avg_entry_after_same_direction(
+            current_size=current_size,
+            current_avg=current_avg,
+            signed_fill=signed_fill,
+            fill_price=fill_price,
+            new_size=new_size,
+        )
+    reduced_or_closed_avg = _avg_entry_after_reduction_or_close(
+        current_size=current_size,
+        current_avg=current_avg,
+        new_size=new_size,
+    )
+    if reduced_or_closed_avg is not None:
+        return float(reduced_or_closed_avg)
+    return float(fill_price)
+
+
 @dataclass
 class Position:
     """Current position."""
@@ -257,23 +308,15 @@ class Position:
         """Update position with new fill."""
         if self.instrument != fill.instrument:
             raise ValueError("Instrument mismatch")
-
-        signed_fill = fill.size if fill.side == OrderSide.BUY else -fill.size
+        signed_fill = _signed_fill_size(fill)
         new_size = self.size + signed_fill
-
-        # Same-direction trade: volume-weight average entry.
-        if self.size == 0 or np.sign(self.size) == np.sign(signed_fill):
-            if np.isclose(new_size, 0.0):
-                new_avg = 0.0
-            else:
-                cost = self.size * self.avg_entry_price + signed_fill * fill.price
-                new_avg = cost / new_size
-        # Reduced without flipping: keep historical average for the remaining lot.
-        elif np.sign(self.size) == np.sign(new_size) or np.isclose(new_size, 0.0):
-            new_avg = 0.0 if np.isclose(new_size, 0.0) else self.avg_entry_price
-        # Flipped direction: remaining position is newly opened at fill price.
-        else:
-            new_avg = fill.price
+        new_avg = _next_average_entry(
+            current_size=self.size,
+            current_avg=self.avg_entry_price,
+            signed_fill=signed_fill,
+            fill_price=fill.price,
+            new_size=new_size,
+        )
 
         return Position(
             instrument=self.instrument,
