@@ -276,11 +276,7 @@ def _build_dashboard_summary(df: pd.DataFrame, value_col: str) -> Dict[str, Any]
     }
 
 
-def _render_dashboard_html(
-    *, file_options: str,
-    primary_fig_html: str, returns_fig_html: str,
-    deviation_section: str, summary_rows: str,
-) -> str:
+def _render_dashboard_html(*, file_options: str, primary_fig_html: str, returns_fig_html: str, deviation_section: str, summary_rows: str) -> str:
     return f"""
 <!DOCTYPE html>
 <html>
@@ -389,8 +385,7 @@ async def _build_live_deviation_report(
             source_meta = {"mode": "provider", "cex_provider": provider, "underlying": underlying, "defi_file": defi_source}
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc))
-    report = build_cross_market_deviation_report(dataset, threshold_bps=float(threshold_bps))
-    report["sources"] = {
+    report = build_cross_market_deviation_report(dataset, threshold_bps=float(threshold_bps)); report["sources"] = {
         **source_meta,
         "align_tolerance_seconds": float(align_tolerance_seconds),
         "rows_aligned": int(len(dataset)),

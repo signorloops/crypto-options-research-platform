@@ -537,7 +537,7 @@ class InverseOptionPricer:
             return 0.0
         if price >= InverseOptionPricer._iv_price_upper_bound(S=S, K=K, T=T, r=r, option_type=option_type):
             return 0.0
-        raw_sigma = InverseOptionPricer._solve_iv_newton(
+        if (raw_sigma := InverseOptionPricer._solve_iv_newton(
             price=price,
             S=S,
             K=K,
@@ -546,8 +546,7 @@ class InverseOptionPricer:
             option_type=option_type,
             tol=tol,
             max_iter=max_iter,
-        )
-        if raw_sigma is None:
+        )) is None:
             raw_sigma = InverseOptionPricer._iv_bisection(price, S, K, T, r, option_type, tol, max_iter)
         return InverseOptionPricer._stabilize_iv_estimate(
             raw_sigma,

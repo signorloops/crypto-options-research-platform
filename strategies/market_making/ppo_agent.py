@@ -259,8 +259,7 @@ class MarketMakingEnv:
                 info=info,
             )
         reward -= self._reward_penalty(self.position, bid_offset, ask_offset)
-        self.current_step += 1
-        next_state = self._get_state()
+        self.current_step += 1; next_state = self._get_state()
         return next_state, reward, done, info
 
     def _sanitize_action(self, action: np.ndarray) -> Tuple[float, float, float]:
@@ -335,8 +334,7 @@ class MarketMakingEnv:
         inventory_norm = self.position / 10.0
         volatility = self._rolling_volatility(idx)
         ret_1, ret_5, ret_10, momentum, realized_skew, realized_kurt = self._return_block(idx)
-        time_left = 1.0 - (self.current_step / self.episode_length)
-        vol_now, vol_mean, volume_z = self._volume_block(idx)
+        time_left = 1.0 - (self.current_step / self.episode_length); vol_now, vol_mean, volume_z = self._volume_block(idx)
         spread_bps = self._safe_column_value(
             current, "spread_bps", max(5.0, min(120.0, float(volatility * 25.0)))
         )
@@ -476,8 +474,7 @@ class PPOMarketMaker(MarketMakingStrategy):
         ret_1, ret_5, ret_10 = state.features.get('return_1', 0.0), state.features.get('return_5', 0.0), state.features.get('return_10', 0.0)
         momentum, volume_ratio, volume_z = state.features.get('momentum', 0.0), state.features.get('volume_ratio', 1.0), state.features.get('volume_zscore', 0.0)
         bid_norm, ask_norm = self._depth_norms_from_order_book(state)
-        inventory_abs = abs(position.size) / max(self.config.inventory_limit, 1e-8)
-        inv_util = min(1.0, inventory_abs); time_left = state.features.get('time_left', 0.5)
+        inventory_abs = abs(position.size) / max(self.config.inventory_limit, 1e-8); inv_util = min(1.0, inventory_abs); time_left = state.features.get('time_left', 0.5)
         realized_skew, realized_kurt = state.features.get('realized_skew', 0.0), state.features.get('realized_kurt', 0.0)
         delta, vega = (state.greeks.delta, state.greeks.vega) if state.greeks is not None else (0.0, 0.0)
         return np.array([
@@ -554,8 +551,7 @@ class PPOMarketMaker(MarketMakingStrategy):
         rewards = torch.FloatTensor(self.rewards)
         values = torch.FloatTensor(self.values)
         dones = torch.FloatTensor(self.dones)
-        last_state = self.states[-1] if self.states else None
-        next_value = None
+        last_state = self.states[-1] if self.states else None; next_value = None
         if last_state is not None and self.dones[-1] == 0:
             with torch.no_grad():
                 state_tensor = torch.FloatTensor(last_state).unsqueeze(0)

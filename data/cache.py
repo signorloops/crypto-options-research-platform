@@ -74,8 +74,7 @@ class DataCache:
         """Retrieve cached data for a date range, returning None if any day is missing."""
         if start > end:
             raise ValueError("start must be <= end")
-        frames = []
-        current = start.replace(hour=0, minute=0, second=0, microsecond=0)
+        frames = []; current = start.replace(hour=0, minute=0, second=0, microsecond=0)
         end_date = end.replace(hour=0, minute=0, second=0, microsecond=0)
         while current <= end_date:
             cache_path = self._get_cache_path(

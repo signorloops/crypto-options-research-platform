@@ -314,11 +314,7 @@ class DuckDBCache:
         result = self.query(query, params if params else None)
         return result.iloc[0].to_dict()
 
-    def resample_ohlcv(
-        self,
-        table_name: str, timeframe: str = "1H",
-        start: Optional[datetime] = None, end: Optional[datetime] = None
-    ) -> pd.DataFrame:
+    def resample_ohlcv(self, table_name: str, timeframe: str = "1H", start: Optional[datetime] = None, end: Optional[datetime] = None) -> pd.DataFrame:
         """Resample tick/trade data to OHLCV buckets."""
         safe_table = _sanitize_identifier(table_name); where_clause, params = "", {}
         if start and end:

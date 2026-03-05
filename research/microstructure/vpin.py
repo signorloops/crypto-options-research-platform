@@ -254,8 +254,7 @@ class VPINCalculator:
             return _empty_bucket_arrays()
         is_buy = sides == 'buy'
         buy_trade_vol, sell_trade_vol = np.where(is_buy, volumes, 0.0), np.where(is_buy, 0.0, volumes)
-        cum_buy = np.cumsum(buy_trade_vol)
-        cum_sell = np.cumsum(sell_trade_vol)
+        cum_buy, cum_sell = np.cumsum(buy_trade_vol), np.cumsum(sell_trade_vol)
         full_components = _full_bucket_components(
             cum_total=cum_total,
             volumes=volumes,

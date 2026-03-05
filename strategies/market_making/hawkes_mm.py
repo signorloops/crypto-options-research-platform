@@ -234,8 +234,7 @@ class HawkesIntensityMonitor:
             if not np.isfinite(nll):
                 return 1e12
             return float(nll)
-        x0 = np.array([init.mu, init.alpha, init.beta], dtype=float)
-        bounds = [(1e-5, 20.0), (1e-5, 10.0), (1e-4, 20.0)]
+        x0 = np.array([init.mu, init.alpha, init.beta], dtype=float); bounds = [(1e-5, 20.0), (1e-5, 10.0), (1e-4, 20.0)]
         result = minimize(neg_log_likelihood, x0, method="L-BFGS-B", bounds=bounds)
         if not result.success:
             return None

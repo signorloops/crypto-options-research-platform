@@ -122,8 +122,7 @@ class CrossExchangeArbitrage:
         price_entries = self.price_cache.get(instrument, {})
         if len(price_entries) < 2:
             return
-        now = datetime.now(timezone.utc)
-        prices = {}
+        now = datetime.now(timezone.utc); prices = {}
         for ex, entry in price_entries.items():
             if hasattr(entry, 'received_at'):
                 age_ms = (now - entry.received_at).total_seconds() * 1000

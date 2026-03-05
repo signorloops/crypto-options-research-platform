@@ -152,8 +152,7 @@ class OKXClient(ExchangeInterface):
             raise ValueError(
                 f"Only coin-margined options supported {self.VALID_UNDERLYINGS}, got: {underlying}"
             )
-        params = {"instType": "OPTION", "uly": underlying}
-        result = await self._request("/api/v5/public/instruments", params)
+        params = {"instType": "OPTION", "uly": underlying}; result = await self._request("/api/v5/public/instruments", params)
         contracts = []
         for inst in result.get("data", []):
             if inst.get("state") != "live":

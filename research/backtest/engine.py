@@ -240,8 +240,7 @@ class BacktestEngine:
     ) -> BacktestResult:
         """Run backtest on historical market data."""
         self._reset_run_state()
-        prices = market_data[price_column].to_numpy(dtype=np.float64)
-        timestamps_arr = market_data[timestamp_column].to_numpy()
+        prices = market_data[price_column].to_numpy(dtype=np.float64); timestamps_arr = market_data[timestamp_column].to_numpy()
         n_events = len(prices)
         if n_events == 0:
             return self._compute_result(current_price=0.0)
@@ -517,8 +516,7 @@ class BacktestEngine:
         total_pnl_usd = total_pnl_crypto * (float(current_price) if current_price is not None else 0.0); realized_pnl, unrealized_pnl = self._calculate_crypto_pnl_components(current_price)
         sharpe = self._calculate_sharpe_ratio(pnl_series); max_dd = _calculate_max_drawdown(pnl_series); buys, sells = _trade_side_counts(self.trades)
         returns_for_ci = pnl_series.diff().dropna() / max(self.initial_crypto_balance, 1e-12) if len(pnl_series) > 1 else pd.Series(dtype=float)
-        sharpe_ci, drawdown_ci = self._bootstrap_risk_ci(returns_for_ci)
-        deflated_trials = max(2, int(getattr(self.strategy, "multiple_testing_trials", 2)))
+        sharpe_ci, drawdown_ci = self._bootstrap_risk_ci(returns_for_ci); deflated_trials = max(2, int(getattr(self.strategy, "multiple_testing_trials", 2)))
         deflated_sharpe = self._deflated_sharpe_ratio(
             float(sharpe), n_obs=len(returns_for_ci), n_trials=deflated_trials
         )

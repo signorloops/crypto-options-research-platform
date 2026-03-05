@@ -89,8 +89,7 @@ class BlackScholesGreeks:
         theta_core = -S * n_prime_d1 * sigma / (2 * np.sqrt(T))
         theta = (theta_core - r * K * np.exp(-r * T) * nd2) / 365 if option_type == 'call' else (theta_core + r * K * np.exp(-r * T) * norm.cdf(-d2)) / 365
         vega = S * n_prime_d1 * np.sqrt(T) / 100
-        vanna = -n_prime_d1 * d2 / sigma
-        charm = -n_prime_d1 * (2 * r * T - d2 * sigma * np.sqrt(T)) / (2 * T * sigma * np.sqrt(T))
+        vanna = -n_prime_d1 * d2 / sigma; charm = -n_prime_d1 * (2 * r * T - d2 * sigma * np.sqrt(T)) / (2 * T * sigma * np.sqrt(T))
         return Greeks(
             delta=delta,
             gamma=gamma,

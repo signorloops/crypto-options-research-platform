@@ -186,8 +186,7 @@ def yang_zhang_volatility(open: np.ndarray, high: np.ndarray,
     return float(vol * np.sqrt(periods)) if annualize else float(vol)
 
 
-def calculate_volatility_from_ohlc(df: pd.DataFrame, method: str = "yang_zhang",
-                                   annualize: bool = True, periods: int = 365) -> float:
+def calculate_volatility_from_ohlc(df: pd.DataFrame, method: str = "yang_zhang", annualize: bool = True, periods: int = 365) -> float:
     """Compute volatility from OHLC data using the selected estimator."""
     if (method := method.lower()) == "realized":
         if 'close' not in df.columns:

@@ -522,8 +522,7 @@ class CircuitBreaker:
         if concentration_violation is not None:
             violations.append(concentration_violation)
         if (var_violation := self._check_var_limit_from_portfolio(portfolio)) is not None: violations.append(var_violation)
-        if self.config.enable_per_instrument_limits:
-            violations.extend(self._check_per_instrument_limits(portfolio))
+        if self.config.enable_per_instrument_limits: violations.extend(self._check_per_instrument_limits(portfolio))
         return violations
 
     def _check_var_limit_from_portfolio(self, portfolio: PortfolioState) -> Optional[Violation]:
@@ -565,7 +564,6 @@ class CircuitBreaker:
         return self.check_var_limit(positions_df, returns_df, portfolio_value)
 
     def _check_per_instrument_limits(self, portfolio: PortfolioState) -> List[Violation]:
-        """Instrument-level notional risk checks."""
         now = datetime.now(timezone.utc); violations: List[Violation] = []
         for instrument, position in portfolio.positions.items():
             if (notional := abs(position.size) * max(position.avg_entry_price, 0.0)) <= 0:
@@ -905,12 +903,7 @@ class CircuitBreaker:
             "instrument_states": {k: v.value for k, v in self._instrument_states.items()}
         }
 
-    def check_var_limit(
-        self,
-        positions: pd.DataFrame,
-        returns: pd.DataFrame,
-        portfolio_value: float
-    ) -> Optional[Violation]:
+    def check_var_limit(self, positions: pd.DataFrame, returns: pd.DataFrame, portfolio_value: float) -> Optional[Violation]:
         """Check configured VaR thresholds and return a violation when breached."""
         if len(returns) < 30:
             return None
@@ -925,7 +918,7 @@ class CircuitBreaker:
         else:
             candidates = [self._var_calculator.parametric_var(positions, returns), self._var_calculator.cornish_fisher_var(positions, returns), self._var_calculator.evt_var(positions, returns), self._var_calculator.filtered_historical_var(positions, returns)]
             var_result = max(candidates, key=lambda x: x.var_95)
-        var_95_pct, var_99_pct = ((var_result.var_95 / portfolio_value, var_result.var_99 / portfolio_value) if portfolio_value > 0 else (0.0, 0.0))
+        var_95_pct, var_99_pct = (var_result.var_95 / portfolio_value, var_result.var_99 / portfolio_value) if portfolio_value > 0 else (0.0, 0.0)
         if var_99_pct > self.config.var_99_limit_pct:
             return Violation(
                 timestamp=datetime.now(timezone.utc),

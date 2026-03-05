@@ -288,9 +288,7 @@ class IntegratedMarketMakingStrategy(MarketMakingStrategy):
             hedge_decision=hedge_decision,
             calibration_meta=calibration_meta,
         )
-        self._record_metrics(
-            state.timestamp, current_regime, circuit_state.value, spread_bps, position.size
-        )
+        self._record_metrics(state.timestamp, current_regime, circuit_state.value, spread_bps, position.size)
         return QuoteAction(
             bid_price=reservation_price - half_spread,
             bid_size=bid_size,

@@ -464,39 +464,23 @@ class CompleteMarketSimulator:
         hours: Optional[int] = None,
         include_options: bool = True
     ) -> Dict[str, pd.DataFrame]:
-        """
-        Generate complete synthetic market dataset.
-
-        Args:
-            days: Number of days to simulate (default: 30)
-            hours: Alternative to days, simulate this many hours (overrides days if set)
-            include_options: Whether to include option chain data
-
-        Returns:
-            Dictionary with keys: spot, order_book, trades, options
-        """
+        """Generate complete synthetic market dataset."""
         rng = np.random.default_rng(self.seed)
         T = self._resolve_time_horizon(days, hours)
-
         # 1. Generate spot price
         spot = self.price_gen.generate(T, rng=rng)
-
         # 2. Generate order books
         obs = self.ob_sim.generate_time_series(spot, rng=rng)
-
         # 3. Generate trades
         trades = self.trade_sim.generate(spot, obs, rng=rng)
-
         result = {
             "spot": spot,
             "order_book": self._obs_to_df(obs),
             "trades": trades
         }
-
         # 4. Generate option data if requested
         if include_options:
             result["options"] = self._generate_options_dataset(spot)
-
         return result
 
     def _obs_to_df(self, obs: List[OrderBook]) -> pd.DataFrame:

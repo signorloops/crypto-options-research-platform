@@ -255,9 +255,7 @@ def plot_volatility_surface(
     except ImportError:
         logger.warning("matplotlib required for plotting")
         return
-    if not surface.points:
-        logger.warning("Empty surface, nothing to plot")
-        return
+    if not surface.points: logger.warning("Empty surface, nothing to plot"); return
     S = surface.points[0].underlying_price
     strikes = np.linspace(strike_range[0] * S, strike_range[1] * S, 50)
     expiries = np.linspace(expiry_range[0], expiry_range[1], 50)

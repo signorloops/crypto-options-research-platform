@@ -632,8 +632,7 @@ class VaRCalculator:
         n_simulations: int, holding_period: int, leverage_correlation: float, rng: Any,
     ) -> np.ndarray:
         """Simulate one-position PnL with option revaluation and linear/Greeks fallbacks."""
-        position_value = float(row["value"])
-        linear_component = simulated_returns[:, default_asset_idx] * position_value
+        position_value = float(row["value"]); linear_component = simulated_returns[:, default_asset_idx] * position_value
         option_type = self._normalize_option_type(row.get("option_type"))
         if option_type is None:
             return self._non_option_position_pnl(

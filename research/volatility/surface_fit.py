@@ -97,8 +97,7 @@ def fit_svi(surface, expiry: float, svi_params_cls: Type, expiry_tol: float = 0.
     expiry_points = [p for p in surface.points if abs(p.expiry - expiry) <= expiry_tol]
     if len(expiry_points) < 5:
         return None
-    k = np.array([p.log_moneyness for p in expiry_points], dtype=float)
-    w = np.array([p.volatility**2 * p.expiry for p in expiry_points], dtype=float)
+    k = np.array([p.log_moneyness for p in expiry_points], dtype=float); w = np.array([p.volatility**2 * p.expiry for p in expiry_points], dtype=float)
     w = np.maximum(w, 1e-8)
     if not HAS_SCIPY_OPT:
         params = svi_params_cls(

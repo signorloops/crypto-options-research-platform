@@ -137,8 +137,7 @@ class RoughVolatilityPricer:
             avg_events = float(np.mean(np.sum(counts, axis=1)))
             return jump_returns, var_multipliers, {"avg_jump_events_per_path": avg_events, "total_jump_events": total_events, "avg_jump_intensity": float(cfg.jump_intensity), "jump_intensity_std": 0.0}
         intensity = np.full(n_paths, cfg.jump_intensity, dtype=float)
-        intensity_history = np.zeros((n_paths, n_steps), dtype=float)
-        counts = np.zeros((n_paths, n_steps), dtype=float)
+        intensity_history = np.zeros((n_paths, n_steps), dtype=float); counts = np.zeros((n_paths, n_steps), dtype=float)
         decay = np.exp(-cfg.jump_decay * dt)
         base = float(cfg.jump_intensity)
         for i in range(n_steps):
@@ -237,8 +236,7 @@ class RoughVolatilityPricer:
             payoff = np.maximum(strike - terminal, 0.0)
         else:
             raise ValueError("option_type must be 'call' or 'put'")
-        discount = np.exp(-self.config.rate * self.config.maturity)
-        discounted = discount * payoff
+        discount = np.exp(-self.config.rate * self.config.maturity); discounted = discount * payoff
         price = float(np.mean(discounted))
         n, std = len(discounted), float(np.std(discounted, ddof=1) if len(discounted) > 1 else 0.0)
         std_error = std / np.sqrt(max(n, 1))

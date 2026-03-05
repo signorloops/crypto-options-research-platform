@@ -167,8 +167,7 @@ class AvellanedaStoikov(MarketMakingStrategy):
         mid = state.order_book.mid_price
         if mid is None:
             raise ValueError("Cannot quote without valid order book")
-        q = position.size  # Current inventory
-        calibration_meta = self._update_online_calibration(state, q)
+        q = position.size; calibration_meta = self._update_online_calibration(state, q)  # Current inventory
         gamma, sigma, k = self.config.gamma, self.config.sigma, self.config.k
         time_remaining = self._compute_time_remaining(state)
         inventory_ratio, effective_q = self._compute_effective_inventory(q)

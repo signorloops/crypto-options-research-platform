@@ -116,8 +116,7 @@ def _normalize_okx_option_row(
         return None
     symbol = str(row.get("instId") or row.get("instFamily") or underlying)
     option_type = _normalize_option_type(row.get("optType"), symbol)
-    timestamp_numeric = pd.to_numeric(row.get("ts") or row.get("uTime") or row.get("cTime"), errors="coerce")
-    timestamp = pd.to_datetime(timestamp_numeric, unit="ms", utc=True, errors="coerce")
+    timestamp_numeric = pd.to_numeric(row.get("ts") or row.get("uTime") or row.get("cTime"), errors="coerce"); timestamp = pd.to_datetime(timestamp_numeric, unit="ms", utc=True, errors="coerce")
     if pd.isna(timestamp):
         timestamp = now
     expiry_years = 0.0

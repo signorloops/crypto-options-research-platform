@@ -90,10 +90,7 @@ class QuantoInverseOptionPricer:
     ) -> Tuple[float, QuantoInverseGreeks]:
         """Calculate price and Greeks for quanto-inverse option."""
         QuantoInverseOptionPricer._validate_quanto_inputs(fx_rate, sigma_fx, rho)
-        base_price, base_greeks = InverseOptionPricer.calculate_price_and_greeks(
-            S, K, T, r, sigma, option_type
-        )
-        t_eff = max(float(T), 0.0)
+        base_price, base_greeks = InverseOptionPricer.calculate_price_and_greeks(S, K, T, r, sigma, option_type); t_eff = max(float(T), 0.0)
         quanto_adjustment = float(np.exp(-rho * sigma * sigma_fx * t_eff))
         factor = quanto_adjustment / fx_rate
         price = float(max(0.0, base_price * factor))

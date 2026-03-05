@@ -137,7 +137,6 @@ class WebSocketStream(ABC):
                 await asyncio.sleep(self._next_reconnect_backoff())
 
     async def _handle_messages(self, websocket: Any) -> None:
-        """Handle incoming WebSocket messages with backpressure control."""
         message_queue: asyncio.Queue = asyncio.Queue(maxsize=1000); queue_full_logged = False
         async def producer():
             nonlocal queue_full_logged
