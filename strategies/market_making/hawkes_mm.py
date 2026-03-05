@@ -211,18 +211,15 @@ class HawkesIntensityMonitor:
             return None
         if len(self.trade_times) < 30:
             return None
-
         times = np.array(self.trade_times, dtype=float)
         marks = np.array(self.trade_sizes, dtype=float)
         marks = np.maximum(marks, 1e-8) ** self.mark_power
         T = max(times[-1] - times[0], 1e-8)
         shifted_times = times - times[0]
-
         def neg_log_likelihood(x: np.ndarray) -> float:
             mu, alpha, beta = float(x[0]), float(x[1]), float(x[2])
             if mu <= 0 or alpha < 0 or beta <= 0 or alpha >= beta:
                 return 1e12
-
             A = 0.0
             last_t = 0.0
             log_like = 0.0
@@ -235,13 +232,11 @@ class HawkesIntensityMonitor:
                 log_like += np.log(lam)
                 A += mark_i
                 last_t = float(t_i)
-
             integral = mu * T + (alpha / beta) * np.sum(marks * (1.0 - np.exp(-beta * (T - shifted_times))))
             nll = integral - log_like
             if not np.isfinite(nll):
                 return 1e12
             return float(nll)
-
         x0 = np.array([init.mu, init.alpha, init.beta], dtype=float)
         bounds = [(1e-5, 20.0), (1e-5, 10.0), (1e-4, 20.0)]
         result = minimize(neg_log_likelihood, x0, method="L-BFGS-B", bounds=bounds)
@@ -249,7 +244,6 @@ class HawkesIntensityMonitor:
             return None
         mu, alpha, beta = map(float, result.x)
         alpha = min(alpha, beta * 0.95)
-
         try:
             return HawkesParameters(mu=mu, alpha=alpha, beta=beta)
         except ValueError:

@@ -189,10 +189,7 @@ class QuantoInversePowerOptionPricer:
     ) -> Tuple[float, QuantoInversePowerGreeks]:
         """Calculate quanto-inverse-power price and Greeks with optional pricer kwargs."""
         QuantoInversePowerOptionPricer._validate_quanto_inputs(fx_rate, sigma_fx, rho)
-        n_paths_value, seed_value, bump_rel_value = QuantoInversePowerOptionPricer._resolve_pricer_kwargs(
-            pricer_kwargs,
-            legacy_pricer_kwargs,
-        )
+        n_paths_value, seed_value, bump_rel_value = QuantoInversePowerOptionPricer._resolve_pricer_kwargs(pricer_kwargs, legacy_pricer_kwargs)
         base_price, base_greeks = InversePowerOptionPricer.calculate_price_and_greeks(
             S=S,
             K=K,

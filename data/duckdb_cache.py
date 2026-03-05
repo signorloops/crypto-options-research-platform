@@ -138,11 +138,8 @@ class DuckDBCache:
             Number of rows loaded
         """
         try:
-            # Validate table name to prevent SQL injection
             safe_table = _sanitize_identifier(table_name)
-
             if columns:
-                # Validate column names
                 safe_cols = ", ".join(_sanitize_identifier(col) for col in columns)
                 query = f"""
                     CREATE OR REPLACE VIEW {safe_table} AS
@@ -153,17 +150,13 @@ class DuckDBCache:
                     CREATE OR REPLACE VIEW {safe_table} AS
                     SELECT * FROM read_parquet(?, hive_partitioning=1)
                 """
-
             self.con.execute(query, [pattern])
-
-            # Get row count using safe table name
             count = self.con.execute(f"SELECT COUNT(*) FROM {safe_table}").fetchone()[0]
             logger.info(
                 "Loaded Parquet into DuckDB",
                 extra=log_extra(table=table_name, rows=count, pattern=pattern)
             )
             return count
-
         except DUCKDB_OPERATION_EXCEPTIONS as e:
             logger.error(
                 "Failed to load Parquet",

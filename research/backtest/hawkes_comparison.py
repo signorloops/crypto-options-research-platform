@@ -174,31 +174,22 @@ class ScenarioGenerator:
             return pd.DataFrame()
         if rng is None:
             rng = np.random.default_rng()
-
-        # Create timestamps from event times
         base_time = datetime(2024, 1, 1)
         timestamps = [base_time + timedelta(seconds=t) for t in events]
-
-        # Generate price path using random walk with volatility proportional to intensity
         prices = []
         volumes = []
         current_price = self.base_price
 
         for i, t in enumerate(events):
-            # Intensity at this event affects volatility
             if i > 0:
                 dt = t - events[i-1]
                 intensity = config.mu + config.alpha * np.exp(-config.beta * dt)
             else:
                 intensity = config.mu
-
-            # Higher intensity = higher volatility
             local_vol = self.price_volatility * (1 + intensity)
             price_change = float(rng.normal(0, local_vol * current_price / 100))
             current_price += price_change
             prices.append(current_price)
-
-            # Volume proportional to intensity
             volume = max(0.1, float(rng.exponential(intensity * 10)))
             volumes.append(volume)
 

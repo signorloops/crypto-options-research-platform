@@ -240,30 +240,23 @@ class BacktestEngine:
     ) -> BacktestResult:
         """Run backtest on historical market data."""
         self._reset_run_state()
-
         prices = market_data[price_column].to_numpy(dtype=np.float64)
         timestamps_arr = market_data[timestamp_column].to_numpy()
         n_events = len(prices)
-
         if n_events == 0:
             return self._compute_result(current_price=0.0)
-
         event_volumes = self._prepare_event_volumes(market_data)
-
         current_ob = self._create_dummy_order_book(prices[0])
         previous_quote: Optional[QuoteAction] = None
         previous_quote_timestamp = None
         previous_market_state: Optional[MarketState] = None
-
         for i in range(n_events):
             price = float(prices[i])
             timestamp = timestamps_arr[i]
-
             current_ob = self._update_order_book(current_ob, price)
             market_state = _build_market_state_snapshot(
                 timestamp=timestamp, price=price, order_book=current_ob
             )
-
             position = self.positions.get("SYNTHETIC", Position("SYNTHETIC", 0, 0))
             position = self._maybe_process_previous_quote(
                 previous_quote=previous_quote,
@@ -279,9 +272,7 @@ class BacktestEngine:
             previous_quote = new_quote
             previous_quote_timestamp = timestamp
             previous_market_state = market_state
-
             self._record_state(timestamp, price)
-
         return self._compute_result(current_price=float(prices[-1]))
 
     def _prepare_event_volumes(self, market_data: pd.DataFrame) -> np.ndarray:

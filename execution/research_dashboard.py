@@ -289,8 +289,7 @@ def _render_dashboard_html(
 <!DOCTYPE html>
 <html>
   <head>
-    <meta charset=\"utf-8\" />
-    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+    <meta charset=\"utf-8\" /><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
     <title>CORP Research Dashboard</title>
     <style>
       body {{ font-family: 'Helvetica Neue', Arial, sans-serif; margin: 0; color: #1f2937; background: #f4f6f8; }}
@@ -315,14 +314,10 @@ def _render_dashboard_html(
           <button type=\"submit\">Load</button>
         </form>
       </div>
-
       <div class=\"card\">{primary_fig_html}</div>
       <div class=\"card\">{returns_fig_html}</div>
       {deviation_section}
-      <div class=\"card\">
-        <h2>Summary</h2>
-        <table>{summary_rows}</table>
-      </div>
+      <div class=\"card\"><h2>Summary</h2><table>{summary_rows}</table></div>
     </div>
   </body>
 </html>

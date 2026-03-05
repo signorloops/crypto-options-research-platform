@@ -213,33 +213,26 @@ def _implied_volatility_lbr_fallback(
     """近似 Let's-Be-Rational 风格 IV 回退求解器。"""
     if r is None:
         r = float(os.getenv("RISK_FREE_RATE", "0.05"))
-
     if market_price <= 0 or T <= 0:
         return 0.0
-
     lower_bound, upper_bound = _option_price_bounds(S, K, T, r, is_call)
     if market_price < lower_bound - 1e-10 or market_price > upper_bound + 1e-10:
         raise ValueError(
             f"Option price {market_price} violates no-arbitrage bounds "
             f"[{lower_bound}, {upper_bound}]"
         )
-
     sigma = _initial_sigma_guess(market_price=market_price, S=S, T=T)
-
     for _ in range(max_iter):
         price = black_scholes_price(S, K, T, r, sigma, is_call)
         diff = price - market_price
         if abs(diff) < tol:
             return float(sigma)
-
         sigma_new = _halley_sigma_update(S=S, K=K, T=T, r=r, sigma=sigma, diff=diff)
         if sigma_new is None:
             break
-
         if abs(sigma_new - sigma) < tol:
             return sigma_new
         sigma = sigma_new
-
     return implied_volatility_bisection(
         market_price=market_price,
         S=S,

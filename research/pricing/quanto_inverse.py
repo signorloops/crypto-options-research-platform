@@ -90,31 +90,22 @@ class QuantoInverseOptionPricer:
     ) -> Tuple[float, QuantoInverseGreeks]:
         """Calculate price and Greeks for quanto-inverse option."""
         QuantoInverseOptionPricer._validate_quanto_inputs(fx_rate, sigma_fx, rho)
-
         base_price, base_greeks = InverseOptionPricer.calculate_price_and_greeks(
             S, K, T, r, sigma, option_type
         )
-
         t_eff = max(float(T), 0.0)
         quanto_adjustment = float(np.exp(-rho * sigma * sigma_fx * t_eff))
         factor = quanto_adjustment / fx_rate
-
         price = float(max(0.0, base_price * factor))
         delta = float(base_greeks.delta * factor)
         gamma = float(base_greeks.gamma * factor)
         rho_rate = float(base_greeks.rho * factor)
-
-        # Convert base daily theta into settlement currency and add quanto drift decay.
         d_factor_dT = -rho * sigma * sigma_fx * factor
         theta = float(base_greeks.theta * factor + (base_price * d_factor_dT) / QuantoInverseOptionPricer.DAYS_PER_YEAR)
-
-        # Base vega is per 1% vol; apply chain adjustment for quanto factor sensitivity to sigma.
         d_factor_d_sigma = -rho * sigma_fx * t_eff * factor
         vega = float(base_greeks.vega * factor + base_price * d_factor_d_sigma * 0.01)
-
         fx_delta = float(-price / fx_rate)
         corr_sensitivity = float(-base_price * factor * sigma * sigma_fx * t_eff)
-
         greeks = QuantoInverseGreeks(
             delta=delta,
             gamma=gamma,

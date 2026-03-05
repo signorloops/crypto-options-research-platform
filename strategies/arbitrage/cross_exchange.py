@@ -139,15 +139,11 @@ class CrossExchangeArbitrage:
     def _check_arbitrage(self, instrument: str) -> None:
         """检查特定交易对的套利机会。"""
         price_entries = self.price_cache.get(instrument, {})
-
         if len(price_entries) < 2:
             return
-
-        # 获取价格和检查时间同步
         now = datetime.now(timezone.utc)
         prices = {}
         for ex, entry in price_entries.items():
-            # 检查是否仍然是新鲜数据
             if hasattr(entry, 'received_at'):
                 age_ms = (now - entry.received_at).total_seconds() * 1000
                 if age_ms > 200:  # 超过200ms视为过期
@@ -155,10 +151,8 @@ class CrossExchangeArbitrage:
                 prices[ex] = entry.price
             else:
                 prices[ex] = entry
-
         if len(prices) < 2:
             return
-
         best_opportunity: Optional[ArbitrageOpportunity] = None
         for buy_ex, buy_price in prices.items():
             for sell_ex, sell_price in prices.items():
@@ -182,7 +176,6 @@ class CrossExchangeArbitrage:
                     or opportunity.profit_pct > best_opportunity.profit_pct
                 ):
                     best_opportunity = opportunity
-
         if best_opportunity is not None:
             if self.opportunity_callback:
                 self.opportunity_callback(best_opportunity)

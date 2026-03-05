@@ -260,11 +260,8 @@ class BasisArbitrage:
         basis_info = self.calculate_basis(instrument, annualized_funding)
         if basis_info is None:
             return None
-        spot = basis_info['spot']
-        futures = basis_info['futures']
-        basis = basis_info['basis']
-        basis_pct = basis_info['basis_pct']
-        T = basis_info['time_to_expiry']
+        spot, futures = basis_info["spot"], basis_info["futures"]
+        basis, basis_pct, T = basis_info["basis"], basis_info["basis_pct"], basis_info["time_to_expiry"]
         if T <= 0:
             return None
         annualized_return, net_return = _annualized_basis_returns(

@@ -146,19 +146,15 @@ class GreeksRiskAnalyzer:
             iv_safe = float(iv)
             if not np.isfinite(iv_safe) or iv_safe <= 0:
                 iv_safe = 1e-6
-
             from research.pricing.inverse_options import InverseOptionPricer
-
             T = contract.time_to_expiry(as_of)
             option_type = "call" if contract.option_type.value == "C" else "put"
             price_btc = InverseOptionPricer.calculate_price(
                 spot_safe, contract.strike, T, self.risk_free_rate, iv_safe, option_type
             )
-
             delta_usd_btc = price_btc + spot_safe * position_greeks.delta
             delta_usd = delta_usd_btc * spot_safe
             gamma_usd = position_greeks.gamma * (spot_safe ** 3)
-
             return PortfolioGreeks(
                 delta=delta_usd,
                 gamma=gamma_usd,
@@ -169,7 +165,6 @@ class GreeksRiskAnalyzer:
                 charm=(position_greeks.charm or 0) * fx_rate,
                 veta=0,
             )
-
         spot_fx = spot * fx_rate
         return PortfolioGreeks(
             delta=position_greeks.delta * spot_fx,

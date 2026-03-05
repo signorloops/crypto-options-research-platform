@@ -165,51 +165,24 @@ class VaRCalculator:
     def parametric_var(
         self, positions: pd.DataFrame, returns: pd.DataFrame, holding_period: int = 1
     ) -> VaRResult:
-        """
-        Calculate parametric VaR assuming normal distribution.
-
-        Args:
-            positions: DataFrame with 'value' column for each position
-            returns: DataFrame of historical returns for each position
-            holding_period: Days to hold positions
-
-        Returns:
-            VaRResult with VaR and CVaR metrics
-        """
+        """Calculate parametric VaR/CVaR under a normal return assumption."""
         if holding_period <= 0:
             raise ValueError("holding_period must be positive")
-
         total_value, weights_arr, aligned_returns = self._prepare_portfolio_inputs(
             positions, returns
         )
-
-        # Portfolio mean and variance
-        returns_mean_arr = aligned_returns.mean().values
-        mean_return = returns_mean_arr @ weights_arr
-        cov_matrix = aligned_returns.cov()
-        portfolio_var = weights_arr @ cov_matrix.values @ weights_arr
-        portfolio_std = np.sqrt(portfolio_var)
-
-        # Scale by holding period
+        mean_return = aligned_returns.mean().values @ weights_arr
+        cov_matrix = aligned_returns.cov().values
+        portfolio_std = np.sqrt(weights_arr @ cov_matrix @ weights_arr)
         adjusted_std = portfolio_std * np.sqrt(holding_period)
-
-        # VaR calculations
-        # VaR_alpha = -mu + z_alpha * sigma (positive value represents risk)
         z_95 = stats.norm.ppf(0.95)
         z_99 = stats.norm.ppf(0.99)
-
         var_95 = total_value * (-mean_return * holding_period + z_95 * adjusted_std)
         var_99 = total_value * (-mean_return * holding_period + z_99 * adjusted_std)
-
-        # CVaR (Expected Shortfall) for normal distribution
-        # CVaR_alpha = -mu + sigma * phi(z_alpha) / (1 - alpha)
-        # where phi is the standard normal PDF
         phi_95 = stats.norm.pdf(z_95)
         phi_99 = stats.norm.pdf(z_99)
-
         cvar_95 = total_value * (-mean_return * holding_period + adjusted_std * phi_95 / 0.05)
         cvar_99 = total_value * (-mean_return * holding_period + adjusted_std * phi_99 / 0.01)
-
         return VaRResult(
             var_95=var_95, var_99=var_99, cvar_95=cvar_95, cvar_99=cvar_99, method="parametric"
         )
@@ -217,47 +190,35 @@ class VaRCalculator:
     def cornish_fisher_var(
         self, positions: pd.DataFrame, returns: pd.DataFrame, holding_period: int = 1
     ) -> VaRResult:
-        """
-        Cornish-Fisher VaR: 在正态 VaR 基础上加入偏度和峰度修正。
-        """
+        """Cornish-Fisher VaR with skew/kurtosis-adjusted quantiles."""
         if holding_period <= 0:
             raise ValueError("holding_period must be positive")
-
         total_value, weights_arr, aligned_returns = self._prepare_portfolio_inputs(
             positions, returns
         )
         portfolio_returns = self._portfolio_return_series(aligned_returns, weights_arr)
         if len(portfolio_returns) < 10:
             return self.parametric_var(positions, returns, holding_period)
-
         mu = np.mean(portfolio_returns) * holding_period
         sigma = np.std(portfolio_returns, ddof=1) * np.sqrt(holding_period)
         if sigma <= 1e-12:
             return VaRResult(0.0, 0.0, 0.0, 0.0, method="cornish_fisher")
-
         skew = stats.skew(portfolio_returns, bias=False)
         kurt = stats.kurtosis(portfolio_returns, fisher=False, bias=False)
-
         def cf_quantile(alpha: float) -> float:
             z = stats.norm.ppf(alpha)
-            z_cf = (
+            return (
                 z
                 + (z**2 - 1) * skew / 6.0
                 + (z**3 - 3 * z) * (kurt - 3.0) / 24.0
                 - (2 * z**3 - 5 * z) * (skew**2) / 36.0
             )
-            return z_cf
-
         z95 = cf_quantile(0.95)
         z99 = cf_quantile(0.99)
-
         var_95 = total_value * max(0.0, -mu + z95 * sigma)
         var_99 = total_value * max(0.0, -mu + z99 * sigma)
-
-        # 近似 CVaR：采用修正分位数对应的尾部正态近似
         cvar_95 = total_value * max(0.0, -mu + sigma * stats.norm.pdf(z95) / 0.05)
         cvar_99 = total_value * max(0.0, -mu + sigma * stats.norm.pdf(z99) / 0.01)
-
         return VaRResult(
             var_95=float(var_95),
             var_99=float(var_99),
@@ -685,7 +646,6 @@ class VaRCalculator:
         """Simulate one-position PnL with option revaluation and linear/Greeks fallbacks."""
         position_value = float(row["value"])
         linear_component = simulated_returns[:, default_asset_idx] * position_value
-
         option_type = self._normalize_option_type(row.get("option_type"))
         if option_type is None:
             return self._non_option_position_pnl(
@@ -697,7 +657,6 @@ class VaRCalculator:
                 n_simulations=n_simulations,
                 rng=rng,
             )
-
         inputs = self._parse_option_revaluation_inputs(
             row=row,
             option_type=option_type,
@@ -705,7 +664,6 @@ class VaRCalculator:
             column_index=column_index,
         )
         if inputs is None: return linear_component
-
         underlying_returns = simulated_returns[:, inputs.underlying_idx]
         revalued = self._simulate_revaluation_price_paths(
             inputs=inputs,

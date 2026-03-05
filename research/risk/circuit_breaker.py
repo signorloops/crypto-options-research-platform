@@ -489,7 +489,6 @@ class CircuitBreaker:
         """Check all risk limits and return violations."""
         violations = []
         now = datetime.now(timezone.utc)
-
         daily_pnl_pct = portfolio.daily_pnl_pct
         if daily_pnl_pct < 0:
             daily_loss_violation = _build_threshold_violation(
@@ -502,7 +501,6 @@ class CircuitBreaker:
             )
             if daily_loss_violation is not None:
                 violations.append(daily_loss_violation)
-
         max_dd = portfolio.max_drawdown
         if max_dd < 0:
             drawdown_violation = _build_threshold_violation(
@@ -515,7 +513,6 @@ class CircuitBreaker:
             )
             if drawdown_violation is not None:
                 violations.append(drawdown_violation)
-
         instrument, concentration = portfolio.get_position_concentration()
         concentration_violation = _build_threshold_violation(
             now=now,
@@ -527,14 +524,10 @@ class CircuitBreaker:
         )
         if concentration_violation is not None:
             violations.append(concentration_violation)
-
         var_violation = self._check_var_limit_from_portfolio(portfolio)
-        if var_violation is not None:
-            violations.append(var_violation)
-
+        if var_violation is not None: violations.append(var_violation)
         if self.config.enable_per_instrument_limits:
             violations.extend(self._check_per_instrument_limits(portfolio))
-
         return violations
 
     def _check_var_limit_from_portfolio(self, portfolio: PortfolioState) -> Optional[Violation]:
@@ -579,23 +572,18 @@ class CircuitBreaker:
         """Instrument-level notional risk checks."""
         now = datetime.now(timezone.utc)
         violations: List[Violation] = []
-
         for instrument, position in portfolio.positions.items():
             notional = abs(position.size) * max(position.avg_entry_price, 0.0)
             if notional <= 0:
                 self._instrument_states[instrument] = CircuitState.NORMAL
                 continue
-
             critical_limit = self.config.per_instrument_notional_limits.get(
-                instrument,
-                self.config.per_instrument_notional_limit
+                instrument, self.config.per_instrument_notional_limit
             )
             warning_limit = min(self.config.per_instrument_warning_notional, critical_limit)
-
             if not np.isfinite(critical_limit):
                 self._instrument_states[instrument] = CircuitState.NORMAL
                 continue
-
             if notional >= critical_limit:
                 self._instrument_states[instrument] = CircuitState.RESTRICTED
                 violations.append(Violation(
@@ -624,7 +612,6 @@ class CircuitBreaker:
                 ))
             else:
                 self._instrument_states[instrument] = CircuitState.NORMAL
-
         return violations
 
     def _determine_state(self, violations: List[Violation]) -> CircuitState:
@@ -936,7 +923,6 @@ class CircuitBreaker:
         """Check configured VaR thresholds and return a violation when breached."""
         if len(returns) < 30:
             return None
-
         method = self.config.var_method.lower()
         if method == "parametric":
             var_result = self._var_calculator.parametric_var(positions, returns)
@@ -956,7 +942,6 @@ class CircuitBreaker:
             var_result = max(candidates, key=lambda x: x.var_95)
         var_95_pct = var_result.var_95 / portfolio_value if portfolio_value > 0 else 0.0
         var_99_pct = var_result.var_99 / portfolio_value if portfolio_value > 0 else 0.0
-
         if var_99_pct > self.config.var_99_limit_pct:
             return Violation(
                 timestamp=datetime.now(timezone.utc),
@@ -975,7 +960,6 @@ class CircuitBreaker:
                 limit_value=self.config.var_95_limit_pct,
                 message=f"VaR 95% {var_95_pct:.2%} exceeds limit {self.config.var_95_limit_pct:.2%}",
             )
-
         return None
 
 

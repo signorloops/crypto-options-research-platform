@@ -174,25 +174,10 @@ class FastVolatilityRegimeDetector:
         return regime, probs
 
     def _hmm_predict(self, features: np.ndarray) -> Optional[Tuple[RegimeState, np.ndarray]]:
-        """
-        HMM预测 (带真正超时控制)。
-
-        使用concurrent.futures实现真正的超时中断，避免计算阻塞主线程。
-
-        Args:
-            features: 特征向量
-
-        Returns:
-            (regime, probabilities) 或 None (超时)
-        """
+        """Run HMM prediction with timeout and fallback."""
         if not self._hmm_fitted or self._hmm_model is None:
             return None
-
-        # 首先检查是否能在超时前完成快速计算
-        # 简单的预测通常很快，复杂计算才需要超时控制
         X = features.reshape(1, -1)
-
-        # 使用线程池执行HMM计算，实现真正的超时
         def _hmm_compute():
             try:
                 hidden_state = self._hmm_model.predict(X)[0]
@@ -200,11 +185,8 @@ class FastVolatilityRegimeDetector:
                 return hidden_state, posteriors[0]
             except HMM_RUNTIME_EXCEPTIONS as e:
                 return e
-
         if self._inference_executor is None:
             return None
-
-        # 使用复用线程池实现超时控制，避免每次预测创建线程池的开销
         future = self._inference_executor.submit(_hmm_compute)
         try:
             result = future.result(timeout=self.config.hmm_timeout_ms / 1000.0)
@@ -213,10 +195,8 @@ class FastVolatilityRegimeDetector:
                 return None
             hidden_state, posteriors = result
         except concurrent.futures.TimeoutError:
-            # 真正的超时发生，取消任务并降级
             future.cancel()
             return None
-
         mapped_state = self._state_map.get(int(hidden_state), int(hidden_state))
         mapped_probs = np.zeros_like(posteriors)
         for old_idx, new_idx in self._state_map.items():
@@ -292,55 +272,28 @@ class FastVolatilityRegimeDetector:
         self._hmm_thread = thread
 
     def update(self, returns: float) -> RegimeState:
-        """
-        更新检测器并返回当前状态 (高性能版本)。
-
-        延迟目标: <5ms (P95)
-
-        Args:
-            returns: 收益率
-
-        Returns:
-            当前波动率状态
-        """
+        """更新检测器并返回当前状态。"""
         self._inference_count += 1
-
-        # 1. 更新数据缓冲区 (线程安全)
         with self._buffer_lock:
             self._returns_buffer.append(returns)
-
-        # 2. 快速波动率计算
         vol = self._calculate_volatility()
         self._volatility_estimate = vol
-
-        # 3. 基于阈值的快速分类 (总是执行,作为备用)
         threshold_regime, threshold_probs = self._threshold_classify(vol)
-
-        # 4. 尝试HMM预测 (如果启用)
         hmm_result = None
         if self.config.use_hmm and self._hmm_fitted:
-            # HMM模型是用单维收益率数据训练的
             hmm_result = self._hmm_predict(np.array([returns]))
-
-        # 5. 选择结果
         if hmm_result is not None:
-            # HMM成功
             self.current_regime, self.regime_probabilities = hmm_result
             self._hmm_inference_count += 1
         else:
-            # 降级到阈值方法
             self.current_regime = threshold_regime
             self.regime_probabilities = threshold_probs
             self._threshold_inference_count += 1
-
             if self.config.use_hmm and self._hmm_fitted:
                 self._fallback_count += 1
-
-        # 6. 异步触发HMM训练 (如果需要)
         self._hmm_sample_count += 1
         if self._should_trigger_hmm_training():
             self._async_hmm_train()
-
         return self.current_regime
 
     def predict_regime_switch_probability(self) -> float:

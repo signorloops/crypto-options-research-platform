@@ -266,8 +266,7 @@ class OrderBookFeatureExtractor:
         timestamp = order_book.timestamp
         basic = self._extract_basic_features(order_book)
         depth = self._extract_depth_features(order_book)
-        vwap_bid = self._vwap(order_book.bids, 5)
-        vwap_ask = self._vwap(order_book.asks, 5)
+        vwap_bid, vwap_ask = self._vwap(order_book.bids, 5), self._vwap(order_book.asks, 5)
         vwap_mid = (vwap_bid + vwap_ask) / 2
         microprice, microprice_bias = self._compute_microprice_features(
             order_book,

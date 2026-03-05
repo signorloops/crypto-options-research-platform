@@ -225,17 +225,13 @@ class MarketMakingEnv:
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, Dict]:
         """Execute one environment step."""
         bid_offset, ask_offset, size_scale = self._sanitize_action(action)
-
         current_data = self.market_data.iloc[self.episode_start + self.current_step]
         mid_price = current_data['price']
-
         bid_price = mid_price * (1 - bid_offset / 10000)
         ask_price = mid_price * (1 + ask_offset / 10000)
         quote_size = size_scale
-
         next_step = self.current_step + 1
         done = next_step >= self.episode_length
-
         reward = 0.0
         info = {
             'fills': 0,
@@ -244,7 +240,6 @@ class MarketMakingEnv:
             'applied_ask_offset_bps': ask_offset,
             'applied_size_scale': size_scale,
         }
-
         if not done:
             recent_volatility, recent_volume = self._estimate_recent_market_conditions()
             fill_prob_bid, fill_prob_ask = self._compute_fill_probabilities(
@@ -266,12 +261,9 @@ class MarketMakingEnv:
                 recent_volatility=recent_volatility,
                 info=info,
             )
-
         reward -= self._reward_penalty(self.position, bid_offset, ask_offset)
-
         self.current_step += 1
         next_state = self._get_state()
-
         return next_state, reward, done, info
 
     def _sanitize_action(self, action: np.ndarray) -> Tuple[float, float, float]:
@@ -494,10 +486,8 @@ class PPOMarketMaker(MarketMakingStrategy):
     def _market_state_to_vector(self, state: MarketState, position: Position) -> np.ndarray:
         """Convert MarketState to numpy vector for network."""
         mid = state.order_book.mid_price or 1.0
-
         price_norm = np.log(mid) / 10.0 - 1.0 if mid > 0 else 0.0
         inventory_norm = position.size / self.config.inventory_limit
-
         volatility_5 = state.features.get('volatility_5', 0.5)
         volatility_20 = state.features.get('volatility_20', volatility_5)
         imbalance = state.order_book.imbalance() if state.order_book else 0.0
@@ -509,7 +499,6 @@ class PPOMarketMaker(MarketMakingStrategy):
         volume_ratio = state.features.get('volume_ratio', 1.0)
         volume_z = state.features.get('volume_zscore', 0.0)
         bid_norm, ask_norm = self._depth_norms_from_order_book(state)
-
         inventory_abs = abs(position.size) / max(self.config.inventory_limit, 1e-8)
         inv_util = min(1.0, inventory_abs)
         time_left = state.features.get('time_left', 0.5)
@@ -517,7 +506,6 @@ class PPOMarketMaker(MarketMakingStrategy):
         realized_kurt = state.features.get('realized_kurt', 0.0)
         delta = state.greeks.delta if state.greeks is not None else 0.0
         vega = state.greeks.vega if state.greeks is not None else 0.0
-
         return np.array([
             price_norm,
             inventory_norm,
@@ -546,66 +534,52 @@ class PPOMarketMaker(MarketMakingStrategy):
     def train(self, historical_data: pd.DataFrame) -> None:
         """Train PPO agent on historical data."""
         logger.info("Training PPO agent", extra=log_extra(samples=len(historical_data)))
-
         if self.config.random_seed is not None:
             torch.manual_seed(self.config.random_seed)
-
         self.env = MarketMakingEnv(
             historical_data,
             episode_length=1000,
             random_seed=self.config.random_seed,
         )
-
         sample_state = self.env.reset()
         self._init_network(len(sample_state))
-
         total_timesteps = self.config.total_timesteps
         timestep = 0
         episodes = 0
-
         while timestep < total_timesteps:
             state = self.env.reset()
             episode_reward = 0
             done = False
-
             while not done and timestep < total_timesteps:
                 state_tensor = torch.FloatTensor(state)
                 action, value, log_prob = self.network.get_action(state_tensor)
-
                 next_state, reward, done, info = self.env.step(action)
-
                 self.states.append(state)
                 self.actions.append(action)
                 self.rewards.append(reward)
                 self.values.append(value)
                 self.log_probs.append(log_prob)
                 self.dones.append(done)
-
                 state = next_state
                 episode_reward += reward
                 timestep += 1
-
                 if len(self.states) >= self.config.batch_size:
                     self._update()
-
             episodes += 1
             if episodes % 10 == 0:
                 logger.info("Training progress", extra=log_extra(episode=episodes, timestep=timestep, reward=episode_reward))
-
         logger.info("Training complete", extra=log_extra(total_timesteps=timestep))
 
     def _update(self) -> None:
         """Perform PPO update on collected experiences."""
         if len(self.states) < self.config.batch_size:
             return
-
         states = torch.FloatTensor(np.array(self.states))
         actions = torch.FloatTensor(np.array(self.actions))
         old_log_probs = torch.FloatTensor(self.log_probs)
         rewards = torch.FloatTensor(self.rewards)
         values = torch.FloatTensor(self.values)
         dones = torch.FloatTensor(self.dones)
-
         last_state = self.states[-1] if self.states else None
         next_value = None
         if last_state is not None and self.dones[-1] == 0:
@@ -613,30 +587,23 @@ class PPOMarketMaker(MarketMakingStrategy):
                 state_tensor = torch.FloatTensor(last_state).unsqueeze(0)
                 _, last_value = self.network(state_tensor)
                 next_value = last_value.squeeze().item()
-
         advantages = self._compute_gae(rewards, values, dones, next_value)
         returns = advantages + values
-
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-
         for _ in range(self.config.epochs):
             dist, current_values = self.network(states)
             current_log_probs = dist.log_prob(actions).sum(dim=-1)
-
             ratio = torch.exp(current_log_probs - old_log_probs)
             surr1 = ratio * advantages
             surr2 = torch.clamp(ratio, 1 - self.config.clip_epsilon, 1 + self.config.clip_epsilon) * advantages
             policy_loss = -torch.min(surr1, surr2).mean()
-
             value_loss = nn.MSELoss()(current_values.squeeze(), returns)
             entropy = dist.entropy().mean()
             loss = policy_loss + self.config.value_coef * value_loss - self.config.entropy_coef * entropy
-
             self.optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.network.parameters(), 0.5)
             self.optimizer.step()
-
         self.states = []
         self.actions = []
         self.rewards = []

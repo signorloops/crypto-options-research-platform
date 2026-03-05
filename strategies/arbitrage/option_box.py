@@ -254,36 +254,20 @@ class OptionBoxArbitrage:
         option_chain: Dict[float, Dict[str, float]],
         underlying: str = ""
     ) -> List[BoxOpportunity]:
-        """
-        扫描所有执行价组合寻找套利机会。
-
-        Args:
-            strikes: 可用执行价列表
-            expiry: 到期日
-            option_chain: {strike: {'call': price, 'put': price}}
-            underlying: 标的资产
-
-        Returns:
-            套利机会列表
-        """
+        """扫描执行价组合并返回可交易盒式套利机会。"""
         opportunities = []
-
-        # 遍历所有执行价对
         for i, low_k in enumerate(strikes):
             for high_k in strikes[i+1:]:
                 low_chain = option_chain.get(low_k, {})
                 high_chain = option_chain.get(high_k, {})
-
                 prices = {
                     'call_low': low_chain.get('call', 0),
                     'put_low': low_chain.get('put', 0),
                     'call_high': high_chain.get('call', 0),
                     'put_high': high_chain.get('put', 0)
                 }
-
                 if any(p == 0 for p in prices.values()):
                     continue
-
                 box = self.build_box(low_k, high_k, expiry, prices)
                 if box:
                     liquidity_score = self._liquidity_score(option_chain, low_k, high_k)
@@ -292,8 +276,6 @@ class OptionBoxArbitrage:
                     opp = self.find_arbitrage(box, underlying, liquidity_score=liquidity_score)
                     if opp:
                         opportunities.append(opp)
-
-        # 按年化收益率排序
         opportunities.sort(key=lambda x: x.annualized_return, reverse=True)
         return opportunities
 

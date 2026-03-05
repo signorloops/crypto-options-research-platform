@@ -191,53 +191,22 @@ def ewma_series(returns: np.ndarray, lambda_param: float = 0.94,
 def garch_volatility(returns: np.ndarray, omega: float = 0.000001,
                     alpha: float = 0.1, beta: float = 0.85,
                     annualize: bool = True, periods: int = 365) -> float:
-    """
-    GARCH(1,1) 波动率预测。
-
-    GARCH(1,1) 模型: sigma_t^2 = omega + alpha * r_{t-1}^2 + beta * sigma_{t-1}^2
-
-    典型参数:
-    - omega: 长期平均方差成分
-    - alpha: 对新闻的反应程度 (0.05-0.15)
-    - beta: 持续性 (0.8-0.95)
-
-    约束条件: alpha + beta < 1 (平稳性)
-
-    Args:
-        returns: 收益率序列
-        omega: 常数项
-        alpha: ARCH 参数
-        beta: GARCH 参数
-        annualize: 是否年化
-        periods: 年化周期数
-
-    Returns:
-        下一期波动率预测
-
-    Example:
-        >>> vol = garch_volatility(returns, omega=1e-6, alpha=0.1, beta=0.85)
-    """
+    """GARCH(1,1) one-step volatility forecast with stationarity checks."""
     if len(returns) < 2:
         return 0.0
-
-    # Enhanced parameter validation
     if omega < 0:
         raise ValueError(f"omega must be non-negative, got {omega}")
-    if alpha < 0 or alpha > 1:
+    if not 0 <= alpha <= 1:
         raise ValueError(f"alpha must be in [0, 1], got {alpha}")
-    if beta < 0 or beta > 1:
+    if not 0 <= beta <= 1:
         raise ValueError(f"beta must be in [0, 1], got {beta}")
     if alpha + beta >= 1:
         raise ValueError(f"Non-stationary parameters: alpha + beta = {alpha + beta} >= 1")
-
     values = np.asarray(returns, dtype=np.float64)
     variance = _garch_terminal_variance_fast(values, omega, alpha, beta, float(np.var(values)))
-
     vol = np.sqrt(variance)
-
     if annualize:
         vol *= np.sqrt(periods)
-
     return float(vol)
 
 
