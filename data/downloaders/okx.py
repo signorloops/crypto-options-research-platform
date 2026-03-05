@@ -239,38 +239,27 @@ class OKXClient(ExchangeInterface):
         end: Optional[datetime] = None,
         limit: int = 100
     ) -> pd.DataFrame:
-        """
-        Get OHLCV history.
-
-        Args:
-            interval: '1m', '3m', '5m', '15m', '30m', '1H', '2H', '4H', '6H', '12H', '1D', '1W', '1M'
-        """
+        """Get OHLCV history from OKX market candles endpoint."""
         params = {
             "instId": instrument,
             "bar": interval,
             "limit": min(limit, 300)
         }
-
         if start:
             params["after"] = str(int(start.timestamp() * 1000))
         if end:
             params["before"] = str(int(end.timestamp() * 1000))
-
         result = await self._request("/api/v5/market/history-candles", params)
-
         data = result.get("data", [])
         if not data:
             return pd.DataFrame()
-
         # OKX format: [timestamp, open, high, low, close, vol, volCcy]
         df = pd.DataFrame(data, columns=[
             "timestamp", "open", "high", "low", "close", "volume", "vol_ccy"
         ])
-
         df["timestamp"] = pd.to_datetime(df["timestamp"].astype(float), unit="ms")
         for col in ["open", "high", "low", "close", "volume"]:
             df[col] = df[col].astype(float)
-
         return df.sort_values("timestamp").reset_index(drop=True)
 
     async def get_index_price(self, underlying: str) -> float:

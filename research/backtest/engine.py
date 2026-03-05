@@ -247,8 +247,7 @@ class BacktestEngine:
             return self._compute_result(current_price=0.0)
         event_volumes = self._prepare_event_volumes(market_data)
         current_ob = self._create_dummy_order_book(prices[0])
-        previous_quote: Optional[QuoteAction] = None; previous_quote_timestamp = None
-        previous_market_state: Optional[MarketState] = None
+        previous_quote: Optional[QuoteAction] = None; previous_quote_timestamp = None; previous_market_state: Optional[MarketState] = None
         for i in range(n_events):
             price = float(prices[i])
             timestamp = timestamps_arr[i]
@@ -515,8 +514,7 @@ class BacktestEngine:
         """Compute final backtest metrics (coin-margined)."""
         pnl_series, inventory_series, crypto_balance_series = _history_to_series(self._pnl_history), _history_to_series(self._inventory_history), _history_to_series(self._crypto_balance_history)
         total_pnl_crypto = float(pnl_series.iloc[-1]) if len(pnl_series) > 0 else 0.0
-        total_pnl_usd = total_pnl_crypto * (float(current_price) if current_price is not None else 0.0)
-        realized_pnl, unrealized_pnl = self._calculate_crypto_pnl_components(current_price)
+        total_pnl_usd = total_pnl_crypto * (float(current_price) if current_price is not None else 0.0); realized_pnl, unrealized_pnl = self._calculate_crypto_pnl_components(current_price)
         sharpe = self._calculate_sharpe_ratio(pnl_series); max_dd = _calculate_max_drawdown(pnl_series); buys, sells = _trade_side_counts(self.trades)
         returns_for_ci = pnl_series.diff().dropna() / max(self.initial_crypto_balance, 1e-12) if len(pnl_series) > 1 else pd.Series(dtype=float)
         sharpe_ci, drawdown_ci = self._bootstrap_risk_ci(returns_for_ci)

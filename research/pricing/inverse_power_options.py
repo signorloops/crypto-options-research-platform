@@ -317,8 +317,7 @@ class InversePowerOptionPricer:
             r=r,
             sigma=sigma,
             bump_rel=bump_rel,
-        )
-        fd_base = InversePowerOptionPricer._build_fd_base(
+        ); fd_base = InversePowerOptionPricer._build_fd_base(
             normals=normals,
             S=S,
             K=K,

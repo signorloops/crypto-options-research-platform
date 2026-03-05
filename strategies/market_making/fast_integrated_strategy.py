@@ -383,8 +383,7 @@ class FastIntegratedMarketMakingStrategy(MarketMakingStrategy):
         hedge_decision: object,
     ) -> QuoteAction:
         """Build active quote path after passing trading gate."""
-        spread_multiplier = self._get_spread_multiplier()
-        spread_bps = self.config.base_spread_bps * spread_multiplier
+        spread_multiplier = self._get_spread_multiplier(); spread_bps = self.config.base_spread_bps * spread_multiplier
         reservation_price, half_spread = self._calculate_reservation_price(
             mid, position.size, spread_bps
         )

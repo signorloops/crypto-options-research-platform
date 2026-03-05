@@ -228,8 +228,7 @@ class RoughVolatilityPricer:
         """Price option and report Monte Carlo confidence interval."""
         if not (0.5 < confidence < 1.0):
             raise ValueError("confidence must be in (0.5, 1.0)")
-        total_t0 = time.perf_counter()
-        spots, _ = self.simulate_paths()
+        total_t0 = time.perf_counter(); spots, _ = self.simulate_paths()
         sim_stats = self.get_last_simulation_stats(); pricing_t0 = time.perf_counter()
         terminal = spots[:, -1]
         if option_type == "call":

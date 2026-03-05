@@ -521,8 +521,7 @@ class CircuitBreaker:
         )
         if concentration_violation is not None:
             violations.append(concentration_violation)
-        var_violation = self._check_var_limit_from_portfolio(portfolio)
-        if var_violation is not None: violations.append(var_violation)
+        if (var_violation := self._check_var_limit_from_portfolio(portfolio)) is not None: violations.append(var_violation)
         if self.config.enable_per_instrument_limits:
             violations.extend(self._check_per_instrument_limits(portfolio))
         return violations
@@ -569,8 +568,7 @@ class CircuitBreaker:
         """Instrument-level notional risk checks."""
         now = datetime.now(timezone.utc); violations: List[Violation] = []
         for instrument, position in portfolio.positions.items():
-            notional = abs(position.size) * max(position.avg_entry_price, 0.0)
-            if notional <= 0:
+            if (notional := abs(position.size) * max(position.avg_entry_price, 0.0)) <= 0:
                 self._instrument_states[instrument] = CircuitState.NORMAL
                 continue
             critical_limit = self.config.per_instrument_notional_limits.get(instrument, self.config.per_instrument_notional_limit); warning_limit = min(self.config.per_instrument_warning_notional, critical_limit)
@@ -916,8 +914,7 @@ class CircuitBreaker:
         """Check configured VaR thresholds and return a violation when breached."""
         if len(returns) < 30:
             return None
-        method = self.config.var_method.lower()
-        if method == "parametric":
+        if (method := self.config.var_method.lower()) == "parametric":
             var_result = self._var_calculator.parametric_var(positions, returns)
         elif method == "cornish_fisher":
             var_result = self._var_calculator.cornish_fisher_var(positions, returns)

@@ -109,7 +109,6 @@ class AdaptiveDeltaHedger:
         """Determine whether to hedge now and compute hedge size/metadata."""
         self.update_price(current_time, current_price)
         time_since_last = self._get_time_since_last_hedge(current_time)
-        price_change_pct = self._calculate_price_change_pct(current_price)
         price_drop_pct = self._calculate_price_drop_pct(current_price)
         price_rise_pct = self._calculate_price_rise_pct(current_price)
         base_interval = timedelta(minutes=self.config.base_hedge_interval_minutes)

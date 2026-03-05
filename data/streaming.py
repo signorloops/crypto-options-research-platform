@@ -165,8 +165,7 @@ class WebSocketStream(ABC):
                             await self._route_message(parsed)
                     except (json.JSONDecodeError, KeyError, TypeError) as e:
                         await self._emit('error', e)
-                except asyncio.CancelledError:
-                    raise
+                except asyncio.CancelledError: raise
                 except Exception as e:
                     logger.error(f"Error processing message: {e}")
         producer_task = asyncio.create_task(producer())

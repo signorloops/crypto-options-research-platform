@@ -171,40 +171,15 @@ def rogers_satchell_volatility(open: np.ndarray, high: np.ndarray,
 def yang_zhang_volatility(open: np.ndarray, high: np.ndarray,
                          low: np.ndarray, close: np.ndarray,
                          annualize: bool = True, periods: int = 365) -> float:
-    """
-    计算 Yang-Zhang Volatility。
-
-    结合隔夜跳空 (overnight) 和日内波动，是最有效的波动率估计之一。
-
-    sigma_yz = sqrt(sigma_o^2 + k*sigma_c^2 + (1-k)*sigma_rs^2)
-
-    其中:
-    - sigma_o: 隔夜波动率 (开盘对数收益率)
-    - sigma_c: 收盘价波动率 (开收对数收益率)
-    - sigma_rs: Rogers-Satchell 波动率
-    - k = 0.34 / (1.34 + (n+1)/(n-1))
-
-    Args:
-        open: 开盘价序列
-        high: 最高价序列
-        low: 最低价序列
-        close: 收盘价序列
-        annualize: 是否年化
-        periods: 年化周期数
-
-    Returns:
-        Yang-Zhang 波动率估计
-    """
+    """计算结合隔夜与日内波动的 Yang-Zhang 波动率估计。"""
     n = len(open)
     if n < 2:
         return 0.0
-
     log_oc_prev = np.log(open[1:] / close[:-1])
     var_o = _demeaned_sample_variance(log_oc_prev)
     log_oc = np.log(close / open)
     var_c = _demeaned_sample_variance(log_oc)
     var_rs = rogers_satchell_volatility(open, high, low, close, annualize=False, periods=periods) ** 2
-
     k = 0.34 / (1.34 + (n + 1) / (n - 1))
     var_yz = var_o + k * var_c + (1 - k) * var_rs
     vol = np.sqrt(max(var_yz, 0.0))
@@ -214,8 +189,7 @@ def yang_zhang_volatility(open: np.ndarray, high: np.ndarray,
 def calculate_volatility_from_ohlc(df: pd.DataFrame, method: str = "yang_zhang",
                                    annualize: bool = True, periods: int = 365) -> float:
     """Compute volatility from OHLC data using the selected estimator."""
-    method = method.lower()
-    if method == "realized":
+    if (method := method.lower()) == "realized":
         if 'close' not in df.columns:
             raise ValueError("realized method requires 'close' column")
         returns = np.log(df['close'] / df['close'].shift(1)).dropna()

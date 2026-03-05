@@ -68,31 +68,26 @@ class AvellanedaStoikov(MarketMakingStrategy):
         """Update sigma/k online from rolling market features."""
         if not self.config.enable_online_calibration:
             return {}
-
         mid = state.order_book.mid_price
         if mid is None or mid <= 0:
             return {}
-
         if self._last_mid_price > 0:
             ret = float(np.log(mid / self._last_mid_price))
             if np.isfinite(ret):
                 self._returns_window.append(ret)
         self._last_mid_price = float(mid)
-
         intensity_feature = state.features.get("trade_intensity")
         if intensity_feature is not None:
             intensity = float(max(0.0, intensity_feature))
         else:
             intensity = float(len(state.recent_trades))
         self._trade_intensity_window.append(intensity)
-
         if len(self._returns_window) >= 5:
             sigma_raw = float(np.std(self._returns_window, ddof=1)) * np.sqrt(
                 max(self.config.annualization_periods, 1.0)
             )
             if np.isfinite(sigma_raw):
                 self.config.sigma = float(np.clip(sigma_raw, self.config.min_sigma, self.config.max_sigma))
-
         if len(self._trade_intensity_window) >= 3:
             # k proxies fill decay against observed trade activity and inventory pressure.
             avg_intensity = float(np.mean(self._trade_intensity_window))
@@ -100,7 +95,6 @@ class AvellanedaStoikov(MarketMakingStrategy):
             k_raw = avg_intensity / (1.0 + 0.5 * inventory_util)
             if np.isfinite(k_raw):
                 self.config.k = float(np.clip(k_raw, self.config.min_k, self.config.max_k))
-
         return {
             "calibrated_sigma": float(self.config.sigma),
             "calibrated_k": float(self.config.k),
@@ -188,8 +182,7 @@ class AvellanedaStoikov(MarketMakingStrategy):
                 inventory_ratio=inventory_ratio,
             )
         )
-        bid_price = reservation_price - half_spread
-        ask_price = reservation_price + half_spread
+        bid_price, ask_price = reservation_price - half_spread, reservation_price + half_spread
         bid_size, ask_size = self._compute_quote_sizes(q, inventory_ratio)
         return QuoteAction(
             bid_price=bid_price,

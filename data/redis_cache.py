@@ -534,18 +534,14 @@ class GreeksCacheManager:
 
     async def get_greeks_with_refresh(
         self,
-        instrument: str,
-        fetch_func: Callable[[str], Any]
+        instrument: str, fetch_func: Callable[[str], Any]
     ) -> Dict[str, float]:
         """Get Greeks with background refresh and singleflight cache-miss fetch."""
         greeks = await self.redis.get_greeks(instrument)
         if greeks is not None:
             ttl = await self.redis.get_ttl(f"greeks:{instrument}")
             if ttl < self.refresh_threshold:
-                logger.debug(
-                    "Greeks stale, refreshing",
-                    extra=log_extra(instrument=instrument, ttl=ttl)
-                )
+                logger.debug("Greeks stale, refreshing", extra=log_extra(instrument=instrument, ttl=ttl))
                 task = asyncio.create_task(self._refresh_greeks(instrument, fetch_func))
                 self._refresh_tasks.add(task)
                 task.add_done_callback(lambda t: self._refresh_tasks.discard(t))

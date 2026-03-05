@@ -146,12 +146,7 @@ def _normalize_okx_option_row(
     }
 
 
-def _align_cex_defi_quotes(
-    cex: pd.DataFrame,
-    defi: pd.DataFrame,
-    *,
-    align_tolerance_seconds: float = 60.0,
-) -> pd.DataFrame:
+def _align_cex_defi_quotes(cex: pd.DataFrame, defi: pd.DataFrame, *, align_tolerance_seconds: float = 60.0) -> pd.DataFrame:
     join_cols = ["ts_bucket", "symbol", "option_type", "expiry_bucket", "delta_bucket"]
     merged = cex.merge(defi, on=join_cols, suffixes=("_cex", "_defi"))
     if merged.empty:

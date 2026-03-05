@@ -266,8 +266,7 @@ def plot_volatility_surface(
     for i in range(len(strikes)):
         for j in range(len(expiries)):
             V_grid[j, i] = surface.get_volatility(strikes[i], expiries[j])
-    fig = plt.figure(figsize=(12, 5))
-    ax1 = fig.add_subplot(121, projection="3d")
+    fig = plt.figure(figsize=(12, 5)); ax1 = fig.add_subplot(121, projection="3d")
     ax1.plot_surface(K_grid / S, T_grid, V_grid, cmap="viridis")
     ax1.set_xlabel("Moneyness (K/S)")
     ax1.set_ylabel("Time to Expiry")

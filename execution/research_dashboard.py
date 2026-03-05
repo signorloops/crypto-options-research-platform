@@ -281,7 +281,6 @@ def _render_dashboard_html(
     primary_fig_html: str, returns_fig_html: str,
     deviation_section: str, summary_rows: str,
 ) -> str:
-    """Render full dashboard HTML page."""
     return f"""
 <!DOCTYPE html>
 <html>

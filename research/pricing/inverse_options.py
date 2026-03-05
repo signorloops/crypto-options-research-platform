@@ -571,10 +571,8 @@ class InverseOptionPricer:
     ) -> float:
         """使用二分法计算隐含波动率（作为fallback）。"""
         sigma_low, sigma_high = 0.001, 5.0
-
         price_low = InverseOptionPricer.calculate_price(S, K, T, r, sigma_low, option_type)
         price_high = InverseOptionPricer.calculate_price(S, K, T, r, sigma_high, option_type)
-
         # 检查价格是否在合理范围内
         if price < price_low or price > price_high:
             # 价格超出范围，可能是输入有误
@@ -583,22 +581,17 @@ class InverseOptionPricer:
                 f"for {option_type} S={S}, K={K}, T={T}"
             )
             return sigma_low if price < price_low else sigma_high
-
         for _ in range(max_iter):
             sigma_mid = (sigma_low + sigma_high) / 2
             price_mid = InverseOptionPricer.calculate_price(S, K, T, r, sigma_mid, option_type)
-
             if abs(price_mid - price) < tol:
                 return sigma_mid
-
             if price_mid < price:
                 sigma_low = sigma_mid
             else:
                 sigma_high = sigma_mid
-
             if sigma_high - sigma_low < tol:
                 return (sigma_low + sigma_high) / 2
-
         return (sigma_low + sigma_high) / 2
 
     @staticmethod
@@ -640,30 +633,9 @@ def inverse_option_parity(
     T: float,
     r: float
 ) -> float:
-    """
-    币本位期权的Put-Call Parity验证。
-
-    币本位的Put-Call Parity（以加密货币计价）：
-    C - P = (1/K) * e^(-rT) - 1/S
-
-    推导：
-    - 币本位call + 币本位put = 持有现金的put-call parity
-    - 在BTC numeraire下，考虑现金的现值
-
-    Args:
-        call_price: 看涨期权价格（加密货币单位）
-        put_price: 看跌期权价格（加密货币单位）
-        S: 标的现价
-        K: 行权价
-        T: 到期时间
-        r: 无风险利率
-
-    Returns:
-        Parity偏差（越接近0越好）
-    """
+    """币本位期权 Put-Call Parity 偏差，越接近 0 说明一致性越好。"""
     if S <= 0 or K <= 0 or T < 0:
         return float('inf')
-
     if T < InverseOptionPricer.EPSILON:
         # 到期时
         lhs = call_price - put_price
@@ -671,7 +643,6 @@ def inverse_option_parity(
     else:
         lhs = call_price - put_price
         rhs = (1.0 / K) * np.exp(-r * T) - 1.0 / S
-
     return lhs - rhs
 
 

@@ -76,8 +76,7 @@ class BlackScholesGreeks:
             raise ValueError(f"Volatility sigma must be positive, got {sigma}")
         if T <= 0:
             return Greeks(delta=0, gamma=0, theta=0, vega=0, rho=0)
-        d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
-        d2 = d1 - sigma * np.sqrt(T)
+        d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T)); d2 = d1 - sigma * np.sqrt(T)
         nd1, nd2 = norm.cdf(d1), norm.cdf(d2)
         n_prime_d1 = norm.pdf(d1)
         if option_type == 'call':
@@ -140,9 +139,7 @@ class GreeksRiskAnalyzer:
                 iv_safe = 1e-6
             from research.pricing.inverse_options import InverseOptionPricer
             option_type = "call" if contract.option_type.value == "C" else "put"
-            price_btc = InverseOptionPricer.calculate_price(
-                spot_safe, contract.strike, contract.time_to_expiry(as_of), self.risk_free_rate, iv_safe, option_type
-            )
+            price_btc = InverseOptionPricer.calculate_price(spot_safe, contract.strike, contract.time_to_expiry(as_of), self.risk_free_rate, iv_safe, option_type)
             delta_usd_btc = price_btc + spot_safe * position_greeks.delta
             delta_usd = delta_usd_btc * spot_safe
             gamma_usd = position_greeks.gamma * (spot_safe ** 3)

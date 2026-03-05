@@ -345,7 +345,6 @@ class StrategyArena:
     def _calculate_scorecard(self, result: BacktestResult) -> StrategyScorecard:
         """Calculate comprehensive metrics from backtest result."""
         pnl_series = result.pnl_series
-
         if len(pnl_series) == 0:
             return _build_empty_scorecard(result)
 
@@ -624,28 +623,21 @@ class StrategyArena:
         else:
             lines.append("Data Period: No data")
         lines.append(f"Number of Strategies: {len(self.scorecards)}")
-
         lines.append("\n" + "=" * 70)
         lines.append("INDIVIDUAL STRATEGY RESULTS")
         lines.append("=" * 70)
-
         for name, sc in self.scorecards.items():
             lines.append(sc.summary())
-
         lines.append("\n" + "=" * 70)
         lines.append("STRATEGY RANKINGS")
         lines.append("=" * 70)
-
         metrics = ["total_pnl", "sharpe_ratio", "sortino_ratio", "calmar_ratio"]
         for metric in metrics:
             winner = self.get_winner(metric)
             value = getattr(self.scorecards[winner], metric)
             lines.append(f"\nBest by {metric}: {winner} ({value:.4f})")
-
         report = "\n".join(lines)
-
         if output_file:
             with open(output_file, "w") as f:
                 f.write(report)
-
         return report

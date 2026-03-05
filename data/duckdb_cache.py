@@ -320,8 +320,7 @@ class DuckDBCache:
         start: Optional[datetime] = None, end: Optional[datetime] = None
     ) -> pd.DataFrame:
         """Resample tick/trade data to OHLCV buckets."""
-        safe_table = _sanitize_identifier(table_name)
-        where_clause, params = "", {}
+        safe_table = _sanitize_identifier(table_name); where_clause, params = "", {}
         if start and end:
             where_clause = "WHERE timestamp >= $start AND timestamp <= $end"
             params = {"start": start, "end": end}

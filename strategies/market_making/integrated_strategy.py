@@ -273,8 +273,7 @@ class IntegratedMarketMakingStrategy(MarketMakingStrategy):
         reservation_price, half_spread = self._calculate_reservation_price(
             mid, position.size, spread_bps
         )
-        position_limit_mult = self.circuit_breaker.get_position_limit_multiplier()
-        effective_inventory_limit = self.config.inventory_limit * position_limit_mult
+        position_limit_mult = self.circuit_breaker.get_position_limit_multiplier(); effective_inventory_limit = self.config.inventory_limit * position_limit_mult
         bid_size, ask_size = self._calculate_quote_sizes(position.size, effective_inventory_limit)
         metadata = self._build_quote_metadata(
             circuit_state=circuit_state,

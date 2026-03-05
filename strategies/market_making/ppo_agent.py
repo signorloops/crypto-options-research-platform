@@ -230,8 +230,7 @@ class MarketMakingEnv:
         bid_price, ask_price = mid_price * (1 - bid_offset / 10000), mid_price * (1 + ask_offset / 10000)
         quote_size = size_scale
         done = (next_step := self.current_step + 1) >= self.episode_length
-        reward = 0.0
-        info = {
+        reward, info = 0.0, {
             'fills': 0,
             'pnl': 0.0,
             'applied_bid_offset_bps': bid_offset,
@@ -343,8 +342,7 @@ class MarketMakingEnv:
         )
         imbalance = self._safe_column_value(current, "imbalance", np.clip(ret_1 * 50.0, -1.0, 1.0))
         bid_norm, ask_norm = self._normalized_bid_ask_depth(current, float(imbalance))
-        delta = self._safe_column_value(current, "delta", 0.0)
-        vega = self._safe_column_value(current, "vega", 0.0)
+        delta, vega = self._safe_column_value(current, "delta", 0.0), self._safe_column_value(current, "vega", 0.0)
         return np.array([
             price_norm,
             inventory_norm,
@@ -479,8 +477,7 @@ class PPOMarketMaker(MarketMakingStrategy):
         momentum, volume_ratio, volume_z = state.features.get('momentum', 0.0), state.features.get('volume_ratio', 1.0), state.features.get('volume_zscore', 0.0)
         bid_norm, ask_norm = self._depth_norms_from_order_book(state)
         inventory_abs = abs(position.size) / max(self.config.inventory_limit, 1e-8)
-        inv_util = min(1.0, inventory_abs)
-        time_left = state.features.get('time_left', 0.5)
+        inv_util = min(1.0, inventory_abs); time_left = state.features.get('time_left', 0.5)
         realized_skew, realized_kurt = state.features.get('realized_skew', 0.0), state.features.get('realized_kurt', 0.0)
         delta, vega = (state.greeks.delta, state.greeks.vega) if state.greeks is not None else (0.0, 0.0)
         return np.array([

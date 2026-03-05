@@ -26,18 +26,15 @@ def _full_bucket_components(
         empty_float = np.array([], dtype=float)
         empty_ts = np.array([], dtype=timestamps.dtype)
         return empty_float, empty_float, empty_ts, empty_float, empty_float, empty_float
-
     boundaries = (np.arange(1, n_full + 1, dtype=float) * bucket_size)
     boundary_idx = np.searchsorted(cum_total, boundaries, side="left")
     boundary_idx = np.clip(boundary_idx, 0, len(cum_total) - 1)
-
     trade_starts = cum_total[boundary_idx] - volumes[boundary_idx]
     partial_to_boundary = boundaries - trade_starts
     buy_prefix = np.where(boundary_idx > 0, cum_buy[boundary_idx - 1], 0.0)
     sell_prefix = np.where(boundary_idx > 0, cum_sell[boundary_idx - 1], 0.0)
     buy_partial = np.where(is_buy[boundary_idx], partial_to_boundary, 0.0)
     sell_partial = np.where(is_buy[boundary_idx], 0.0, partial_to_boundary)
-
     cum_buy_at_boundaries = buy_prefix + buy_partial
     cum_sell_at_boundaries = sell_prefix + sell_partial
     full_buy = np.diff(np.concatenate(([0.0], cum_buy_at_boundaries)))
@@ -256,8 +253,7 @@ class VPINCalculator:
         if n_buckets == 0:
             return _empty_bucket_arrays()
         is_buy = sides == 'buy'
-        buy_trade_vol = np.where(is_buy, volumes, 0.0)
-        sell_trade_vol = np.where(is_buy, 0.0, volumes)
+        buy_trade_vol, sell_trade_vol = np.where(is_buy, volumes, 0.0), np.where(is_buy, 0.0, volumes)
         cum_buy = np.cumsum(buy_trade_vol)
         cum_sell = np.cumsum(sell_trade_vol)
         full_components = _full_bucket_components(
