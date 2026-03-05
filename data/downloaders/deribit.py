@@ -242,53 +242,62 @@ class DeribitClient(ExchangeInterface):
         Get historical trades.
         Note: Deribit has rate limits, may need to paginate for large requests.
         """
-        from core.types import OrderSide
-
         trades = []
         current_start = start
 
         while current_start < end:
+            params = self._build_trade_query_params(
+                instrument=instrument,
+                current_start=current_start,
+                end=end,
+                limit=limit,
+            )
             result = await self._request(
                 "get_last_trades_by_instrument",
-                {
-                    "instrument_name": instrument,
-                    "start_timestamp": int(current_start.timestamp() * 1000),
-                    "end_timestamp": int(
-                        min(
-                            current_start + timedelta(hours=TRADES_PAGE_WINDOW_HOURS), end
-                        ).timestamp()
-                        * 1000
-                    ),
-                    "count": min(limit, MAX_TRADES_PER_REQUEST),
-                },
+                params,
             )
 
             batch = result.get("trades", [])
             if not batch:
                 break
-
-            for t in batch:
-                trades.append(
-                    Trade(
-                        timestamp=datetime.fromtimestamp(t["timestamp"] / 1000, tz=timezone.utc),
-                        instrument=instrument,
-                        price=t["price"],
-                        size=t["amount"],
-                        side=OrderSide.BUY if t["direction"] == "buy" else OrderSide.SELL,
-                        trade_id=t.get("trade_id"),
-                    )
-                )
-
-            # Move to next batch
-            last_time = batch[-1]["timestamp"]
-            current_start = datetime.fromtimestamp(last_time / 1000, tz=timezone.utc) + timedelta(
-                milliseconds=1
-            )
-
-            # Rate limiting
+            trades.extend(self._parse_trade_batch(batch=batch, instrument=instrument))
+            current_start = self._advance_trade_cursor(batch)
             await asyncio.sleep(TRADES_RATE_LIMIT_SLEEP_SECONDS)
 
         return trades
+
+    @staticmethod
+    def _build_trade_query_params(
+        *, instrument: str, current_start: datetime, end: datetime, limit: int
+    ) -> Dict[str, int | str]:
+        window_end = min(current_start + timedelta(hours=TRADES_PAGE_WINDOW_HOURS), end)
+        return {
+            "instrument_name": instrument,
+            "start_timestamp": int(current_start.timestamp() * 1000),
+            "end_timestamp": int(window_end.timestamp() * 1000),
+            "count": min(limit, MAX_TRADES_PER_REQUEST),
+        }
+
+    @staticmethod
+    def _parse_trade_batch(*, batch: List[Dict[str, Any]], instrument: str) -> List[Trade]:
+        from core.types import OrderSide
+
+        return [
+            Trade(
+                timestamp=datetime.fromtimestamp(t["timestamp"] / 1000, tz=timezone.utc),
+                instrument=instrument,
+                price=t["price"],
+                size=t["amount"],
+                side=OrderSide.BUY if t["direction"] == "buy" else OrderSide.SELL,
+                trade_id=t.get("trade_id"),
+            )
+            for t in batch
+        ]
+
+    @staticmethod
+    def _advance_trade_cursor(batch: List[Dict[str, Any]]) -> datetime:
+        last_time = batch[-1]["timestamp"]
+        return datetime.fromtimestamp(last_time / 1000, tz=timezone.utc) + timedelta(milliseconds=1)
 
     async def get_historical_volatility(
         self, currency: str = "BTC", period_days: int = 30
