@@ -248,7 +248,6 @@ class RoughVolatilityPricer:
         ci_low = price - z * std_error
         ci_high = price + z * std_error
         pricing_time = float(max(time.perf_counter() - pricing_t0, 0.0))
-        total_time = float(max(time.perf_counter() - total_t0, 0.0))
         return {
             "price": price,
             "std_error": float(std_error),
@@ -261,5 +260,5 @@ class RoughVolatilityPricer:
             "jump_intensity_std": float(sim_stats.get("jump_intensity_std", 0.0)),
             "simulation_time_sec": float(sim_stats.get("simulation_time_sec", 0.0)),
             "pricing_time_sec": pricing_time,
-            "total_time_sec": total_time,
+            "total_time_sec": float(max(time.perf_counter() - total_t0, 0.0)),
         }

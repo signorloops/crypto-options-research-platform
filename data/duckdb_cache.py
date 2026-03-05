@@ -326,8 +326,7 @@ class DuckDBCache:
 
     def resample_ohlcv(
         self,
-        table_name: str,
-        timeframe: str = "1H",
+        table_name: str, timeframe: str = "1H",
         start: Optional[datetime] = None,
         end: Optional[datetime] = None
     ) -> pd.DataFrame:

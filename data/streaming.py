@@ -147,10 +147,9 @@ class WebSocketStream(ABC):
                     no_drop = self._enqueue_with_drop_oldest(message_queue, message)
                     if no_drop:
                         queue_full_logged = False
-                    else:
-                        if not queue_full_logged:
-                            logger.warning("Message queue full, dropping old messages")
-                            queue_full_logged = True
+                    elif not queue_full_logged:
+                        logger.warning("Message queue full, dropping old messages")
+                        queue_full_logged = True
             except ConnectionClosed:
                 logger.info("WebSocket connection closed in producer")
             finally:

@@ -335,17 +335,12 @@ class CrossExchangeArbitrage:
         start_amount: float = 1.0,
         min_profit_pct: float = 0.001
     ) -> Optional[TriangularOpportunity]:
-        """
-        检查简化三角套利（3条边）:
-        path: A/B, B/C, C/A
-        pair_prices 使用 "BASE/QUOTE": price 约定。
-        """
+        """检查简化三角套利（3条边）: A/B -> B/C -> C/A。"""
         currencies = set()
         for pair in pair_prices:
             base, quote = pair.split("/")
             currencies.add(base)
             currencies.add(quote)
-
         currencies = sorted(currencies)
         for b in currencies:
             for c in currencies:
@@ -354,12 +349,10 @@ class CrossExchangeArbitrage:
                 path = [f"{start_currency}/{b}", f"{b}/{c}", f"{c}/{start_currency}"]
                 if not all(p in pair_prices and pair_prices[p] > 0 for p in path):
                     continue
-
                 amount_b = start_amount / pair_prices[path[0]]
                 amount_c = amount_b / pair_prices[path[1]]
                 end_amount = amount_c * pair_prices[path[2]]
                 profit_pct = (end_amount - start_amount) / start_amount
-
                 if profit_pct >= min_profit_pct:
                     return TriangularOpportunity(
                         exchange=exchange,
@@ -369,5 +362,4 @@ class CrossExchangeArbitrage:
                         profit_pct=float(profit_pct * 100),
                         timestamp=datetime.now(timezone.utc)
                     )
-
         return None

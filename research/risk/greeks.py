@@ -132,11 +132,7 @@ class GreeksRiskAnalyzer:
         self,
         *,
         position_greeks: Greeks,
-        contract: OptionContract,
-        spot: float,
-        iv: float,
-        as_of: datetime,
-        fx_rate: float,
+        contract: OptionContract, spot: float, iv: float, as_of: datetime, fx_rate: float,
     ) -> PortfolioGreeks:
         """Convert a single-position Greeks vector into portfolio USD terms."""
         if contract.inverse:
@@ -145,9 +141,10 @@ class GreeksRiskAnalyzer:
             if not np.isfinite(iv_safe) or iv_safe <= 0:
                 iv_safe = 1e-6
             from research.pricing.inverse_options import InverseOptionPricer
-            T = contract.time_to_expiry(as_of)
             option_type = "call" if contract.option_type.value == "C" else "put"
-            price_btc = InverseOptionPricer.calculate_price(spot_safe, contract.strike, T, self.risk_free_rate, iv_safe, option_type)
+            price_btc = InverseOptionPricer.calculate_price(
+                spot_safe, contract.strike, contract.time_to_expiry(as_of), self.risk_free_rate, iv_safe, option_type
+            )
             delta_usd_btc = price_btc + spot_safe * position_greeks.delta
             delta_usd = delta_usd_btc * spot_safe
             gamma_usd = position_greeks.gamma * (spot_safe ** 3)

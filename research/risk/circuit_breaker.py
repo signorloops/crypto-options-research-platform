@@ -501,8 +501,7 @@ class CircuitBreaker:
             )
             if daily_loss_violation is not None:
                 violations.append(daily_loss_violation)
-        max_dd = portfolio.max_drawdown
-        if max_dd < 0:
+        if (max_dd := portfolio.max_drawdown) < 0:
             drawdown_violation = _build_threshold_violation(
                 now=now,
                 violation_type="drawdown",

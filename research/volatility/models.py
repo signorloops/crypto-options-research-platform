@@ -274,23 +274,19 @@ def estimate_har_params(rv_daily: np.ndarray, periods: Tuple[int, int, int] = (1
         (beta_0, beta_d, beta_w, beta_m) 参数元组
     """
     d, w, m = periods
-
     if len(rv_daily) < m + 2:
         # 样本不足，返回固定系数
         return (0.0, 0.4, 0.3, 0.2)
-
     # 构建特征矩阵
     n = len(rv_daily) - m
     X = np.zeros((n, 4))  # [1, RV_d, RV_w, RV_m]
     y = rv_daily[m:]
-
     for i in range(n):
         idx = i + m
         X[i, 0] = 1.0  # 截距
         X[i, 1] = rv_daily[idx - 1]  # 日
         X[i, 2] = np.mean(rv_daily[idx - w:idx])  # 周
         X[i, 3] = np.mean(rv_daily[idx - m:idx])  # 月
-
     # 估计参数，使用非负最小二乘(NNLS)确保经济学合理性
     try:
         if HAS_SCIPY:
@@ -764,29 +760,21 @@ def volatility_regime_switching(returns: np.ndarray, n_states: int = 2, method: 
     """
     if n_states != 2:
         raise NotImplementedError("Only 2-state model implemented")
-
     if method == "hamilton":
         return hamilton_filter_regime_switching(returns)
-
     # 简单实现: 使用收益率绝对值的阈值划分
     abs_returns = np.abs(returns)
-
     # K-means 风格的分割
     threshold = np.median(abs_returns)
-
     low_vol_mask = abs_returns <= threshold
     high_vol_mask = ~low_vol_mask
-
     mu_low = np.mean(returns[low_vol_mask]) if np.any(low_vol_mask) else 0
     sigma_low = np.std(returns[low_vol_mask]) if np.any(low_vol_mask) else 0.01
-
     mu_high = np.mean(returns[high_vol_mask]) if np.any(high_vol_mask) else 0
     sigma_high = np.std(returns[high_vol_mask]) if np.any(high_vol_mask) else 0.05
-
     # 计算当前状态概率 (最后 N 个观测)
     recent = abs_returns[-min(20, len(abs_returns)):]
     p_high = np.mean(recent > threshold)
-
     return {
         "current_high_vol_probability": float(p_high),
         "low_vol_state": {"mean": float(mu_low), "vol": float(sigma_low)},

@@ -409,9 +409,7 @@ class DeribitDataDownloader:
     async def download_order_book_snapshots(
         self, instrument: str, timestamps: List[datetime], use_cache: bool = True
     ) -> pd.DataFrame:
-        """
-        Download order book snapshots at specific times.
-        """
+        """Download order book snapshots at specific times."""
         snapshots = []
 
         # Check cache for existing data
