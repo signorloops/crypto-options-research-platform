@@ -59,7 +59,6 @@ def fit_ssvi(surface, ssvi_params_cls: Type, expiry_tol: float = 0.01):
     if atm_curve is None:
         return None
     x_exp, y_theta = atm_curve
-
     def theta_of_t(t: np.ndarray) -> np.ndarray:
         return np.interp(t, x_exp, y_theta, left=y_theta[0], right=y_theta[-1])
 

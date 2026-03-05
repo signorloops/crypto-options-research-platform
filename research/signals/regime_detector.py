@@ -347,30 +347,18 @@ class VolatilityRegimeDetector:
             return self.current_regime, self.regime_probabilities
 
     def update(self, returns: float) -> RegimeState:
-        """
-        Update detector with new return and return current regime.
-
-        Args:
-            returns: Log return (or simple return if use_log_returns=False)
-
-        Returns:
-            Current regime state
-        """
+        """Update detector with new return and return current regime."""
         self._sample_count += 1
-
         # Convert to log return if needed
         log_return = np.log1p(returns) if self.config.use_log_returns and returns > -1 else returns
-
         # Extract features
         self._extract_features(log_return)
-
         # Train model if needed
         if (
             not self._is_fitted
             or self._sample_count - self._last_training_sample >= self.config.retrain_interval
         ):
             self._train_model()
-
         # Predict regime if model is fitted
         if self._is_fitted:
             regime, probs = self._predict_regime()
@@ -381,10 +369,8 @@ class VolatilityRegimeDetector:
                 self.current_regime = selected_regime
                 self._current_regime_run_length = 1
             self.regime_probabilities = probs
-
             # Record history
             self.regime_history.append((datetime.now(timezone.utc), self.current_regime, probs.copy()))
-
         return self.current_regime
 
     def predict_regime_switch_probability(self) -> float:

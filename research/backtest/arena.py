@@ -347,7 +347,6 @@ class StrategyArena:
         pnl_series = result.pnl_series
         if len(pnl_series) == 0:
             return _build_empty_scorecard(result)
-
         total_pnl = result.total_pnl_usd
         total_return_pct = total_pnl / self.initial_capital
         periods_per_year = self._periods_per_year(pnl_series)

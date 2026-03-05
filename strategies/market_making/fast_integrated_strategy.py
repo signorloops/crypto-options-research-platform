@@ -413,28 +413,19 @@ class FastIntegratedMarketMakingStrategy(MarketMakingStrategy):
         )
 
     def quote(self, state: MarketState, position: Position) -> QuoteAction:
-        """
-        生成报价 (高性能版本).
-
-        目标延迟: <35ms (P95)
-        """
+        """生成报价（高性能版本，目标延迟 <35ms P95）。"""
         start_time = time.perf_counter()
-
         mid = state.order_book.mid_price
         if mid is None:
             raise ValueError("Cannot quote without valid order book")
         self._current_price = mid
-
         circuit_state, can_trade, reason = self._evaluate_trading_gate(state, mid, position)
         if not can_trade:
             return self._build_halted_quote(mid=mid, circuit_state=circuit_state, reason=reason)
-
         self._update_regime_state(mid)
         current_regime = self.regime_detector.current_regime
-
         # 3. 尝试从缓存获取Greeks (如果可用)
         self._refresh_greeks_context(state, mid)
-
         hedge_decision = _evaluate_fast_hedge_decision(
             config=self.config,
             current_greeks=self._current_greeks,

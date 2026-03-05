@@ -36,19 +36,16 @@ def _normalize_quotes(df: pd.DataFrame, fallback_venue: str) -> pd.DataFrame:
     price_col = _find_first_existing(df, PRICE_CANDIDATES)
     if price_col is None:
         raise ValueError("Quote data requires a price column")
-
     symbol_col = _find_first_existing(df, SYMBOL_CANDIDATES)
     option_type_col = _find_first_existing(df, OPTION_TYPE_CANDIDATES)
     expiry_col = _find_first_existing(df, EXPIRY_CANDIDATES)
     delta_col = _find_first_existing(df, DELTA_CANDIDATES)
     venue_col = _find_first_existing(df, VENUE_CANDIDATES)
-
     out = pd.DataFrame()
     if time_col is not None:
         out["timestamp"] = pd.to_datetime(df[time_col], errors="coerce", utc=True)
     else:
         out["timestamp"] = pd.NaT
-
     out["price"] = pd.to_numeric(df[price_col], errors="coerce")
     out["symbol"] = df[symbol_col].astype(str) if symbol_col else "UNKNOWN"
     out["option_type"] = (
@@ -57,16 +54,13 @@ def _normalize_quotes(df: pd.DataFrame, fallback_venue: str) -> pd.DataFrame:
     out["expiry_years"] = pd.to_numeric(df[expiry_col], errors="coerce") if expiry_col else 0.0
     out["delta"] = pd.to_numeric(df[delta_col], errors="coerce") if delta_col else 0.5
     out["venue"] = df[venue_col].astype(str) if venue_col else fallback_venue
-
     out = out.dropna(subset=["price"])
     if out.empty:
         raise ValueError("Quote data has no valid rows after normalization")
-
     out["timestamp"] = out["timestamp"].ffill().bfill()
     out = out.dropna(subset=["timestamp"])
     if out.empty:
         raise ValueError("Quote data requires at least one valid timestamp")
-
     out["expiry_bucket"] = out["expiry_years"].astype(float).round(4)
     out["delta_bucket"] = out["delta"].astype(float).abs().round(2)
     out["ts_bucket"] = pd.to_datetime(out["timestamp"]).dt.floor("min")

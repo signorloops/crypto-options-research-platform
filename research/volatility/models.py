@@ -221,7 +221,6 @@ def estimate_garch_params(returns: np.ndarray) -> Tuple[float, float, float]:
     omega_init = var_returns * 0.01
     alpha_init = 0.1
     beta_init = 0.85
-
     def neg_log_likelihood(params):
         """Negative log-likelihood for minimization."""
         omega, alpha, beta = params
@@ -241,7 +240,6 @@ def estimate_garch_params(returns: np.ndarray) -> Tuple[float, float, float]:
         constraints=constraints,
         options={'maxiter': 1000, 'ftol': 1e-8}
     )
-
     if result.success:
         omega, alpha, beta = result.x
         alpha = max(0.0, min(alpha, 0.5))
@@ -261,18 +259,7 @@ def _garch_log_likelihood(returns: np.ndarray, omega: float,
 
 
 def estimate_har_params(rv_daily: np.ndarray, periods: Tuple[int, int, int] = (1, 5, 22)) -> Tuple[float, float, float, float]:
-    """
-    使用 OLS 估计 HAR-RV 模型参数。
-
-    HAR-RV 模型: RV_t = beta_0 + beta_d * RV_{t-1} + beta_w * RV_{t-5:t-1} + beta_m * RV_{t-22:t-1}
-
-    Args:
-        rv_daily: 日已实现波动率序列
-        periods: (日, 周, 月) 周期
-
-    Returns:
-        (beta_0, beta_d, beta_w, beta_m) 参数元组
-    """
+    """使用 OLS/NNLS 估计 HAR-RV 参数 (beta_0, beta_d, beta_w, beta_m)。"""
     d, w, m = periods
     if len(rv_daily) < m + 2:
         # 样本不足，返回固定系数
