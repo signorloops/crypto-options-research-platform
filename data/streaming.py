@@ -300,50 +300,49 @@ class DeribitStream(WebSocketStream):
             ask_size=data.get('best_ask_amount', 0)
         )
 
+    @staticmethod
+    def _parse_levels(levels: list[Any]) -> list[OrderBookLevel]:
+        return [OrderBookLevel(price=float(level[0]), size=float(level[1])) for level in levels]
+
+    @staticmethod
+    def _levels_to_deltas(
+        *,
+        levels: list[OrderBookLevel],
+        side: str,
+        sequence: int,
+        timestamp: datetime,
+    ) -> list[OrderBookDelta]:
+        return [
+            OrderBookDelta(
+                price=level.price,
+                size=level.size,
+                side=side,
+                sequence=sequence,
+                timestamp=timestamp,
+            )
+            for level in levels
+        ]
+
     def _parse_orderbook(self, data: Dict) -> Dict:
         """Parse order book data from Deribit format with reconstruction support."""
         instrument = data.get('instrument_name', '')
         timestamp = datetime.fromtimestamp(data.get('timestamp', 0) / 1000, tz=timezone.utc)
-
-        # Extract sequence numbers for gap detection
         change_id = data.get('change_id')
         prev_change_id = data.get('prev_change_id')
-
-        # Parse bids and asks
-        bids = [
-            OrderBookLevel(price=float(b[0]), size=float(b[1]))
-            for b in data.get('bids', [])
-        ]
-        asks = [
-            OrderBookLevel(price=float(a[0]), size=float(a[1]))
-            for a in data.get('asks', [])
-        ]
-
+        bids = self._parse_levels(data.get('bids', []))
+        asks = self._parse_levels(data.get('asks', []))
         order_book = OrderBook(
             timestamp=timestamp,
             instrument=instrument,
             bids=bids,
             asks=asks
         )
-
-        # Build deltas for reconstruction
-        deltas = []
-        for bid in bids:
-            deltas.append(OrderBookDelta(
-                price=bid.price,
-                size=bid.size,
-                side='bid',
-                sequence=change_id or 0,
-                timestamp=timestamp
-            ))
-        for ask in asks:
-            deltas.append(OrderBookDelta(
-                price=ask.price,
-                size=ask.size,
-                side='ask',
-                sequence=change_id or 0,
-                timestamp=timestamp
-            ))
+        sequence = change_id or 0
+        deltas = self._levels_to_deltas(
+            levels=bids, side='bid', sequence=sequence, timestamp=timestamp
+        ) + self._levels_to_deltas(
+            levels=asks, side='ask', sequence=sequence, timestamp=timestamp
+        )
 
         return {
             'type': 'orderbook',
