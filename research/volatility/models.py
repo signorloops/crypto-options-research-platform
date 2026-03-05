@@ -405,6 +405,14 @@ def har_forecast(rv_series: np.ndarray, h: int = 1,
     return float(forecast[-1])
 
 
+def _mqd_non_overlapping(returns: np.ndarray, delta: int, q: float = 2.0) -> float:
+    n_blocks = len(returns) // delta
+    if n_blocks == 0:
+        return np.nan
+    blocked = returns[: n_blocks * delta].reshape(n_blocks, delta).sum(axis=1)
+    return float(np.mean(np.abs(blocked) ** q))
+
+
 def rough_volatility_signature(log_prices: np.ndarray, sampling: str = "daily") -> float:
     """
     估计波动率的粗糙指数 (Roughness Index)。
@@ -431,32 +439,16 @@ def rough_volatility_signature(log_prices: np.ndarray, sampling: str = "daily") 
 
     # 计算对数收益率
     returns = np.diff(log_prices)
-
-    # 对于不同时间尺度 delta，计算非重叠 block 累加增量的 q-阶变差
-    def mqd(delta: int, q: float = 2.0) -> float:
-        """计算 delta 时间尺度的 q-阶矩（非重叠 block 聚合）。"""
-        n_blocks = len(returns) // delta
-        if n_blocks == 0:
-            return np.nan
-        blocked = returns[:n_blocks * delta].reshape(n_blocks, delta).sum(axis=1)
-        return np.mean(np.abs(blocked) ** q)
-
-    # 不同时间尺度
     scales = np.array([1, 2, 4, 8, 16])
-    mq_values = np.array([mqd(int(s)) for s in scales])
-
-    # 对数回归: log(M_q(delta)) ≈ q*H*log(delta) + const
+    mq_values = np.array([_mqd_non_overlapping(returns, int(s)) for s in scales])
     valid = mq_values > 0
     if np.sum(valid) < 2:
         return 0.1
 
     log_scales = np.log(scales[valid])
     log_mq = np.log(mq_values[valid])
-
-    # 线性回归估计斜率
     slope = np.polyfit(log_scales, log_mq, 1)[0]
-    H = slope / 2.0  # q=2 时斜率 = 2*H
-
+    H = slope / 2.0
     return float(np.clip(H, 0.01, 0.5))
 
 

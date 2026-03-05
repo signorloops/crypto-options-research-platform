@@ -84,26 +84,18 @@ class BlackScholesGreeks:
         nd1 = norm.cdf(d1)
         nd2 = norm.cdf(d2)
         n_prime_d1 = norm.pdf(d1)
-
         if option_type == 'call':
             delta = nd1
             rho = K * T * np.exp(-r * T) * nd2 / 100  # Per 1% rate change
         else:  # put
             delta = nd1 - 1
             rho = -K * T * np.exp(-r * T) * norm.cdf(-d2) / 100
-
         gamma = n_prime_d1 / (S * sigma * np.sqrt(T))
-        if option_type == 'call':
-            theta = (-S * n_prime_d1 * sigma / (2 * np.sqrt(T))
-                     - r * K * np.exp(-r * T) * nd2) / 365
-        else:
-            theta = (-S * n_prime_d1 * sigma / (2 * np.sqrt(T))
-                     + r * K * np.exp(-r * T) * norm.cdf(-d2)) / 365
-
+        theta_core = -S * n_prime_d1 * sigma / (2 * np.sqrt(T))
+        theta = (theta_core - r * K * np.exp(-r * T) * nd2) / 365 if option_type == 'call' else (theta_core + r * K * np.exp(-r * T) * norm.cdf(-d2)) / 365
         vega = S * n_prime_d1 * np.sqrt(T) / 100
         vanna = -n_prime_d1 * d2 / sigma
         charm = -n_prime_d1 * (2 * r * T - d2 * sigma * np.sqrt(T)) / (2 * T * sigma * np.sqrt(T))
-
         return Greeks(
             delta=delta,
             gamma=gamma,
