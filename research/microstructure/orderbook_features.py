@@ -268,22 +268,13 @@ class OrderBookFeatureExtractor:
         depth = self._extract_depth_features(order_book)
         vwap_bid, vwap_ask = self._vwap(order_book.bids, 5), self._vwap(order_book.asks, 5)
         vwap_mid = (vwap_bid + vwap_ask) / 2
-        microprice, microprice_bias = self._compute_microprice_features(
-            order_book,
-            best_bid=basic["best_bid"],
-            best_ask=basic["best_ask"],
-            mid=basic["mid"],
-        )
+        microprice, microprice_bias = self._compute_microprice_features(order_book, best_bid=basic["best_bid"], best_ask=basic["best_ask"], mid=basic["mid"])
         bid_slope = self._calc_slope(order_book.bids)
         ask_slope = self._calc_slope(order_book.asks)
-        bid_queue_ratio, ask_queue_ratio = self._compute_queue_ratios(
-            order_book, depth["bid_depth_5"], depth["ask_depth_5"]
-        )
+        bid_queue_ratio, ask_queue_ratio = self._compute_queue_ratios(order_book, depth["bid_depth_5"], depth["ask_depth_5"])
         self._append_history(timestamp, basic["mid"], basic["spread"])
         realized_vol_1min, realized_vol_5min = self._compute_realized_volatility()
-        trade_flow_imbalance, volume_order_imbalance = self._compute_trade_flow_features(
-            recent_trades, depth["depth_imbalance"]
-        )
+        trade_flow_imbalance, volume_order_imbalance = self._compute_trade_flow_features(recent_trades, depth["depth_imbalance"])
         derived: Dict[str, float | Optional[float]] = {
             "vwap_bid": vwap_bid,
             "vwap_ask": vwap_ask,

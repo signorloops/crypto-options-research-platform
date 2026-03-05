@@ -185,26 +185,9 @@ class RealisticFillSimulator:
                 continue
             if trade.side == OrderSide.SELL:
                 if trade.price <= quote.bid_price and quote.bid_size > 0:
-                    return self._create_fill(
-                        trade,
-                        quote,
-                        OrderSide.BUY,
-                        market_state,
-                        transaction_cost_bps,
-                        latency_ms=latency_ms,
-                        inventory_pressure=inventory_pressure,
-                    )
-            else:
-                if trade.price >= quote.ask_price and quote.ask_size > 0:
-                    return self._create_fill(
-                        trade,
-                        quote,
-                        OrderSide.SELL,
-                        market_state,
-                        transaction_cost_bps,
-                        latency_ms=latency_ms,
-                        inventory_pressure=inventory_pressure,
-                    )
+                    return self._create_fill(trade, quote, OrderSide.BUY, market_state, transaction_cost_bps, latency_ms=latency_ms, inventory_pressure=inventory_pressure)
+            elif trade.price >= quote.ask_price and quote.ask_size > 0:
+                return self._create_fill(trade, quote, OrderSide.SELL, market_state, transaction_cost_bps, latency_ms=latency_ms, inventory_pressure=inventory_pressure)
         return None
 
     def _create_fill(

@@ -67,16 +67,7 @@ class OrderBookReconstructor:
         logger.info(f"{self.instrument}: 订单簿快照初始化完成，序列号 {sequence}")
 
     def apply_delta(self, delta: OrderBookDelta) -> bool:
-        """
-        应用增量更新
-
-        Args:
-            delta: 增量更新数据
-
-        Returns:
-            bool: 是否成功应用
-        """
-        # 检查序列号连续性
+        """应用增量更新并在序列跳跃时标记失步。"""
         if self.state.last_sequence is not None:
             expected_seq = self.state.last_sequence + 1
             if delta.sequence != expected_seq:
@@ -94,25 +85,15 @@ class OrderBookReconstructor:
                     except Exception as e:
                         # Gap callbacks are external hooks; preserve reconstruction control flow.
                         logger.error(f"Gap callback error: {e}")
-
                 return False
-
-        # 应用更新
         target_side = self.state.bids if delta.side == 'bid' else self.state.asks
-
         if delta.size <= 0:
-            # 删除价格级别
             target_side.pop(delta.price, None)
         else:
-            # 添加或更新价格级别
             target_side[delta.price] = delta.size
-
-        # 限制价格级别数量
         self._trim_price_levels()
-
         self.state.last_sequence = delta.sequence
         self.state.last_timestamp = delta.timestamp
-
         return True
 
     def apply_deltas(self, deltas: List[OrderBookDelta]) -> Tuple[int, int]:

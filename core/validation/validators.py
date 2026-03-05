@@ -119,41 +119,23 @@ def validate_instrument_name(name: str, field_name: str = "instrument") -> str:
 def validate_datetime_range(
     start: datetime, end: datetime, max_range_days: Optional[int] = None, allow_future: bool = False
 ) -> Tuple[datetime, datetime]:
-    """
-    Validate datetime range.
-
-    Args:
-        start: Start datetime
-        end: End datetime
-        max_range_days: Maximum allowed range in days
-        allow_future: Whether to allow future dates
-
-    Returns:
-        Validated (start, end) tuple
-
-    Raises:
-        DataValidationError: If range is invalid
-    """
+    """Validate datetime range and return normalized boundaries."""
     if start is None or end is None:
         raise DataValidationError(
             "Start and end dates cannot be None", field="datetime_range", value=None
         )
-
     if not isinstance(start, datetime) or not isinstance(end, datetime):
         raise DataValidationError(
             "Start and end must be datetime objects", field="datetime_range", value=(start, end)
         )
-
     if end <= start:
         raise DataValidationError(
             f"End date ({end}) must be after start date ({start})",
             field="datetime_range",
             value=(start, end),
         )
-
     if not allow_future:
         _validate_not_future(start=start, end=end)
-
     if max_range_days is not None:
         range_days = (end - start).days
         if range_days > max_range_days:
@@ -162,7 +144,6 @@ def validate_datetime_range(
                 field="datetime_range",
                 value=(start, end),
             )
-
     return start, end
 
 

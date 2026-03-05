@@ -200,39 +200,19 @@ class VPINCalculator:
         self.num_buckets = num_buckets
 
     def calculate(self, trades_df: pd.DataFrame) -> VPINResult:
-        """
-        Calculate VPIN from trade data.
-
-        Args:
-            trades_df: DataFrame with columns:
-                - timestamp: datetime
-                - price: float
-                - size: float (base currency volume)
-                - side: 'buy' or 'sell' (optional, will estimate if missing)
-
-        Returns:
-            VPINResult with timestamps and VPIN values
-        """
-        # Validate required columns
+        """Calculate VPIN from trade data."""
         required_cols = ['timestamp', 'price', 'size']
         missing = set(required_cols) - set(trades_df.columns)
         if missing:
             raise ValueError(f"Missing required columns: {missing}")
-
         df = trades_df.copy()
         df['timestamp'] = pd.to_datetime(df['timestamp'])
         df = df.sort_values('timestamp').reset_index(drop=True)
-
-        # Estimate trade direction if not provided (using tick rule)
         if 'side' not in df.columns or df['side'].isna().all():
             df['side'] = self._estimate_trade_direction(df)
-
-        # Create volume buckets (vectorized using cumsum/searchsorted)
         bucket_timestamps, buy_arr, sell_arr, total_arr = self._create_volume_buckets(df)
-
         if len(total_arr) < self.num_buckets:
             return _fallback_vpin_result(df)
-
         n = len(total_arr)
         vpin_values = _rolling_vpin_values(
             buy_arr=buy_arr,

@@ -334,15 +334,11 @@ class MarketMakingEnv:
         """Compute current state vector."""
         idx = self.episode_start + self.current_step
         current = self.market_data.iloc[idx]
-
         price_norm = (current["price"] - self.price_mean) / self.price_std
         inventory_norm = self.position / 10.0
-
         volatility = self._rolling_volatility(idx)
         ret_1, ret_5, ret_10, momentum, realized_skew, realized_kurt = self._return_block(idx)
-
         time_left = 1.0 - (self.current_step / self.episode_length)
-
         vol_now, vol_mean, volume_z = self._volume_block(idx)
         spread_bps = self._safe_column_value(
             current, "spread_bps", max(5.0, min(120.0, float(volatility * 25.0)))
@@ -351,8 +347,7 @@ class MarketMakingEnv:
         bid_norm, ask_norm = self._normalized_bid_ask_depth(current, float(imbalance))
         delta = self._safe_column_value(current, "delta", 0.0)
         vega = self._safe_column_value(current, "vega", 0.0)
-
-        state = np.array([
+        return np.array([
             price_norm,
             inventory_norm,
             volatility,
@@ -376,8 +371,6 @@ class MarketMakingEnv:
             float(delta),
             float(vega),
         ], dtype=np.float32)
-
-        return state
 
 
 class PPOMarketMaker(MarketMakingStrategy):

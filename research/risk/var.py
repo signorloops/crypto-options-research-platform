@@ -270,22 +270,15 @@ class VaRCalculator:
         lambda_param: float = 0.94,
         random_seed: int | None = None,
     ) -> VaRResult:
-        """
-        Filtered Historical Simulation (FHS):
-        1) EWMA 估计条件波动率
-        2) 标准化残差重采样
-        3) 用最新波动率重构未来损益分布
-        """
+        """Filtered Historical Simulation (EWMA volatility + residual resampling)."""
         if holding_period <= 0:
             raise ValueError("holding_period must be positive")
-
         total_value, weights_arr, aligned_returns = self._prepare_portfolio_inputs(
             positions, returns
         )
         portfolio_returns = self._portfolio_return_series(aligned_returns, weights_arr)
         if len(portfolio_returns) < 30:
             return self.historical_var(positions, returns, holding_period)
-
         cond_vol = self._ewma_conditional_volatility(
             portfolio_returns=portfolio_returns, lambda_param=lambda_param
         )
@@ -297,12 +290,10 @@ class VaRCalculator:
             total_value=total_value,
             random_seed=random_seed,
         )
-
         var_95 = -np.percentile(pnl, 5)
         var_99 = -np.percentile(pnl, 1)
         cvar_95 = -pnl[pnl <= np.percentile(pnl, 5)].mean()
         cvar_99 = -pnl[pnl <= np.percentile(pnl, 1)].mean()
-
         return VaRResult(
             var_95=float(var_95),
             var_99=float(var_99),
@@ -657,12 +648,7 @@ class VaRCalculator:
                 n_simulations=n_simulations,
                 rng=rng,
             )
-        inputs = self._parse_option_revaluation_inputs(
-            row=row,
-            option_type=option_type,
-            default_asset_idx=default_asset_idx,
-            column_index=column_index,
-        )
+        inputs = self._parse_option_revaluation_inputs(row=row, option_type=option_type, default_asset_idx=default_asset_idx, column_index=column_index)
         if inputs is None: return linear_component
         underlying_returns = simulated_returns[:, inputs.underlying_idx]
         revalued = self._simulate_revaluation_price_paths(

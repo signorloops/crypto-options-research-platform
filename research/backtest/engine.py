@@ -518,8 +518,7 @@ class BacktestEngine:
         inventory_series = _history_to_series(self._inventory_history)
         crypto_balance_series = _history_to_series(self._crypto_balance_history)
         total_pnl_crypto = float(pnl_series.iloc[-1]) if len(pnl_series) > 0 else 0.0
-        safe_price = float(current_price) if current_price is not None else 0.0
-        total_pnl_usd = total_pnl_crypto * safe_price
+        total_pnl_usd = total_pnl_crypto * (float(current_price) if current_price is not None else 0.0)
         realized_pnl, unrealized_pnl = self._calculate_crypto_pnl_components(current_price)
         inventory_pnl = unrealized_pnl
         sharpe = self._calculate_sharpe_ratio(pnl_series)

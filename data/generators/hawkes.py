@@ -85,46 +85,26 @@ class HawkesProcess:
         seed: Optional[int] = None,
         rng: Optional[np.random.Generator] = None,
     ) -> List[float]:
-        """Simulate Hawkes process using Ogata's thinning algorithm.
-
-        Uses O(1) recursive kernel update instead of O(n) full summation:
-            A(n) = exp(-beta * (t_n - t_{n-1})) * (A(n-1) + alpha)
-            lambda(t) = mu + A(n)
-
-        Args:
-            T: Time horizon (in seconds)
-            seed: Random seed for reproducibility
-
-        Returns:
-            List of event times
-        """
+        """Simulate Hawkes process using Ogata thinning with recursive intensity updates."""
         if rng is None:
             rng = np.random.default_rng(seed)
-
         events = []
         t = 0.0
-        A = 0.0  # recursive kernel accumulator
+        A = 0.0
         t_last = 0.0
-
         lambda_max = self.params.mu
-
         while t < T:
             u = float(rng.exponential(1.0 / lambda_max))
             t = t + u
-
             if t >= T:
                 break
-
-            # O(1) intensity via recursive update
             A = np.exp(-self.params.beta * (t - t_last)) * A
             lambda_t = self.params.mu + A
-
             if float(rng.uniform()) <= lambda_t / lambda_max:
                 events.append(t)
                 A += self.params.alpha
                 lambda_max = lambda_t + self.params.alpha
                 t_last = t
-
         self.events = events
         return events
 

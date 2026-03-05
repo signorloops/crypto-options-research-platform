@@ -229,27 +229,12 @@ class DuckDBCache:
         instrument: str,
         view_name: Optional[str] = None
     ) -> str:
-        """
-        Create a view for tick data with time-based indexing.
-
-        Args:
-            exchange: Exchange name
-            instrument: Instrument symbol
-            view_name: Optional custom view name
-
-        Returns:
-            Name of created view
-        """
+        """Create a view for tick data with time-based indexing."""
         if view_name is None:
             safe_instrument = instrument.replace("-", "_").replace("/", "_")
             view_name = f"tick_{exchange}_{safe_instrument}"
-
-        # Validate view name
         safe_view = _sanitize_identifier(view_name)
-
-        # Use configurable cache directory instead of hardcoded path
         pattern = str(self.cache_dir / f"raw/{exchange}/tick/{instrument}/**/*.parquet")
-
         query = f"""
             CREATE OR REPLACE VIEW {safe_view} AS
             SELECT
@@ -267,7 +252,6 @@ class DuckDBCache:
             WHERE bid > 0 AND ask > 0
             ORDER BY timestamp
         """
-
         self.con.execute(query, [pattern])
         logger.info("Created tick view", extra=log_extra(view=view_name))
         return view_name

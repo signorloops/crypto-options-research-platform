@@ -376,15 +376,9 @@ async def _build_live_deviation_report(
     provider = cex_provider or os.getenv("CEX_QUOTES_PROVIDER", "")
     defi_source = defi_file or os.getenv("DEFI_QUOTES_FILE", "")
     if not defi_source:
-        raise HTTPException(
-            status_code=422,
-            detail="defi_file is required (query or env)",
-        )
+        raise HTTPException(status_code=422, detail="defi_file is required (query or env)")
     if not cex_source and not provider:
-        raise HTTPException(
-            status_code=422,
-            detail="Either cex_file or cex_provider is required (query or env)",
-        )
+        raise HTTPException(status_code=422, detail="Either cex_file or cex_provider is required (query or env)")
     try:
         if cex_source:
             dataset = build_cex_defi_deviation_dataset(

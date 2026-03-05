@@ -95,45 +95,26 @@ class CrossExchangeArbitrage:
         timestamp: Optional[datetime] = None,
         max_age_ms: float = 100.0
     ) -> None:
-        """
-        更新价格缓存。
-
-        Args:
-            exchange: 交易所名称
-            instrument: 交易对 (如 "BTC-USD")
-            price: 当前价格
-            timestamp: 价格时间戳（交易所时间）
-            max_age_ms: 最大允许价格延迟（毫秒）
-        """
+        """更新价格缓存并触发跨交易所机会扫描。"""
         from dataclasses import dataclass
-
         @dataclass
         class PriceEntry:
             price: float
             timestamp: datetime
             received_at: datetime
-
         now = datetime.now(timezone.utc)
-
         if instrument not in self.price_cache:
             self.price_cache[instrument] = {}
-
         entry = PriceEntry(
             price=price,
             timestamp=timestamp or now,
             received_at=now
         )
-
-        # 检查数据新鲜度
         if timestamp:
             age_ms = (now - timestamp).total_seconds() * 1000
             if age_ms > max_age_ms:
-                # 忽略过期数据，但保留之前的有效价格
                 return
-
         self.price_cache[instrument][exchange] = entry
-
-        # 检查套利机会
         self._check_arbitrage(instrument)
 
     def _check_arbitrage(self, instrument: str) -> None:

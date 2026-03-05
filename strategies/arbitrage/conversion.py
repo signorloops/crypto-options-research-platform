@@ -173,15 +173,7 @@ class ConversionArbitrage:
         expiry: Optional[datetime] = None
     ) -> Optional[ConversionOpportunity]:
         """检查是否存在转换/反转套利机会。"""
-        resolved = _resolve_opportunity_inputs(
-            strategy=self,
-            underlying=underlying,
-            call_price=call_price,
-            put_price=put_price,
-            spot_price=spot_price,
-            strike=strike,
-            expiry=expiry,
-        )
+        resolved = _resolve_opportunity_inputs(strategy=self, underlying=underlying, call_price=call_price, put_price=put_price, spot_price=spot_price, strike=strike, expiry=expiry)
         if resolved is None:
             return None
         call_price, put_price, spot_price, strike, expiry = resolved
