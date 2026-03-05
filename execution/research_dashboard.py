@@ -278,8 +278,7 @@ def _build_dashboard_summary(df: pd.DataFrame, value_col: str) -> Dict[str, Any]
 
 def _render_dashboard_html(
     *, file_options: str,
-    primary_fig_html: str,
-    returns_fig_html: str,
+    primary_fig_html: str, returns_fig_html: str,
     deviation_section: str, summary_rows: str,
 ) -> str:
     """Render full dashboard HTML page."""
@@ -368,9 +367,7 @@ async def _build_live_deviation_report(
     defi_file: Optional[str],
 ) -> dict:
     """Build live/file-based CEX-DEFI deviation report payload."""
-    cex_source = cex_file or os.getenv("CEX_QUOTES_FILE", "")
-    provider = cex_provider or os.getenv("CEX_QUOTES_PROVIDER", "")
-    defi_source = defi_file or os.getenv("DEFI_QUOTES_FILE", "")
+    cex_source = cex_file or os.getenv("CEX_QUOTES_FILE", ""); provider = cex_provider or os.getenv("CEX_QUOTES_PROVIDER", ""); defi_source = defi_file or os.getenv("DEFI_QUOTES_FILE", "")
     if not defi_source:
         raise HTTPException(status_code=422, detail="defi_file is required (query or env)")
     if not cex_source and not provider:

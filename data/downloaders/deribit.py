@@ -199,40 +199,21 @@ class DeribitClient(ExchangeInterface):
         start: Optional[datetime] = None,
         end: Optional[datetime] = None,
     ) -> pd.DataFrame:
-        """
-        Get volatility index (DVOL) historical data.
-
-        Deribit Volatility Index (DVOL) is similar to VIX.
-
-        Args:
-            currency: 'BTC' or 'ETH'
-            resolution: '1D', '1H', etc.
-            start: Start datetime
-            end: End datetime
-
-        Returns:
-            DataFrame with timestamp, open, high, low, close
-        """
+        """Get Deribit volatility index (DVOL) historical OHLC data."""
         params: Dict[str, Any] = {"currency": currency, "resolution": resolution}
-
         if start:
             params["start_timestamp"] = int(start.timestamp() * 1000)
         if end:
             params["end_timestamp"] = int(end.timestamp() * 1000)
-
         result = await self._request("get_volatility_index_data", params)
-
         data = result.get("data", [])
         if not data:
             return pd.DataFrame()
-
         # Data format: [timestamp, open, high, low, close]
         df = pd.DataFrame(data, columns=["timestamp", "open", "high", "low", "close"])
-
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
         for col in ["open", "high", "low", "close"]:
             df[col] = df[col].astype(float) / 100  # Convert from percentage
-
         return df.sort_values("timestamp").reset_index(drop=True)
 
     async def get_trades(
@@ -366,18 +347,7 @@ class DeribitDataDownloader:
     async def download_trades(
         self, instrument: str, start: datetime, end: datetime, use_cache: bool = True
     ) -> pd.DataFrame:
-        """
-        Download historical trades with automatic caching.
-
-        Args:
-            instrument: Option contract name (e.g., "BTC-27DEC24-80000-C")
-            start: Start datetime
-            end: End datetime
-            use_cache: Whether to use cache
-
-        Returns:
-            DataFrame with columns: timestamp, price, size, side
-        """
+        """Download historical trades with optional cache lookup/storage."""
         # Check cache
         if use_cache:
             cached = self.cache.get("deribit", "trades", instrument, start, end)
@@ -386,24 +356,20 @@ class DeribitDataDownloader:
                     "Using cached data", extra=log_extra(instrument=instrument, records=len(cached))
                 )
                 return cached
-
         # Download
         logger.info("Downloading trades from Deribit", extra=log_extra(instrument=instrument))
         async with self.client:
             trades = await self.client.get_trades(instrument, start, end)
-
         df = pd.DataFrame(
             [
                 {"timestamp": t.timestamp, "price": t.price, "size": t.size, "side": t.side.value}
                 for t in trades
             ]
         )
-
         # Cache result
         if use_cache and len(df) > 0:
             self.cache.put_range(df, "deribit", "trades", instrument)
             logger.info("Cached trades", extra=log_extra(instrument=instrument, count=len(df)))
-
         return df
 
     async def download_order_book_snapshots(
@@ -411,7 +377,6 @@ class DeribitDataDownloader:
     ) -> pd.DataFrame:
         """Download order book snapshots at specific times."""
         snapshots = []
-
         # Check cache for existing data
         if use_cache and len(timestamps) > 0:
             start, end = min(timestamps), max(timestamps)
@@ -419,9 +384,7 @@ class DeribitDataDownloader:
                 cached = self.cache.get("deribit", "orderbook", instrument, start, end)
                 if cached is not None:
                     return cached
-
         logger.info("Downloading order book snapshots", extra=log_extra(count=len(timestamps)))
-
         async with self.client:
             for ts in timestamps:
                 ob = await self.client.get_order_book(instrument)
@@ -438,15 +401,11 @@ class DeribitDataDownloader:
                         "ask_volume_5": sum(lvl.size for lvl in ob.asks[:5]),
                     }
                 )
-
                 if len(timestamps) > SNAPSHOT_RATE_LIMIT_THRESHOLD:
                     await asyncio.sleep(SNAPSHOT_RATE_LIMIT_SLEEP_SECONDS)
-
         df = pd.DataFrame(snapshots)
-
         if use_cache and len(df) > 0:
             self.cache.put_range(df, "deribit", "orderbook", instrument)
-
         return df
 
     async def download_tick_data(

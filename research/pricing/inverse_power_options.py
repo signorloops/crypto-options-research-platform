@@ -296,8 +296,7 @@ class InversePowerOptionPricer:
         K: float,
         T: float,
         r: float,
-        sigma: float,
-        option_type: Literal["call", "put"],
+        sigma: float, option_type: Literal["call", "put"],
         power: float,
         n_paths: int, bump_rel: float,
     ) -> tuple[float, _InversePowerFDBase, _InversePowerFDBumps]:

@@ -252,8 +252,7 @@ class VPINCalculator:
         volumes, cum_total, total_volume, sides, timestamps = inputs
         bucket_size = float(self.volume_bucket_size)
         n_full = int(total_volume // bucket_size); residual = total_volume - n_full * bucket_size
-        include_partial = residual >= bucket_size * 0.5
-        n_buckets = n_full + (1 if include_partial else 0)
+        n_buckets = n_full + (1 if (include_partial := residual >= bucket_size * 0.5) else 0)
         if n_buckets == 0:
             return _empty_bucket_arrays()
         is_buy = sides == 'buy'

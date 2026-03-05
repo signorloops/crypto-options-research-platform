@@ -159,13 +159,8 @@ class CrossExchangeArbitrage:
                 self.opportunity_callback(best_opportunity)
 
     def get_best_opportunities(self, top_n: int = 10) -> List[ArbitrageOpportunity]:
-        """
-        获取当前最佳套利机会。
-
-        注意: 此方法需要维护机会历史，当前实现为简化版。
-        """
+        """获取当前最佳套利机会（简化版，不维护历史队列）。"""
         opportunities: List[ArbitrageOpportunity] = []
-
         for instrument, price_entries in self.price_cache.items():
             # Extract prices from PriceEntry objects
             prices = {}
@@ -174,10 +169,8 @@ class CrossExchangeArbitrage:
                     prices[ex] = entry.price
                 else:
                     prices[ex] = entry
-
             if len(prices) < 2:
                 continue
-
             for buy_ex, buy_price in prices.items():
                 for sell_ex, sell_price in prices.items():
                     if buy_ex == sell_ex:
@@ -196,7 +189,6 @@ class CrossExchangeArbitrage:
                     if opportunity.profit_pct / 100 < self.min_profit_pct:
                         continue
                     opportunities.append(opportunity)
-
         # 按净利润排序
         opportunities.sort(key=lambda x: x.profit_pct, reverse=True)
         return opportunities[:top_n]

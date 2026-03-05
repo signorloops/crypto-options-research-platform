@@ -155,8 +155,7 @@ def _align_cex_defi_quotes(
     join_cols = ["ts_bucket", "symbol", "option_type", "expiry_bucket", "delta_bucket"]
     merged = cex.merge(defi, on=join_cols, suffixes=("_cex", "_defi"))
     if merged.empty:
-        key_cols = ["symbol", "option_type", "expiry_bucket", "delta_bucket"]
-        tolerance = pd.Timedelta(seconds=max(float(align_tolerance_seconds), 0.0))
+        key_cols = ["symbol", "option_type", "expiry_bucket", "delta_bucket"]; tolerance = pd.Timedelta(seconds=max(float(align_tolerance_seconds), 0.0))
         cex_asof = cex.sort_values([*key_cols, "timestamp"])
         defi_asof = defi.sort_values([*key_cols, "timestamp"])
         merged = pd.merge_asof(

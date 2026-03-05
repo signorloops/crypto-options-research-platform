@@ -488,8 +488,7 @@ class CircuitBreaker:
     def _check_all_limits(self, portfolio: PortfolioState) -> List[Violation]:
         """Check all risk limits and return violations."""
         violations = []; now = datetime.now(timezone.utc)
-        daily_pnl_pct = portfolio.daily_pnl_pct
-        if daily_pnl_pct < 0:
+        if (daily_pnl_pct := portfolio.daily_pnl_pct) < 0:
             daily_loss_violation = _build_threshold_violation(
                 now=now,
                 violation_type="daily_loss",
@@ -574,8 +573,7 @@ class CircuitBreaker:
             if notional <= 0:
                 self._instrument_states[instrument] = CircuitState.NORMAL
                 continue
-            critical_limit = self.config.per_instrument_notional_limits.get(instrument, self.config.per_instrument_notional_limit)
-            warning_limit = min(self.config.per_instrument_warning_notional, critical_limit)
+            critical_limit = self.config.per_instrument_notional_limits.get(instrument, self.config.per_instrument_notional_limit); warning_limit = min(self.config.per_instrument_warning_notional, critical_limit)
             if not np.isfinite(critical_limit):
                 self._instrument_states[instrument] = CircuitState.NORMAL
                 continue

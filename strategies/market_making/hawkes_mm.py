@@ -207,9 +207,7 @@ class HawkesIntensityMonitor:
 
     def _estimate_parameters_mle(self, init: HawkesParameters) -> Optional[HawkesParameters]:
         """Marked Hawkes MLE using log-likelihood minimization."""
-        if not HAS_SCIPY_OPT:
-            return None
-        if len(self.trade_times) < 30:
+        if not HAS_SCIPY_OPT or len(self.trade_times) < 30:
             return None
         times = np.array(self.trade_times, dtype=float)
         marks = np.maximum(np.array(self.trade_sizes, dtype=float), 1e-8) ** self.mark_power

@@ -269,8 +269,7 @@ class IntegratedMarketMakingStrategy(MarketMakingStrategy):
     ) -> QuoteAction:
         """Build normal market-making quote after risk gate passes."""
         hedge_decision = self._evaluate_hedge_decision(state, mid, position)
-        spread_multiplier = self._get_spread_multiplier()
-        spread_bps = self.config.base_spread_bps * spread_multiplier
+        spread_multiplier = self._get_spread_multiplier(); spread_bps = self.config.base_spread_bps * spread_multiplier
         reservation_price, half_spread = self._calculate_reservation_price(
             mid, position.size, spread_bps
         )

@@ -179,7 +179,6 @@ class ScenarioGenerator:
         prices = []
         volumes = []
         current_price = self.base_price
-
         for i, t in enumerate(events):
             if i > 0:
                 dt = t - events[i-1]
@@ -192,7 +191,6 @@ class ScenarioGenerator:
             prices.append(current_price)
             volume = max(0.1, float(rng.exponential(intensity * 10)))
             volumes.append(volume)
-
         df = pd.DataFrame({
             'timestamp': timestamps,
             'price': prices,
@@ -203,7 +201,6 @@ class ScenarioGenerator:
             ]
         })
         df.set_index('timestamp', inplace=True)
-
         return df
 
     def load_real_scenarios(

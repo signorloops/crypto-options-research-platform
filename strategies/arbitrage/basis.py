@@ -209,35 +209,18 @@ class BasisArbitrage:
         instrument: str,
         funding_rate: float = 0.0
     ) -> Optional[Dict]:
-        """
-        计算基差。
-
-        Returns:
-            {
-                'spot': 现货价格,
-                'futures': 期货价格,
-                'fair_value': 理论价格,
-                'basis': 基差,
-                'basis_pct': 基差百分比,
-                'time_to_expiry': 剩余时间(年化)
-            }
-        """
+        """计算并返回现货/期货相对理论公允值的基差指标。"""
         spot = self.spot_prices.get(instrument)
         futures = self.futures_prices.get(instrument)
         expiry = self.futures_expiry.get(instrument)
-
         if spot is None or futures is None or expiry is None:
             return None
-
         if spot <= 0:
             return None
-
         fair_value = self.calculate_fair_value(spot, expiry, funding_rate)
         basis = futures - fair_value
         basis_pct = basis / spot
-
         T = _time_to_expiry_years(expiry)
-
         return {
             'spot': spot,
             'futures': futures,

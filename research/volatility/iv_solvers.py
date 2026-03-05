@@ -131,32 +131,24 @@ def implied_volatility_bisection(
         r = float(os.getenv("RISK_FREE_RATE", "0.05"))
     if market_price <= 0:
         return 0.0
-
     lower_bound, upper_bound = _option_price_bounds(S, K, T, r, is_call)
     if market_price < lower_bound - 1e-10 or market_price > upper_bound + 1e-10:
-        raise ValueError(
-            f"Option price {market_price} violates no-arbitrage bounds "
-            f"[{lower_bound}, {upper_bound}]"
-        )
+        raise ValueError(f"Option price {market_price} violates no-arbitrage bounds [{lower_bound}, {upper_bound}]")
     sigma_low, sigma_high = 0.001, 5.0
     bracket_outcome = _bisection_bracket_outcome(
         market_price=market_price, S=S, K=K, T=T, r=r, is_call=is_call
     )
     if bracket_outcome is not None:
         return float(bracket_outcome)
-
     for _ in range(max_iter):
         sigma_mid = (sigma_low + sigma_high) / 2
         price_mid = black_scholes_price(S, K, T, r, sigma_mid, is_call)
-
         if abs(price_mid - market_price) < tol:
             return float(sigma_mid)
-
         if price_mid < market_price:
             sigma_low = sigma_mid
         else:
             sigma_high = sigma_mid
-
     return float((sigma_low + sigma_high) / 2)
 
 
@@ -216,10 +208,7 @@ def _implied_volatility_lbr_fallback(
         return 0.0
     lower_bound, upper_bound = _option_price_bounds(S, K, T, r, is_call)
     if market_price < lower_bound - 1e-10 or market_price > upper_bound + 1e-10:
-        raise ValueError(
-            f"Option price {market_price} violates no-arbitrage bounds "
-            f"[{lower_bound}, {upper_bound}]"
-        )
+        raise ValueError(f"Option price {market_price} violates no-arbitrage bounds [{lower_bound}, {upper_bound}]")
     sigma = _initial_sigma_guess(market_price=market_price, S=S, T=T)
     for _ in range(max_iter):
         price = black_scholes_price(S, K, T, r, sigma, is_call)
@@ -251,8 +240,7 @@ def implied_volatility_jaeckel(
     T: float,
     r: float = None,
     is_call: bool = True,
-    tol: float = 1e-8,
-    max_iter: int = 20,
+    tol: float = 1e-8, max_iter: int = 20,
 ) -> float:
     """Prefer Jaeckel LBR solver when available, otherwise use local fallback."""
     if r is None:
@@ -261,10 +249,7 @@ def implied_volatility_jaeckel(
         return 0.0
     lower_bound, upper_bound = _option_price_bounds(S, K, T, r, is_call)
     if market_price < lower_bound - 1e-10 or market_price > upper_bound + 1e-10:
-        raise ValueError(
-            f"Option price {market_price} violates no-arbitrage bounds "
-            f"[{lower_bound}, {upper_bound}]"
-        )
+        raise ValueError(f"Option price {market_price} violates no-arbitrage bounds [{lower_bound}, {upper_bound}]")
     if HAS_JAECKEL_SOLVER:
         flag = "c" if is_call else "p"
         try:
