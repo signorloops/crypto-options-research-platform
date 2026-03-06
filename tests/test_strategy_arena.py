@@ -125,6 +125,26 @@ def test_scorecard_summary_metrics_helper_matches_expected_values():
     assert metrics["best_day"] == 100.0
 
 
+def test_comparison_helpers_format_rows_and_metric_values():
+    arena = StrategyArena(_market_data_frame(), initial_capital=100000.0)
+    rich_result = _make_backtest_result("rich", [0, 100, 80, 120, 150], sharpe=1.2)
+    rich_score = arena._calculate_scorecard(rich_result)
+
+    row = arena_module._comparison_row("rich", rich_score)
+    strategies, sharpes = arena_module._scorecard_metric_values(
+        {"rich": rich_score},
+        "sharpe_ratio",
+    )
+    table_rows = arena_module._comparison_table_rows(pd.DataFrame([row]))
+
+    assert row["Strategy"] == "rich"
+    assert row["Total PnL ($)"] == 150.0
+    assert row["Return (%)"] == pytest.approx(0.15)
+    assert strategies == ["rich"]
+    assert sharpes == [1.2]
+    assert table_rows == [["rich", "$150", "0.1%", "1.20", "-10.0%"]]
+
+
 def test_statistical_comparison_and_plotting():
     arena = StrategyArena(_market_data_frame(), initial_capital=100000.0)
     r1 = _make_backtest_result("A", list(range(20)), sharpe=1.0)

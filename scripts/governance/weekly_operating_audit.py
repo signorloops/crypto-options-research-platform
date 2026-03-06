@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import shlex
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -23,6 +22,11 @@ from scripts.governance.report_utils import (
     load_json_object as _load_json,
     write_json as _write_json,
     write_markdown as _write_markdown,
+)
+from scripts.governance.weekly_operating_cli_utils import (
+    collect_issue_messages,
+    resolve_input_files,
+    run_regression_command,
 )
 from scripts.governance.status_action_utils import (
     MANUAL_CHECKLIST_ITEMS,
@@ -149,6 +153,25 @@ def _build_close_gate_report(
 
 def _close_gate_to_markdown(report: dict[str, Any]) -> str:
     return build_close_gate_markdown(report)
+
+
+def _write_close_gate_report(
+    *,
+    signoff_json_path: Path,
+    close_gate_md: Path,
+    close_gate_json: Path,
+    close_ready: bool,
+    close_detail: str,
+    signoff_payload: dict[str, Any],
+) -> None:
+    close_report = _build_close_gate_report(
+        signoff_json_path=signoff_json_path,
+        close_ready=close_ready,
+        close_detail=close_detail,
+        signoff_payload=signoff_payload,
+    )
+    _write_markdown(close_gate_md, _close_gate_to_markdown(close_report))
+    _write_json(close_gate_json, close_report)
 
 
 def _fmt(v: float | None, digits: int = 6) -> str:
@@ -517,7 +540,7 @@ def _to_markdown(report: dict[str, Any]) -> str:
     return build_weekly_operating_markdown(report)
 
 
-def main() -> int:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Generate weekly operating KPI/risk audit.")
     parser.add_argument("--results-dir", default="results", help="Directory for backtest outputs.")
     parser.add_argument("--pattern", default="backtest*.json", help="Glob pattern in results dir.")
@@ -607,28 +630,62 @@ def main() -> int:
         default=7,
         help="Look-back window (days) for auto-generated change log.",
     )
-    args = parser.parse_args()
+    return parser
+
+
+def _resolve_input_files(
+    *,
+    repo_root: Path,
+    explicit_inputs: Sequence[str],
+    results_dir: str,
+    pattern: str,
+) -> list[Path]:
+    return resolve_input_files(
+        repo_root=repo_root,
+        explicit_inputs=explicit_inputs,
+        results_dir=results_dir,
+        pattern=pattern,
+        discover_input_files=_discover_input_files,
+    )
+
+
+def _run_regression_command(command: str, repo_root: Path) -> dict[str, Any] | None:
+    return run_regression_command(command, repo_root=repo_root, runner=subprocess.run)
+
+
+def _collect_issue_messages(
+    report: dict[str, Any],
+    *,
+    regression_result: dict[str, Any] | None,
+    require_performance: bool,
+    require_latency: bool,
+) -> list[str]:
+    return collect_issue_messages(
+        report,
+        regression_result=regression_result,
+        require_performance=require_performance,
+        require_latency=require_latency,
+    )
+
+
+def main() -> int:
+    args = _build_parser().parse_args()
 
     repo_root = Path(".").resolve()
     signoff_json_path = (repo_root / args.signoff_json).resolve()
     close_gate_md = (repo_root / args.close_gate_output_md).resolve()
     close_gate_json = (repo_root / args.close_gate_output_json).resolve()
 
-    def _write_close_gate_report(
-        close_ready: bool, close_detail: str, signoff_payload: dict[str, Any]
-    ) -> None:
-        close_report = _build_close_gate_report(
+    if args.close_gate_only:
+        close_ready, close_detail, signoff_payload = _evaluate_close_gate(signoff_json_path)
+        _write_close_gate_report(
             signoff_json_path=signoff_json_path,
+            close_gate_md=close_gate_md,
+            close_gate_json=close_gate_json,
             close_ready=close_ready,
             close_detail=close_detail,
             signoff_payload=signoff_payload,
         )
-        _write_markdown(close_gate_md, _close_gate_to_markdown(close_report))
-        _write_json(close_gate_json, close_report)
-
-    if args.close_gate_only:
-        close_ready, close_detail, signoff_payload = _evaluate_close_gate(signoff_json_path)
-        _write_close_gate_report(close_ready, close_detail, signoff_payload)
         if close_ready:
             print("Weekly close gate: READY_FOR_CLOSE.")
             return 0
@@ -639,37 +696,18 @@ def main() -> int:
     thresholds = _load_thresholds(thresholds_path)
     consistency_thresholds_path = (repo_root / args.consistency_thresholds).resolve()
     consistency_thresholds = _load_consistency_thresholds(consistency_thresholds_path)
-
-    if args.inputs:
-        input_files = [Path(p).resolve() for p in args.inputs]
-    else:
-        results_dir = (repo_root / args.results_dir).resolve()
-        input_files = _discover_input_files(results_dir, args.pattern)
+    input_files = _resolve_input_files(
+        repo_root=repo_root,
+        explicit_inputs=args.inputs or [],
+        results_dir=args.results_dir,
+        pattern=args.pattern,
+    )
 
     if not input_files:
         print("Weekly operating audit: no input files found.")
         return 2 if (args.strict or args.strict_close) else 0
 
-    regression_result: dict[str, Any] | None = None
-    if args.regression_cmd.strip():
-        regression_cmd = shlex.split(args.regression_cmd)
-        if not regression_cmd:
-            raise ValueError("Regression command is empty after parsing")
-        completed = subprocess.run(
-            regression_cmd,
-            cwd=repo_root,
-            text=True,
-            capture_output=True,
-        )
-        combined_output = f"{completed.stdout}\n{completed.stderr}".strip()
-        output_lines = combined_output.splitlines()
-        regression_result = {
-            "executed": True,
-            "command": args.regression_cmd,
-            "passed": completed.returncode == 0,
-            "return_code": completed.returncode,
-            "output_tail": "\n".join(output_lines[-40:]),
-        }
+    regression_result = _run_regression_command(args.regression_cmd, repo_root)
 
     change_log = _collect_recent_changes(repo_root, max(args.change_log_days, 1))
     rollback_marker = _detect_latest_tag(repo_root)
@@ -702,46 +740,30 @@ def main() -> int:
     _write_markdown(md_path, _to_markdown(report))
     _write_json(json_path, report)
 
-    had_issue = False
-    if report["summary"]["exceptions"] > 0:
-        print(f"Weekly operating audit: {report['summary']['exceptions']} risk exception(s).")
-        had_issue = True
-        if args.strict:
-            return 2
-    if regression_result is not None and not regression_result["passed"]:
-        print("Weekly operating audit: regression command failed.")
-        had_issue = True
-        if args.strict:
-            return 2
-    if report["summary"]["strategies"] == 0:
-        print("Weekly operating audit: no strategy rows extracted.")
-        had_issue = True
-        if args.strict:
-            return 2
-    if report["summary"]["consistency_exceptions"] > 0:
-        print(
-            f"Weekly operating audit: {report['summary']['consistency_exceptions']} consistency exception(s)."
-        )
-        had_issue = True
-        if args.strict:
-            return 2
-    if args.require_performance and report["checklist"]["performance_baseline_passed"] is not True:
-        print("Weekly operating audit: performance baseline missing or failing.")
-        had_issue = True
-        if args.strict:
-            return 2
-    if args.require_latency and report["checklist"]["latency_baseline_passed"] is not True:
-        print("Weekly operating audit: latency baseline missing or failing.")
-        had_issue = True
+    issue_messages = _collect_issue_messages(
+        report,
+        regression_result=regression_result,
+        require_performance=args.require_performance,
+        require_latency=args.require_latency,
+    )
+    for message in issue_messages:
+        print(message)
         if args.strict:
             return 2
     if args.strict_close:
         close_ready, close_detail, signoff_payload = _evaluate_close_gate(signoff_json_path)
-        _write_close_gate_report(close_ready, close_detail, signoff_payload)
+        _write_close_gate_report(
+            signoff_json_path=signoff_json_path,
+            close_gate_md=close_gate_md,
+            close_gate_json=close_gate_json,
+            close_ready=close_ready,
+            close_detail=close_detail,
+            signoff_payload=signoff_payload,
+        )
         if not close_ready:
             print(f"Weekly operating audit: close gate not ready ({close_detail}).")
             return 2
-    if not had_issue:
+    if not issue_messages:
         print("Weekly operating audit: no threshold exceptions.")
 
     return 0

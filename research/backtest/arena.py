@@ -264,6 +264,52 @@ def _build_scorecard_from_result(
     )
 
 
+def _comparison_row(name: str, scorecard: StrategyScorecard) -> dict:
+    return {
+        "Strategy": name,
+        "Total PnL ($)": scorecard.total_pnl,
+        "Return (%)": scorecard.total_return_pct * 100,
+        "Annual Return (%)": scorecard.annualized_return * 100,
+        "Sharpe": scorecard.sharpe_ratio,
+        "Deflated Sharpe": scorecard.deflated_sharpe_ratio,
+        "Sortino": scorecard.sortino_ratio,
+        "Max DD (%)": scorecard.max_drawdown * 100,
+        "Calmar": scorecard.calmar_ratio,
+        "Trades": scorecard.total_trades,
+        "Avg Trade ($)": scorecard.avg_trade_pnl,
+        "Daily Std ($)": scorecard.daily_pnl_std,
+    }
+
+
+def _scorecard_metric_values(
+    scorecards: Dict[str, StrategyScorecard],
+    metric: str,
+    scale: float = 1.0,
+) -> Tuple[List[str], List[float]]:
+    strategies = list(scorecards.keys())
+    values = [float(getattr(scorecards[name], metric)) * scale for name in strategies]
+    return strategies, values
+
+
+def _comparison_table_rows(comparison: pd.DataFrame) -> List[List[str]]:
+    rows: List[List[str]] = []
+    for _, row in comparison.iterrows():
+        rows.append(
+            [
+                row["Strategy"][:15],
+                f"${row['Total PnL ($)']:,.0f}",
+                f"{row['Return (%)']:.1f}%",
+                f"{row['Sharpe']:.2f}",
+                f"{row['Max DD (%)']:.1f}%",
+            ]
+        )
+    return rows
+
+
+def _strategy_summary_lines(scorecards: Dict[str, StrategyScorecard]) -> List[str]:
+    return [scorecard.summary() for scorecard in scorecards.values()]
+
+
 def _scorecard_summary_metrics(
     *,
     result: BacktestResult,
@@ -474,26 +520,9 @@ class StrategyArena:
 
     def _create_comparison_df(self) -> pd.DataFrame:
         """Create comparison DataFrame from scorecards."""
-        rows = []
-        for name, sc in self.scorecards.items():
-            rows.append(
-                {
-                    "Strategy": name,
-                    "Total PnL ($)": sc.total_pnl,
-                    "Return (%)": sc.total_return_pct * 100,
-                    "Annual Return (%)": sc.annualized_return * 100,
-                    "Sharpe": sc.sharpe_ratio,
-                    "Deflated Sharpe": sc.deflated_sharpe_ratio,
-                    "Sortino": sc.sortino_ratio,
-                    "Max DD (%)": sc.max_drawdown * 100,
-                    "Calmar": sc.calmar_ratio,
-                    "Trades": sc.total_trades,
-                    "Avg Trade ($)": sc.avg_trade_pnl,
-                    "Daily Std ($)": sc.daily_pnl_std,
-                }
-            )
-
-        return pd.DataFrame(rows)
+        return pd.DataFrame(
+            [_comparison_row(name, scorecard) for name, scorecard in self.scorecards.items()]
+        )
 
     def _plot_cumulative_pnl(self, ax: plt.Axes) -> None:
         for name, sc in self.scorecards.items():
@@ -528,8 +557,11 @@ class StrategyArena:
         ax.grid(True, alpha=0.3)
 
     def _plot_total_return_bars(self, ax: plt.Axes) -> None:
-        strategies = list(self.scorecards.keys())
-        returns = [self.scorecards[s].total_return_pct * 100 for s in strategies]
+        strategies, returns = _scorecard_metric_values(
+            self.scorecards,
+            "total_return_pct",
+            scale=100.0,
+        )
         colors = ["green" if r > 0 else "red" for r in returns]
         ax.bar(strategies, returns, color=colors, alpha=0.7)
         ax.set_title("Total Return (%)")
@@ -551,8 +583,7 @@ class StrategyArena:
         ax.grid(True, alpha=0.3)
 
     def _plot_sharpe_bars(self, ax: plt.Axes) -> None:
-        strategies = list(self.scorecards.keys())
-        sharpes = [self.scorecards[s].sharpe_ratio for s in strategies]
+        strategies, sharpes = _scorecard_metric_values(self.scorecards, "sharpe_ratio")
         colors = ["green" if s > 1 else "orange" if s > 0 else "red" for s in sharpes]
         ax.bar(strategies, sharpes, color=colors, alpha=0.7)
         ax.axhline(y=1, color="g", linestyle="--", alpha=0.5, label="Good (>1)")
@@ -606,20 +637,8 @@ class StrategyArena:
         ax.axis("off")
 
         comparison = self._create_comparison_df()
-        table_data = []
-        for _, row in comparison.iterrows():
-            table_data.append(
-                [
-                    row["Strategy"][:15],
-                    f"${row['Total PnL ($)']:,.0f}",
-                    f"{row['Return (%)']:.1f}%",
-                    f"{row['Sharpe']:.2f}",
-                    f"{row['Max DD (%)']:.1f}%",
-                ]
-            )
-
         table = ax.table(
-            cellText=table_data,
+            cellText=_comparison_table_rows(comparison),
             colLabels=["Strategy", "PnL", "Return", "Sharpe", "Max DD"],
             cellLoc="center",
             loc="center",
@@ -676,8 +695,7 @@ class StrategyArena:
         lines.append("\n" + "=" * 70)
         lines.append("INDIVIDUAL STRATEGY RESULTS")
         lines.append("=" * 70)
-        for name, sc in self.scorecards.items():
-            lines.append(sc.summary())
+        lines.extend(_strategy_summary_lines(self.scorecards))
         lines.extend(_arena_report_rankings_lines(self))
         report = "\n".join(lines)
         if output_file:

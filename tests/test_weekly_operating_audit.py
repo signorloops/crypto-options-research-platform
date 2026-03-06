@@ -239,6 +239,73 @@ def test_main_executes_regression_cmd_without_shell(tmp_path, monkeypatch):
     assert regression_kwargs.get("shell") in (None, False)
 
 
+def test_run_regression_command_returns_report_and_ignores_blank(tmp_path, monkeypatch):
+    module = _load_module()
+    calls: list[tuple[object, dict[str, object]]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=1,
+            stdout="line-1\nline-2\n",
+            stderr="line-3\n",
+        )
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    assert module._run_regression_command("", tmp_path) is None
+
+    report = module._run_regression_command(
+        "python -m pytest -q tests/test_pricing_inverse.py",
+        tmp_path,
+    )
+
+    assert report == {
+        "executed": True,
+        "command": "python -m pytest -q tests/test_pricing_inverse.py",
+        "passed": False,
+        "return_code": 1,
+        "output_tail": "line-1\nline-2\n\nline-3",
+    }
+    regression_cmd, regression_kwargs = calls[0]
+    assert regression_cmd == ["python", "-m", "pytest", "-q", "tests/test_pricing_inverse.py"]
+    assert regression_kwargs["cwd"] == tmp_path
+    assert regression_kwargs.get("shell") in (None, False)
+
+
+def test_resolve_input_files_prefers_explicit_inputs_before_discovery(tmp_path, monkeypatch):
+    module = _load_module()
+    explicit = tmp_path / "explicit.json"
+    discovered = tmp_path / "results" / "backtest_results.json"
+    _write(explicit, "{}")
+    _write(discovered, "{}")
+    calls: list[tuple[Path, str]] = []
+
+    def fake_discover(results_dir: Path, pattern: str) -> list[Path]:
+        calls.append((results_dir, pattern))
+        return [discovered]
+
+    monkeypatch.setattr(module, "_discover_input_files", fake_discover)
+
+    resolved_explicit = module._resolve_input_files(
+        repo_root=tmp_path,
+        explicit_inputs=[str(explicit)],
+        results_dir="results",
+        pattern="backtest*.json",
+    )
+    resolved_discovered = module._resolve_input_files(
+        repo_root=tmp_path,
+        explicit_inputs=[],
+        results_dir="results",
+        pattern="backtest*.json",
+    )
+
+    assert resolved_explicit == [explicit.resolve()]
+    assert resolved_discovered == [discovered]
+    assert calls == [((tmp_path / "results").resolve(), "backtest*.json")]
+
+
 def test_detect_latest_tag_falls_back_to_commit_when_head_is_not_tagged(tmp_path):
     module = _load_module()
 
