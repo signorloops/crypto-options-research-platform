@@ -304,6 +304,24 @@ def test_pnl_histogram_bins_handle_flat_and_variable_series():
     assert variable_bins == 30
 
 
+def test_plot_color_and_point_helpers_return_expected_values():
+    arena = StrategyArena(_market_data_frame(), initial_capital=100000.0)
+    rich_result = _make_backtest_result("rich", [0, 100, 80, 120, 150], sharpe=1.2)
+    poor_result = _make_backtest_result("poor", [0, -50, -80, -40, -20], sharpe=-0.2)
+    rich_score = arena._calculate_scorecard(rich_result)
+    poor_score = arena._calculate_scorecard(poor_result)
+
+    return_colors = arena_module._return_bar_colors([10.0, -5.0])
+    sharpe_colors = arena_module._sharpe_bar_colors([1.2, 0.4, -0.1])
+    points = arena_module._risk_return_points({"rich": rich_score, "poor": poor_score})
+
+    assert return_colors == ["green", "red"]
+    assert sharpe_colors == ["green", "orange", "red"]
+    assert points[0][0] == "rich"
+    assert points[0][1] == rich_score.max_drawdown * 100
+    assert points[0][2] == rich_score.annualized_return * 100
+
+
 def test_statistical_comparison_and_plotting():
     arena = StrategyArena(_market_data_frame(), initial_capital=100000.0)
     r1 = _make_backtest_result("A", list(range(20)), sharpe=1.0)

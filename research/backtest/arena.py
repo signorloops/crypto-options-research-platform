@@ -412,6 +412,23 @@ def _pnl_histogram_bins(values: list[float] | np.ndarray) -> list[float] | int:
     return 30
 
 
+def _return_bar_colors(returns: list[float]) -> list[str]:
+    return ["green" if value > 0 else "red" for value in returns]
+
+
+def _sharpe_bar_colors(sharpes: list[float]) -> list[str]:
+    return ["green" if value > 1 else "orange" if value > 0 else "red" for value in sharpes]
+
+
+def _risk_return_points(
+    scorecards: Dict[str, StrategyScorecard],
+) -> list[tuple[str, float, float]]:
+    return [
+        (name, scorecard.max_drawdown * 100, scorecard.annualized_return * 100)
+        for name, scorecard in scorecards.items()
+    ]
+
+
 def _scorecard_summary_metrics(
     *,
     result: BacktestResult,
@@ -689,18 +706,15 @@ class StrategyArena:
             "total_return_pct",
             scale=100.0,
         )
-        colors = ["green" if r > 0 else "red" for r in returns]
-        ax.bar(strategies, returns, color=colors, alpha=0.7)
+        ax.bar(strategies, returns, color=_return_bar_colors(returns), alpha=0.7)
         ax.set_title("Total Return (%)")
         ax.set_ylabel("Return (%)")
         ax.axhline(y=0, color="k", linestyle="-", linewidth=0.5)
         plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
 
     def _plot_risk_return_scatter(self, ax: plt.Axes) -> None:
-        for name, sc in self.scorecards.items():
-            ax.scatter(
-                sc.max_drawdown * 100, sc.annualized_return * 100, s=200, alpha=0.6, label=name
-            )
+        for name, max_drawdown, annualized_return in _risk_return_points(self.scorecards):
+            ax.scatter(max_drawdown, annualized_return, s=200, alpha=0.6, label=name)
         ax.set_xlabel("Max Drawdown (%)")
         ax.set_ylabel("Annualized Return (%)")
         ax.set_title("Risk-Return Profile")
@@ -711,8 +725,7 @@ class StrategyArena:
 
     def _plot_sharpe_bars(self, ax: plt.Axes) -> None:
         strategies, sharpes = _scorecard_metric_values(self.scorecards, "sharpe_ratio")
-        colors = ["green" if s > 1 else "orange" if s > 0 else "red" for s in sharpes]
-        ax.bar(strategies, sharpes, color=colors, alpha=0.7)
+        ax.bar(strategies, sharpes, color=_sharpe_bar_colors(sharpes), alpha=0.7)
         ax.axhline(y=1, color="g", linestyle="--", alpha=0.5, label="Good (>1)")
         ax.axhline(y=0, color="r", linestyle="--", alpha=0.5)
         ax.set_title("Sharpe Ratio")

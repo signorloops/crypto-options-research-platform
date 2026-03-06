@@ -415,6 +415,27 @@ def test_run_close_gate_only_returns_status_and_writes_report(tmp_path, monkeypa
     assert calls and calls[0]["close_ready"] is True
 
 
+def test_execute_close_gate_reuses_evaluate_and_write(tmp_path, monkeypatch):
+    module = _load_module()
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        module,
+        "_evaluate_close_gate",
+        lambda path: (False, "status=PENDING_MANUAL_SIGNOFF", {"status": "PENDING_MANUAL_SIGNOFF"}),
+    )
+    monkeypatch.setattr(module, "_write_close_gate_report", lambda **kwargs: calls.append(kwargs))
+
+    close_ready, close_detail = module._execute_close_gate(
+        signoff_json_path=tmp_path / "signoff.json",
+        close_gate_md=tmp_path / "close.md",
+        close_gate_json=tmp_path / "close.json",
+    )
+
+    assert close_ready is False
+    assert close_detail == "status=PENDING_MANUAL_SIGNOFF"
+    assert calls and calls[0]["signoff_payload"] == {"status": "PENDING_MANUAL_SIGNOFF"}
+
+
 def test_prepare_audit_run_loads_thresholds_inputs_and_supporting_reports(tmp_path, monkeypatch):
     module = _load_module()
     result_path = tmp_path / "results" / "demo.json"

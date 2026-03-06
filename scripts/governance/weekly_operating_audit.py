@@ -294,6 +294,24 @@ def _report_issue_messages(issue_messages: list[str], *, strict: bool) -> int | 
     return None
 
 
+def _execute_close_gate(
+    *,
+    signoff_json_path: Path,
+    close_gate_md: Path,
+    close_gate_json: Path,
+) -> tuple[bool, str]:
+    close_ready, close_detail, signoff_payload = _evaluate_close_gate(signoff_json_path)
+    _write_close_gate_report(
+        signoff_json_path=signoff_json_path,
+        close_gate_md=close_gate_md,
+        close_gate_json=close_gate_json,
+        close_ready=close_ready,
+        close_detail=close_detail,
+        signoff_payload=signoff_payload,
+    )
+    return close_ready, close_detail
+
+
 def _handle_strict_close(
     *,
     strict_close: bool,
@@ -303,14 +321,10 @@ def _handle_strict_close(
 ) -> int | None:
     if not strict_close:
         return None
-    close_ready, close_detail, signoff_payload = _evaluate_close_gate(signoff_json_path)
-    _write_close_gate_report(
+    close_ready, close_detail = _execute_close_gate(
         signoff_json_path=signoff_json_path,
         close_gate_md=close_gate_md,
         close_gate_json=close_gate_json,
-        close_ready=close_ready,
-        close_detail=close_detail,
-        signoff_payload=signoff_payload,
     )
     if not close_ready:
         print(f"Weekly operating audit: close gate not ready ({close_detail}).")
@@ -325,14 +339,10 @@ def _run_close_gate_only(
     close_gate_md: Path,
     close_gate_json: Path,
 ) -> int:
-    close_ready, close_detail, signoff_payload = _evaluate_close_gate(signoff_json_path)
-    _write_close_gate_report(
+    close_ready, close_detail = _execute_close_gate(
         signoff_json_path=signoff_json_path,
         close_gate_md=close_gate_md,
         close_gate_json=close_gate_json,
-        close_ready=close_ready,
-        close_detail=close_detail,
-        signoff_payload=signoff_payload,
     )
     if close_ready:
         print("Weekly close gate: READY_FOR_CLOSE.")
