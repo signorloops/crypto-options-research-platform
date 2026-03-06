@@ -717,6 +717,84 @@ def test_build_operating_report_payload_normalizes_sections_and_counts():
     assert report["rollback_marker"]["executed"] is False
 
 
+def test_write_audit_outputs_persists_markdown_and_json(tmp_path):
+    module = _load_module()
+    report = {
+        "generated_at_utc": "2026-03-06T00:00:00+00:00",
+        "summary": {
+            "strategies": 1,
+            "exceptions": 0,
+            "consistency_pairs": 0,
+            "consistency_exceptions": 0,
+            "parse_errors": 0,
+        },
+        "inputs": [],
+        "thresholds": {},
+        "consistency_thresholds": {},
+        "kpi_snapshot": [],
+        "risk_exceptions": [],
+        "consistency_checks": [],
+        "consistency_exceptions": [],
+        "checklist": {
+            "kpi_snapshot_updated": True,
+            "experiment_ids_assigned": True,
+            "risk_thresholds_confirmed": True,
+            "change_log_complete": False,
+            "rollback_version_marked": False,
+            "minimum_regression_passed": None,
+            "performance_baseline_passed": None,
+            "latency_baseline_passed": None,
+            "consistency_check_completed": True,
+            "risk_exception_report_output": True,
+            "anomalies_attributed": True,
+        },
+        "manual_checklist_items": [],
+        "incomplete_tasks": [],
+        "parse_errors": [],
+        "regression": {
+            "executed": False,
+            "command": "",
+            "passed": None,
+            "return_code": None,
+            "output_tail": "",
+        },
+        "change_log": {
+            "executed": False,
+            "since_days": 0,
+            "entries": [],
+            "count": 0,
+            "shallow": False,
+            "error": "",
+        },
+        "rollback_marker": {"executed": False, "tag": "", "error": "", "source": ""},
+        "performance_baseline": {
+            "executed": False,
+            "summary": {"all_passed": None},
+            "error": "",
+            "path": "",
+        },
+        "latency_baseline": {
+            "executed": False,
+            "summary": {"all_passed": None},
+            "error": "",
+            "path": "",
+        },
+    }
+    output_md = tmp_path / "weekly.md"
+    output_json = tmp_path / "weekly.json"
+
+    module._write_audit_outputs(
+        report=report,
+        output_md=output_md,
+        output_json=output_json,
+    )
+
+    assert output_md.exists()
+    assert output_json.exists()
+    assert "Weekly Operating Audit" in output_md.read_text(encoding="utf-8")
+    assert json.loads(output_json.read_text(encoding="utf-8"))["summary"]["strategies"] == 1
+
+
 def test_main_strict_exits_nonzero_when_consistency_exceptions_exist(tmp_path, monkeypatch):
     module = _load_module()
     older = tmp_path / "results" / "backtest_results_old2.json"

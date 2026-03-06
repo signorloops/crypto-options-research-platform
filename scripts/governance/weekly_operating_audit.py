@@ -219,6 +219,11 @@ def _to_markdown(report: dict[str, Any]) -> str:
     return build_weekly_operating_markdown(report)
 
 
+def _write_audit_outputs(*, report: dict[str, Any], output_md: Path, output_json: Path) -> None:
+    _write_markdown(output_md, _to_markdown(report))
+    _write_json(output_json, report)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Generate weekly operating KPI/risk audit.")
     for spec in build_weekly_operating_argument_specs():
@@ -423,9 +428,11 @@ def main() -> int:
         latency_result=audit_run["baselines"]["latency"],
         latency_required=args.require_latency,
     )
-
-    _write_markdown(paths["output_md"], _to_markdown(report))
-    _write_json(paths["output_json"], report)
+    _write_audit_outputs(
+        report=report,
+        output_md=paths["output_md"],
+        output_json=paths["output_json"],
+    )
 
     issue_messages = _collect_issue_messages(
         report,
