@@ -4,9 +4,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, Literal, Optional
+from typing import Dict, Literal, Optional, TypedDict
 
 import numpy as np
+
+
+class MarketSnapshot(TypedDict):
+    call_price: float
+    put_price: float
+    spot_price: float
+    strike: float
+    expiry: datetime
 
 
 def _time_to_expiry_years(expiry: datetime) -> float:
@@ -36,6 +44,14 @@ def _resolve_opportunity_inputs(
         spot_price = snapshot["spot_price"] if spot_price is None else spot_price
         strike = snapshot["strike"] if strike is None else strike
         expiry = snapshot["expiry"] if expiry is None else expiry
+    if (
+        call_price is None
+        or put_price is None
+        or spot_price is None
+        or strike is None
+        or expiry is None
+    ):
+        return None
     return float(call_price), float(put_price), float(spot_price), float(strike), expiry
 
 
@@ -183,7 +199,7 @@ class ConversionArbitrage:
         self.min_profit = min_profit_threshold
         self.transaction_cost = transaction_cost
         self.staking_yield = staking_yield
-        self._market_snapshot: Dict[str, Dict[str, float]] = {}
+        self._market_snapshot: Dict[str, MarketSnapshot] = {}
 
     def update_market_snapshot(
         self,
@@ -203,7 +219,7 @@ class ConversionArbitrage:
             "expiry": expiry,
         }
 
-    def get_latest_snapshot(self, underlying: str) -> Optional[Dict[str, float]]:
+    def get_latest_snapshot(self, underlying: str) -> Optional[MarketSnapshot]:
         return self._market_snapshot.get(underlying)
 
     def calculate_parity_deviation(
