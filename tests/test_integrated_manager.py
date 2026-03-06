@@ -102,6 +102,30 @@ async def test_connect_gracefully_handles_backend_init_failures(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_connect_skips_disabled_backends(monkeypatch):
+    """Disabled optional backends should not be constructed at all."""
+    import data.integrated_manager as module
+
+    class UnexpectedRedis:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("redis should stay disabled")
+
+    class UnexpectedDuckDB:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("duckdb should stay disabled")
+
+    monkeypatch.setattr(module, "RedisCache", UnexpectedRedis)
+    monkeypatch.setattr(module, "DuckDBCache", UnexpectedDuckDB)
+
+    manager = IntegratedDataManager(enable_duckdb=False, enable_redis=False)
+    await manager.connect()
+
+    assert manager.redis is None
+    assert manager.greeks_manager is None
+    assert manager.duckdb is None
+
+
+@pytest.mark.asyncio
 async def test_invalidate_realtime_cache_uses_policy_patterns():
     """Invalidation should clear deterministic Redis key patterns."""
     manager = IntegratedDataManager(enable_duckdb=False, enable_redis=False)
@@ -128,6 +152,17 @@ def test_get_cache_status_includes_policy_ttls():
 
     assert "policy" in status
     assert status["policy"]["ttl_seconds"] == realtime_ttls()
+
+
+def test_close_clears_duckdb_runtime():
+    manager = IntegratedDataManager(enable_duckdb=False, enable_redis=False)
+    duckdb = MagicMock()
+    manager.duckdb = duckdb
+
+    manager.close()
+
+    duckdb.close.assert_called_once()
+    assert manager.duckdb is None
 
 
 def test_duckdb_wrappers_delegate_when_initialized():

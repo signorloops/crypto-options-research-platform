@@ -199,6 +199,26 @@ class IntegratedDataManager(_IntegratedRealtimeCacheMixin):
             self._state_lock = asyncio.Lock()
         return self._state_lock
 
+    async def _connect_redis_runtime(self) -> None:
+        """Initialize Redis-dependent runtime state when enabled."""
+        try:
+            self.redis = RedisCache(host=self.redis_host, port=self.redis_port)
+            await self.redis.connect()
+            self.greeks_manager = GreeksCacheManager(self.redis)
+            logger.info("Redis connected successfully")
+        except REDIS_CONNECT_EXCEPTIONS as e:
+            logger.warning(f"Failed to connect to Redis: {e}")
+            self._reset_redis_runtime()
+
+    def _connect_duckdb_runtime(self) -> None:
+        """Initialize DuckDB runtime state when enabled."""
+        try:
+            self.duckdb = DuckDBCache(self.duckdb_path)
+            logger.info("DuckDB initialized successfully")
+        except DUCKDB_OPERATION_EXCEPTIONS as e:
+            logger.warning(f"Failed to initialize DuckDB: {e}")
+            self.duckdb = None
+
     def _reset_redis_runtime(self) -> None:
         """Clear redis-derived runtime state after disconnect or failed init."""
         self.redis = None
@@ -211,26 +231,31 @@ class IntegratedDataManager(_IntegratedRealtimeCacheMixin):
             duckdb.close()
             self.duckdb = None
 
+    def _duckdb_status(self) -> Dict[str, Any]:
+        """Summarize DuckDB runtime status for diagnostics."""
+        return {
+            "enabled": self.enable_duckdb,
+            "initialized": self.duckdb is not None,
+            "path": self.duckdb_path or "memory",
+        }
+
+    def _redis_status(self) -> Dict[str, Any]:
+        """Summarize Redis runtime status for diagnostics."""
+        return {
+            "enabled": self.enable_redis,
+            "connected": self.redis is not None,
+            "host": self.redis_host if self.enable_redis else None,
+            "port": self.redis_port if self.enable_redis else None,
+        }
+
     async def connect(self) -> None:
         """Connect to Redis if enabled."""
         async with self._get_state_lock():
             if self.enable_redis:
-                try:
-                    self.redis = RedisCache(host=self.redis_host, port=self.redis_port)
-                    await self.redis.connect()
-                    self.greeks_manager = GreeksCacheManager(self.redis)
-                    logger.info("Redis connected successfully")
-                except REDIS_CONNECT_EXCEPTIONS as e:
-                    logger.warning(f"Failed to connect to Redis: {e}")
-                    self._reset_redis_runtime()
+                await self._connect_redis_runtime()
 
             if self.enable_duckdb:
-                try:
-                    self.duckdb = DuckDBCache(self.duckdb_path)
-                    logger.info("DuckDB initialized successfully")
-                except DUCKDB_OPERATION_EXCEPTIONS as e:
-                    logger.warning(f"Failed to initialize DuckDB: {e}")
-                    self.duckdb = None
+                self._connect_duckdb_runtime()
 
     async def disconnect(self) -> None:
         """Disconnect from all services."""
@@ -425,17 +450,8 @@ class IntegratedDataManager(_IntegratedRealtimeCacheMixin):
         return {
             "parquet": self.parquet_manager.cache.get_cache_info(),
             "policy": {"ttl_seconds": realtime_ttls()},
-            "duckdb": {
-                "enabled": self.enable_duckdb,
-                "initialized": self.duckdb is not None,
-                "path": self.duckdb_path or "memory",
-            },
-            "redis": {
-                "enabled": self.enable_redis,
-                "connected": self.redis is not None,
-                "host": self.redis_host if self.enable_redis else None,
-                "port": self.redis_port if self.enable_redis else None,
-            },
+            "duckdb": self._duckdb_status(),
+            "redis": self._redis_status(),
         }
 
     async def get_redis_stats(self) -> Optional[Dict[str, Any]]:
