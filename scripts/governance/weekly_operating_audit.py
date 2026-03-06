@@ -20,7 +20,6 @@ if str(REPO_ROOT) not in sys.path:
 from scripts.governance.report_utils import (
     JSON_REPORT_EXCEPTIONS,
     discover_input_files as _discover_input_files,
-    format_markdown_table as _format_table,
     load_json_object as _load_json,
     write_json as _write_json,
     write_markdown as _write_markdown,
@@ -29,6 +28,11 @@ from scripts.governance.status_action_utils import (
     MANUAL_CHECKLIST_ITEMS,
     build_close_gate_action_items,
     build_incomplete_tasks,
+)
+from scripts.governance.weekly_operating_render_utils import (
+    build_close_gate_markdown,
+    build_close_gate_pr_brief,
+    build_weekly_operating_markdown,
 )
 
 DEFAULT_THRESHOLDS: dict[str, float] = {
@@ -53,18 +57,6 @@ def _to_text_list(value: Any) -> list[str]:
         if text:
             items.append(text)
     return items
-
-
-def _summarize_items(items: list[str], limit: int = 4) -> str:
-    if not items:
-        return "None"
-    visible = items[:limit]
-    summary = " / ".join(visible)
-    remaining = len(items) - len(visible)
-    if remaining > 0:
-        return f"{summary} (+{remaining} more)"
-    return summary
-
 
 def _load_close_gate_snapshot(signoff_json_path: Path) -> tuple[dict[str, Any], str]:
     if not signoff_json_path.exists():
@@ -118,15 +110,14 @@ def _build_close_gate_report(
         role_signoffs_missing=role_signoffs_missing,
         close_ready=close_ready,
     )
-    pr_brief_lines = [
-        "### Weekly Close Gate",
-        f"- Status: {'PASS' if close_ready else 'FAIL'} (`{close_detail}`)",
-        f"- Signoff status: `{signoff_status or 'UNKNOWN'}`",
-        f"- Auto blockers: {_summarize_items(auto_blockers)}",
-        f"- Pending items: {_summarize_items(pending_items)}",
-        f"- Next actions: {_summarize_items(action_items, limit=3)}",
-    ]
-    pr_brief = "\n".join(pr_brief_lines)
+    pr_brief = build_close_gate_pr_brief(
+        close_ready=close_ready,
+        close_detail=close_detail,
+        signoff_status=signoff_status,
+        auto_blockers=auto_blockers,
+        pending_items=pending_items,
+        action_items=action_items,
+    )
     return {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "status": "PASS" if close_ready else "FAIL",
@@ -150,55 +141,7 @@ def _build_close_gate_report(
 
 
 def _close_gate_to_markdown(report: dict[str, Any]) -> str:
-    lines: list[str] = []
-    lines.append("# Weekly Close Gate")
-    lines.append("")
-    lines.append(f"- Generated (UTC): `{report['generated_at_utc']}`")
-    lines.append(f"- Status: `{report['status']}`")
-    lines.append(f"- Gate: `{report['gate']}`")
-    lines.append(f"- Reason: `{report['reason']}`")
-    lines.append(f"- Signoff Status: `{report['signoff_status']}`")
-    lines.append(f"- Signoff JSON: `{report['signoff_json']}`")
-    lines.append("")
-    lines.append("## Auto Blockers")
-    lines.append("")
-    if report["auto_blockers"]:
-        for item in report["auto_blockers"]:
-            lines.append(f"- [ ] {item}")
-    else:
-        lines.append("- [x] None")
-    lines.append("")
-    lines.append("## Pending Items")
-    lines.append("")
-    if report["pending_items"]:
-        for item in report["pending_items"]:
-            lines.append(f"- [ ] {item}")
-    else:
-        lines.append("- [x] None")
-    lines.append("")
-    lines.append("## Missing Manual Checks")
-    lines.append("")
-    if report["manual_missing"]:
-        for item in report["manual_missing"]:
-            lines.append(f"- [ ] {item}")
-    else:
-        lines.append("- [x] None")
-    lines.append("")
-    lines.append("## Missing Role Sign-offs")
-    lines.append("")
-    if report["role_signoffs_missing"]:
-        for item in report["role_signoffs_missing"]:
-            lines.append(f"- [ ] {item}")
-    else:
-        lines.append("- [x] None")
-    lines.append("")
-    lines.append("## PR Brief (Copy/Paste)")
-    lines.append("")
-    lines.append("```markdown")
-    lines.append(report["pr_brief"])
-    lines.append("```")
-    lines.append("")
-    return "\n".join(lines)
+    return build_close_gate_markdown(report)
 
 
 def _to_float(value: Any) -> float | None:
@@ -700,229 +643,7 @@ def _build_report(
 
 
 def _to_markdown(report: dict[str, Any]) -> str:
-    lines: list[str] = []
-    lines.append("# Weekly Operating Audit")
-    lines.append("")
-    lines.append(f"- Generated (UTC): `{report['generated_at_utc']}`")
-    lines.append(f"- Input files: `{len(report['inputs'])}`")
-    lines.append(f"- Strategies in snapshot: `{report['summary']['strategies']}`")
-    lines.append(f"- Risk exceptions: `{report['summary']['exceptions']}`")
-    lines.append(f"- Consistency pairs: `{report['summary']['consistency_pairs']}`")
-    lines.append(f"- Consistency exceptions: `{report['summary']['consistency_exceptions']}`")
-    lines.append("")
-    lines.append("## Input Files")
-    lines.append("")
-    if report["inputs"]:
-        for path in report["inputs"]:
-            lines.append(f"- `{path}`")
-    else:
-        lines.append("_none_")
-    lines.append("")
-    lines.append("## KPI Snapshot")
-    lines.append("")
-    snapshot_rows = []
-    for row in report["kpi_snapshot"]:
-        snapshot_rows.append(
-            {
-                "strategy": row["strategy"],
-                "source_file": row["source_file"],
-                "experiment_id": row.get("experiment_id") or "n/a",
-                "pnl": _fmt(row.get("pnl")),
-                "sharpe": _fmt(row.get("sharpe"), digits=4),
-                "max_drawdown_abs": _fmt(row.get("max_drawdown_abs"), digits=4),
-                "var_breach_rate": _fmt(row.get("var_breach_rate"), digits=4),
-                "fill_calibration_error": _fmt(row.get("fill_calibration_error"), digits=4),
-                "status": row["status"],
-            }
-        )
-    lines.append(
-        _format_table(
-            snapshot_rows,
-            [
-                "strategy",
-                "source_file",
-                "experiment_id",
-                "pnl",
-                "sharpe",
-                "max_drawdown_abs",
-                "var_breach_rate",
-                "fill_calibration_error",
-                "status",
-            ],
-        )
-    )
-    lines.append("")
-    lines.append("## Risk Exceptions")
-    lines.append("")
-    lines.append(
-        _format_table(
-            report["risk_exceptions"],
-            ["strategy", "source_file", "breached_rules"],
-        )
-    )
-    lines.append("")
-    lines.append("## Consistency Checks")
-    lines.append("")
-    consistency_rows = []
-    for row in report["consistency_checks"]:
-        consistency_rows.append(
-            {
-                "strategy": row["strategy"],
-                "latest_source_file": row["latest_source_file"],
-                "previous_source_file": row["previous_source_file"],
-                "abs_pnl_diff": _fmt(row.get("abs_pnl_diff")),
-                "abs_sharpe_diff": _fmt(row.get("abs_sharpe_diff"), digits=4),
-                "abs_max_drawdown_diff": _fmt(row.get("abs_max_drawdown_diff"), digits=4),
-                "status": row["status"],
-                "breached_rules": row["breached_rules"],
-            }
-        )
-    lines.append(
-        _format_table(
-            consistency_rows,
-            [
-                "strategy",
-                "latest_source_file",
-                "previous_source_file",
-                "abs_pnl_diff",
-                "abs_sharpe_diff",
-                "abs_max_drawdown_diff",
-                "status",
-                "breached_rules",
-            ],
-        )
-    )
-    lines.append("")
-    lines.append("## Checklist (Auto)")
-    lines.append("")
-    auto_items = [
-        ("KPI 快照更新", report["checklist"]["kpi_snapshot_updated"]),
-        ("实验编号分配完成", report["checklist"]["experiment_ids_assigned"]),
-        ("风险门槛已确认", report["checklist"]["risk_thresholds_confirmed"]),
-        ("变更记录完整", report["checklist"]["change_log_complete"]),
-        ("回滚版本已标记", report["checklist"]["rollback_version_marked"]),
-        ("最小回归通过", report["checklist"]["minimum_regression_passed"]),
-        ("性能基线达标", report["checklist"]["performance_baseline_passed"]),
-        ("延迟基线达标", report["checklist"]["latency_baseline_passed"]),
-        ("一致性检查完成", report["checklist"]["consistency_check_completed"]),
-        ("风险例外报告输出", report["checklist"]["risk_exception_report_output"]),
-        ("异常项已归因", report["checklist"]["anomalies_attributed"]),
-    ]
-    for label, done in auto_items:
-        mark = "[x]" if done is True else "[ ]"
-        if done is None:
-            lines.append(f"- {mark} {label}（未执行自动检查）")
-        else:
-            lines.append(f"- {mark} {label}")
-    lines.append("")
-    lines.append("## Regression Check")
-    lines.append("")
-    regression = report["regression"]
-    if regression.get("executed"):
-        lines.append(f"- Command: `{regression['command']}`")
-        lines.append(f"- Return code: `{regression['return_code']}`")
-        lines.append(f"- Passed: `{regression['passed']}`")
-        if regression.get("output_tail"):
-            lines.append("")
-            lines.append("```text")
-            lines.append(regression["output_tail"])
-            lines.append("```")
-    else:
-        lines.append("_not executed_")
-    lines.append("")
-    lines.append("## Algorithm Performance Baseline")
-    lines.append("")
-    performance = report["performance_baseline"]
-    if performance.get("executed"):
-        perf_summary = performance.get("summary", {})
-        lines.append(f"- All passed: `{perf_summary.get('all_passed')}`")
-        lines.append(
-            f"- Checks passed: `{perf_summary.get('checks_passed')}/{perf_summary.get('checks_total')}`"
-        )
-        metrics = performance.get("metrics", {})
-        var_stats = metrics.get("var_monte_carlo")
-        backtest_stats = metrics.get("backtest_engine")
-        if isinstance(var_stats, dict):
-            lines.append(
-                f"- VaR Monte Carlo P95 (ms): `{_fmt(_to_float(var_stats.get('p95_ms')), 4)}`"
-            )
-        if isinstance(backtest_stats, dict):
-            lines.append(
-                f"- Backtest Engine P95 (ms): `{_fmt(_to_float(backtest_stats.get('p95_ms')), 4)}`"
-            )
-    else:
-        lines.append("_not available_")
-        if performance.get("error"):
-            lines.append(f"- Error: `{performance['error']}`")
-    lines.append("")
-    lines.append("## Latency Baseline")
-    lines.append("")
-    latency = report["latency_baseline"]
-    if latency.get("executed"):
-        latency_summary = latency.get("summary", {})
-        lines.append(f"- All passed: `{latency_summary.get('all_passed')}`")
-        lines.append(
-            f"- Checks passed: `{latency_summary.get('checks_passed')}/{latency_summary.get('checks_total')}`"
-        )
-        benchmarks = latency.get("benchmarks", [])
-        if isinstance(benchmarks, list) and benchmarks:
-            benchmark_rows = [
-                {
-                    "name": row.get("name", ""),
-                    "p95_ms": _fmt(_to_float(row.get("p95_ms")), 4),
-                    "target_ms": _fmt(_to_float(row.get("target_ms")), 4),
-                    "meets_target": row.get("meets_target"),
-                }
-                for row in benchmarks
-            ]
-            lines.append("")
-            lines.append(
-                _format_table(benchmark_rows, ["name", "p95_ms", "target_ms", "meets_target"])
-            )
-    else:
-        lines.append("_not available_")
-        if latency.get("error"):
-            lines.append(f"- Error: `{latency['error']}`")
-    lines.append("")
-    lines.append("## Change Log (Auto)")
-    lines.append("")
-    change_log = report["change_log"]
-    if change_log.get("executed"):
-        lines.append(f"- Window: last `{change_log['since_days']}` day(s)")
-        if change_log.get("shallow"):
-            lines.append("- Repository clone is shallow; change log may be incomplete.")
-        lines.append("")
-        lines.append(_format_table(change_log["entries"], ["date", "commit", "subject"]))
-    else:
-        lines.append("_not available_")
-    lines.append("")
-    lines.append("## Rollback Marker (Auto)")
-    lines.append("")
-    rollback_marker = report["rollback_marker"]
-    if rollback_marker.get("executed") and rollback_marker.get("tag"):
-        if rollback_marker.get("source") == "commit":
-            lines.append(f"- Rollback baseline (commit): `{rollback_marker['tag']}`")
-        else:
-            lines.append(f"- Latest tag: `{rollback_marker['tag']}`")
-    else:
-        lines.append("_not available_")
-    lines.append("")
-    lines.append("## Checklist (Manual)")
-    lines.append("")
-    for label in report["manual_checklist_items"]:
-        lines.append(f"- [ ] {label}")
-    lines.append("")
-    lines.append("## Incomplete Tasks")
-    lines.append("")
-    for task in report["incomplete_tasks"]:
-        lines.append(f"- {task}")
-    lines.append("")
-    if report["parse_errors"]:
-        lines.append("## Parse Errors")
-        lines.append("")
-        lines.append(_format_table(report["parse_errors"], ["file", "error"]))
-        lines.append("")
-    return "\n".join(lines)
+    return build_weekly_operating_markdown(report)
 
 
 def main() -> int:

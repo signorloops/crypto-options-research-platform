@@ -11,6 +11,7 @@ import pandas as pd
 import pytest
 
 from core.types import MarketState, OrderBook, OrderBookLevel, Position, QuoteAction
+import research.backtest.arena as arena_module
 from research.backtest.arena import StrategyArena
 from research.backtest.engine import BacktestResult
 from strategies.base import MarketMakingStrategy
@@ -100,6 +101,28 @@ def test_scorecard_paths_and_report_generation():
     report = arena.generate_report()
     assert "STRATEGY ARENA - BACKTEST REPORT" in report
     assert "INDIVIDUAL STRATEGY RESULTS" in report
+
+
+def test_scorecard_summary_metrics_helper_matches_expected_values():
+    arena = StrategyArena(_market_data_frame(), initial_capital=100000.0)
+    result = _make_backtest_result("rich", [0, 100, 80, 120, 150], sharpe=1.2)
+    pnl_series = result.pnl_series
+    daily_returns = pnl_series.diff().dropna()
+
+    metrics = arena_module._scorecard_summary_metrics(
+        result=result,
+        initial_capital=arena.initial_capital,
+        periods_per_year=arena._periods_per_year(pnl_series),
+        periods_observed=max(len(pnl_series) - 1, 1),
+        daily_returns=daily_returns,
+    )
+
+    assert metrics["total_pnl"] == 150.0
+    assert metrics["total_return_pct"] == pytest.approx(0.0015)
+    assert metrics["sharpe"] == 1.2
+    assert metrics["win_rate"] == pytest.approx(0.75)
+    assert metrics["profit_factor"] > 1.0
+    assert metrics["best_day"] == 100.0
 
 
 def test_statistical_comparison_and_plotting():

@@ -264,6 +264,47 @@ def _build_scorecard_from_result(
     )
 
 
+def _scorecard_summary_metrics(
+    *,
+    result: BacktestResult,
+    initial_capital: float,
+    periods_per_year: float,
+    periods_observed: int,
+    daily_returns: pd.Series,
+) -> dict[str, float]:
+    total_pnl = result.total_pnl_usd
+    total_return_pct = total_pnl / initial_capital
+    annualized_return = _annualized_return_from_total(
+        total_return_pct=total_return_pct,
+        periods_per_year=periods_per_year,
+        periods_observed=periods_observed,
+    )
+    win_rate, avg_win, avg_loss, profit_factor = _compute_trade_stats(
+        result.trade_count,
+        daily_returns,
+    )
+    daily_pnl_std, worst_day, best_day = _daily_pnl_stats(daily_returns)
+    return {
+        "total_pnl": total_pnl,
+        "total_return_pct": total_return_pct,
+        "annualized_return": annualized_return,
+        "sharpe": result.sharpe_ratio,
+        "deflated_sharpe": getattr(result, "deflated_sharpe_ratio", 0.0),
+        "sortino": _compute_sortino_ratio(daily_returns, periods_per_year),
+        "calmar": _calmar_ratio(
+            annualized_return=annualized_return,
+            max_drawdown=result.max_drawdown,
+        ),
+        "win_rate": win_rate,
+        "avg_win": avg_win,
+        "avg_loss": avg_loss,
+        "profit_factor": profit_factor,
+        "daily_pnl_std": daily_pnl_std,
+        "worst_day": worst_day,
+        "best_day": best_day,
+    }
+
+
 def _collect_pairwise_p_values(
     scorecards: Dict[str, StrategyScorecard],
     names: List[str],
@@ -411,36 +452,24 @@ class StrategyArena:
     def _calculate_scorecard(self, result: BacktestResult) -> StrategyScorecard:
         """Calculate comprehensive metrics from backtest result."""
         pnl_series = result.pnl_series
-        if len(pnl_series) == 0: return _build_empty_scorecard(result)
-        total_pnl = result.total_pnl_usd; total_return_pct = total_pnl / self.initial_capital
-        periods_per_year = self._periods_per_year(pnl_series); periods_observed = max(len(pnl_series) - 1, 1)
-        annualized_return = _annualized_return_from_total(total_return_pct=total_return_pct, periods_per_year=periods_per_year, periods_observed=periods_observed)
+        if len(pnl_series) == 0:
+            return _build_empty_scorecard(result)
+
         daily_returns = pnl_series.diff().dropna()
-        sharpe = result.sharpe_ratio; deflated_sharpe = getattr(result, "deflated_sharpe_ratio", 0.0)
-        sortino = _compute_sortino_ratio(daily_returns, self._periods_per_year(daily_returns)); calmar = _calmar_ratio(annualized_return=annualized_return, max_drawdown=result.max_drawdown)
-        win_rate, avg_win, avg_loss, profit_factor = _compute_trade_stats(result.trade_count, daily_returns)
-        daily_pnl_std, worst_day, best_day = _daily_pnl_stats(daily_returns)
+        periods_per_year = self._periods_per_year(pnl_series)
+        metrics = _scorecard_summary_metrics(
+            result=result,
+            initial_capital=self.initial_capital,
+            periods_per_year=periods_per_year,
+            periods_observed=max(len(pnl_series) - 1, 1),
+            daily_returns=daily_returns,
+        )
         drawdown_series = _compute_drawdown_series(pnl_series, self.initial_capital)
         return _build_scorecard_from_result(
             result=result,
             pnl_series=pnl_series,
             drawdown_series=drawdown_series,
-            metrics={
-                "total_pnl": total_pnl,
-                "total_return_pct": total_return_pct,
-                "annualized_return": annualized_return,
-                "sharpe": sharpe,
-                "deflated_sharpe": deflated_sharpe,
-                "sortino": sortino,
-                "calmar": calmar,
-                "win_rate": win_rate,
-                "avg_win": avg_win,
-                "avg_loss": avg_loss,
-                "profit_factor": profit_factor,
-                "daily_pnl_std": daily_pnl_std,
-                "worst_day": worst_day,
-                "best_day": best_day,
-            },
+            metrics=metrics,
         )
 
     def _create_comparison_df(self) -> pd.DataFrame:
