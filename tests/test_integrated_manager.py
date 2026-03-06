@@ -17,11 +17,7 @@ async def test_get_historical_data_delegates_to_parquet_manager():
     """Historical data API should delegate to underlying DataManager."""
     manager = IntegratedDataManager(enable_duckdb=False, enable_redis=False)
     expected = pd.DataFrame({"price": [1.0, 2.0]})
-
-    async def _mock_get_data(**kwargs):
-        return expected
-
-    manager.parquet_manager.get_data = _mock_get_data
+    manager.parquet_manager.get_data = AsyncMock(return_value=expected)
 
     result = await manager.get_historical_data(
         exchange="okx",
@@ -34,6 +30,38 @@ async def test_get_historical_data_delegates_to_parquet_manager():
     )
 
     assert result.equals(expected)
+    manager.parquet_manager.get_data.assert_awaited_once_with(
+        exchange="okx",
+        data_type="tick",
+        instrument="BTC-USD",
+        start=pd.Timestamp("2024-01-01"),
+        end=pd.Timestamp("2024-01-02"),
+        downloader=None,
+        use_cache=True,
+    )
+
+
+def test_build_historical_request_returns_parquet_manager_kwargs():
+    manager = IntegratedDataManager(enable_duckdb=False, enable_redis=False)
+    request = manager._build_historical_request(
+        exchange="okx",
+        data_type="tick",
+        instrument="BTC-USD",
+        start=pd.Timestamp("2024-01-01"),
+        end=pd.Timestamp("2024-01-02"),
+        downloader=None,
+        use_cache=False,
+    )
+
+    assert request == {
+        "exchange": "okx",
+        "data_type": "tick",
+        "instrument": "BTC-USD",
+        "start": pd.Timestamp("2024-01-01"),
+        "end": pd.Timestamp("2024-01-02"),
+        "downloader": None,
+        "use_cache": False,
+    }
 
 
 def test_load_exchange_data_to_duckdb_uses_sanitized_cache_path(tmp_path):

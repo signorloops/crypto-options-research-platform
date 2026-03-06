@@ -36,6 +36,13 @@ from scripts.governance.status_action_utils import (
 from scripts.governance.weekly_operating_data_utils import (
     collect_strategy_snapshots,
 )
+from scripts.governance.weekly_operating_report_utils import (
+    build_consistency_checks,
+    build_operating_checklist,
+    build_report_summary,
+    normalize_optional_baseline_report,
+    resolve_optional_report_check,
+)
 from scripts.governance.weekly_operating_runtime_utils import (
     load_optional_report,
     load_threshold_map,
@@ -335,146 +342,36 @@ def _build_report(
         if row["status"] == "FAIL"
     ]
 
-    consistency_checks: list[dict[str, Any]] = []
-    for strategy in sorted(set(latest_by_strategy).intersection(previous_by_strategy)):
-        latest = latest_by_strategy[strategy]
-        previous = previous_by_strategy[strategy]
-
-        latest_pnl = latest.get("pnl")
-        prev_pnl = previous.get("pnl")
-        latest_sharpe = latest.get("sharpe")
-        prev_sharpe = previous.get("sharpe")
-        latest_dd = latest.get("max_drawdown_abs")
-        prev_dd = previous.get("max_drawdown_abs")
-
-        abs_pnl_diff = (
-            abs(float(latest_pnl) - float(prev_pnl))
-            if latest_pnl is not None and prev_pnl is not None
-            else None
-        )
-        abs_sharpe_diff = (
-            abs(float(latest_sharpe) - float(prev_sharpe))
-            if latest_sharpe is not None and prev_sharpe is not None
-            else None
-        )
-        abs_max_drawdown_diff = (
-            abs(float(latest_dd) - float(prev_dd))
-            if latest_dd is not None and prev_dd is not None
-            else None
-        )
-
-        breaches: list[str] = []
-        if (
-            abs_pnl_diff is not None
-            and abs_pnl_diff > consistency_thresholds_final["max_abs_pnl_diff"]
-        ):
-            breaches.append(f"abs_pnl_diff>{consistency_thresholds_final['max_abs_pnl_diff']}")
-        if (
-            abs_sharpe_diff is not None
-            and abs_sharpe_diff > consistency_thresholds_final["max_abs_sharpe_diff"]
-        ):
-            breaches.append(
-                f"abs_sharpe_diff>{consistency_thresholds_final['max_abs_sharpe_diff']}"
-            )
-        if (
-            abs_max_drawdown_diff is not None
-            and abs_max_drawdown_diff > consistency_thresholds_final["max_abs_max_drawdown_diff"]
-        ):
-            breaches.append(
-                f"abs_max_drawdown_diff>{consistency_thresholds_final['max_abs_max_drawdown_diff']}"
-            )
-
-        consistency_checks.append(
-            {
-                "strategy": strategy,
-                "latest_source_file": latest.get("source_file", ""),
-                "previous_source_file": previous.get("source_file", ""),
-                "abs_pnl_diff": abs_pnl_diff,
-                "abs_sharpe_diff": abs_sharpe_diff,
-                "abs_max_drawdown_diff": abs_max_drawdown_diff,
-                "status": "FAIL" if breaches else "PASS",
-                "breached_rules": "; ".join(breaches),
-            }
-        )
-
+    consistency_checks = build_consistency_checks(
+        latest_by_strategy=latest_by_strategy,
+        previous_by_strategy=previous_by_strategy,
+        thresholds=consistency_thresholds_final,
+    )
     consistency_exceptions = [row for row in consistency_checks if row["status"] == "FAIL"]
-    consistency_baseline_available = len(consistency_checks) > 0
 
-    performance_report = (
-        dict(performance_result)
-        if performance_result is not None
-        else {
-            "executed": False,
-            "summary": {"all_passed": None},
-            "error": "",
-            "path": "",
-        }
+    performance_report = normalize_optional_baseline_report(performance_result)
+    performance_check = resolve_optional_report_check(
+        performance_report,
+        required=performance_required,
     )
-    perf_all_passed = (
-        bool(performance_report.get("summary", {}).get("all_passed"))
-        if performance_report.get("summary", {}).get("all_passed") is not None
-        else None
+    latency_report = normalize_optional_baseline_report(latency_result)
+    latency_check = resolve_optional_report_check(
+        latency_report,
+        required=latency_required,
     )
-    if performance_required and perf_all_passed is None:
-        performance_check = False
-    else:
-        performance_check = perf_all_passed
-    latency_report = (
-        dict(latency_result)
-        if latency_result is not None
-        else {
-            "executed": False,
-            "summary": {"all_passed": None},
-            "error": "",
-            "path": "",
-        }
-    )
-    latency_all_passed = (
-        bool(latency_report.get("summary", {}).get("all_passed"))
-        if latency_report.get("summary", {}).get("all_passed") is not None
-        else None
-    )
-    if latency_required and latency_all_passed is None:
-        latency_check = False
-    else:
-        latency_check = latency_all_passed
 
-    checklist = {
-        "kpi_snapshot_updated": bool(snapshot_rows),
-        "experiment_ids_assigned": bool(snapshot_rows)
-        and all(bool(row.get("experiment_id")) for row in snapshot_rows),
-        "risk_thresholds_confirmed": True,
-        "change_log_complete": bool(
-            change_log
-            and change_log.get("executed")
-            and not change_log.get("shallow", False)
-            and change_log.get("count", 0) > 0
-        ),
-        "rollback_version_marked": bool(
-            rollback_marker
-            and rollback_marker.get("source") == "tag"
-            and rollback_marker.get("tag")
-        ),
-        "rollback_marker_from_tag": bool(
-            rollback_marker
-            and rollback_marker.get("source") == "tag"
-            and rollback_marker.get("tag")
-        ),
-        "minimum_regression_passed": (
-            bool(regression_result["passed"])
-            if regression_result is not None and regression_result.get("executed")
-            else None
-        ),
-        "performance_baseline_passed": performance_check,
-        "latency_baseline_passed": latency_check,
-        "consistency_check_completed": (
-            len(parse_errors) == 0
-            and consistency_baseline_available
-            and len(consistency_exceptions) == 0
-        ),
-        "risk_exception_report_output": True,
-        "anomalies_attributed": len(risk_exceptions) == 0,
-    }
+    checklist = build_operating_checklist(
+        snapshot_rows=snapshot_rows,
+        parse_errors=parse_errors,
+        consistency_checks=consistency_checks,
+        consistency_exceptions=consistency_exceptions,
+        risk_exceptions=risk_exceptions,
+        change_log=change_log,
+        rollback_marker=rollback_marker,
+        regression_result=regression_result,
+        performance_check=performance_check,
+        latency_check=latency_check,
+    )
 
     incomplete_tasks = build_incomplete_tasks(
         checklist,
@@ -488,13 +385,13 @@ def _build_report(
         "inputs": [str(p) for p in files_sorted],
         "thresholds": thresholds,
         "consistency_thresholds": consistency_thresholds_final,
-        "summary": {
-            "strategies": len(snapshot_rows),
-            "exceptions": len(risk_exceptions),
-            "consistency_pairs": len(consistency_checks),
-            "consistency_exceptions": len(consistency_exceptions),
-            "parse_errors": len(parse_errors),
-        },
+        "summary": build_report_summary(
+            snapshot_rows=snapshot_rows,
+            risk_exceptions=risk_exceptions,
+            consistency_checks=consistency_checks,
+            consistency_exceptions=consistency_exceptions,
+            parse_errors=parse_errors,
+        ),
         "kpi_snapshot": snapshot_rows,
         "risk_exceptions": risk_exceptions,
         "consistency_checks": consistency_checks,

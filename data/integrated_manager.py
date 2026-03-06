@@ -288,30 +288,40 @@ class IntegratedDataManager(_IntegratedRealtimeCacheMixin):
         downloader: Optional[Callable] = None,
         use_cache: bool = True,
     ) -> pd.DataFrame:
-        """
-        Get historical data with automatic caching.
-
-        Args:
-            exchange: Exchange name (e.g., 'deribit', 'okx')
-            data_type: Data type (e.g., 'trades', 'ticks', 'orderbook')
-            instrument: Instrument name
-            start: Start datetime
-            end: End datetime
-            downloader: Async function to download missing data
-            use_cache: Whether to use cache
-
-        Returns:
-            DataFrame with requested data
-        """
+        """Get historical data via the parquet manager cache layer."""
         return await self.parquet_manager.get_data(
-            exchange=exchange,
-            data_type=data_type,
-            instrument=instrument,
-            start=start,
-            end=end,
-            downloader=downloader,
-            use_cache=use_cache,
+            **self._build_historical_request(
+                exchange=exchange,
+                data_type=data_type,
+                instrument=instrument,
+                start=start,
+                end=end,
+                downloader=downloader,
+                use_cache=use_cache,
+            )
         )
+
+    def _build_historical_request(
+        self,
+        *,
+        exchange: str,
+        data_type: str,
+        instrument: str,
+        start: datetime,
+        end: datetime,
+        downloader: Optional[Callable],
+        use_cache: bool,
+    ) -> Dict[str, Any]:
+        """Build the canonical parquet-manager kwargs for historical queries."""
+        return {
+            "exchange": exchange,
+            "data_type": data_type,
+            "instrument": instrument,
+            "start": start,
+            "end": end,
+            "downloader": downloader,
+            "use_cache": use_cache,
+        }
 
     # ==================== DuckDB Analytics Methods ====================
 
