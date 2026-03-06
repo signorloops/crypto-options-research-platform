@@ -129,6 +129,20 @@ def test_duckdb_wrappers_delegate_when_initialized():
     assert not manager.resample_to_ohlcv("t").empty
 
 
+def test_init_does_not_require_current_event_loop(monkeypatch):
+    """Manager construction must not eagerly create asyncio primitives."""
+    import data.integrated_manager as module
+
+    def _unexpected_lock():
+        raise RuntimeError("no current event loop")
+
+    monkeypatch.setattr(module.asyncio, "Lock", _unexpected_lock)
+
+    manager = module.IntegratedDataManager(enable_duckdb=False, enable_redis=False)
+
+    assert manager is not None
+
+
 @pytest.mark.asyncio
 async def test_redis_wrappers_delegate_when_initialized():
     """Redis wrappers should delegate to backend methods when connected."""

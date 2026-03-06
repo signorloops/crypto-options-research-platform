@@ -182,7 +182,7 @@ class IntegratedDataManager(_IntegratedRealtimeCacheMixin):
         self.redis_port = redis_port
         self.redis: Optional[RedisCache] = None
         self.greeks_manager: Optional[GreeksCacheManager] = None
-        self._state_lock = asyncio.Lock()
+        self._state_lock: Optional[asyncio.Lock] = None
         logger.info(
             "IntegratedDataManager initialized",
             extra=log_extra(
@@ -193,9 +193,15 @@ class IntegratedDataManager(_IntegratedRealtimeCacheMixin):
             ),
         )
 
+    def _get_state_lock(self) -> asyncio.Lock:
+        """Create the async state lock lazily inside an active event loop."""
+        if self._state_lock is None:
+            self._state_lock = asyncio.Lock()
+        return self._state_lock
+
     async def connect(self) -> None:
         """Connect to Redis if enabled."""
-        async with self._state_lock:
+        async with self._get_state_lock():
             if self.enable_redis:
                 try:
                     self.redis = RedisCache(host=self.redis_host, port=self.redis_port)
@@ -217,7 +223,7 @@ class IntegratedDataManager(_IntegratedRealtimeCacheMixin):
 
     async def disconnect(self) -> None:
         """Disconnect from all services."""
-        async with self._state_lock:
+        async with self._get_state_lock():
             if self.redis:
                 await self.redis.disconnect()
                 self.redis = None
