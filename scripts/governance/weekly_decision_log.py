@@ -18,15 +18,7 @@ from scripts.governance.report_utils import (
     write_json as _write_json,
     write_markdown as _write_markdown,
 )
-
-BLOCKER_REMEDIATIONS: dict[str, str] = {
-    "performance_baseline_failed": "Rerun algorithm performance baseline and fix regressions",
-    "latency_baseline_failed": "Rerun latency benchmark and reduce latency regressions",
-    "rollback_baseline_not_tagged": (
-        "Run `make prepare-rollback-tag` to create a rollback tag for the release candidate"
-    ),
-    "minimum_regression_failed": "Fix the minimum regression suite and rerun it",
-}
+from scripts.governance.status_action_utils import remediation_for_canary_blockers
 
 
 def _dedupe_keep_order(items: list[str]) -> list[str]:
@@ -55,7 +47,7 @@ def _build_report(audit: dict[str, Any], canary: dict[str, Any]) -> dict[str, An
     )
     follow_up_tasks = _dedupe_keep_order(
         list(audit.get("incomplete_tasks", []))
-        + [BLOCKER_REMEDIATIONS.get(blocker, "") for blocker in blockers]
+        + remediation_for_canary_blockers(blockers)
     )
 
     return {

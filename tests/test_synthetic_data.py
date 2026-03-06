@@ -19,6 +19,21 @@ from data.generators.synthetic import (
 class TestGBMPriceGenerator:
     """Test Geometric Brownian Motion generator."""
 
+    def test_build_price_frame_uses_default_start_time_and_log_price_diffs(self):
+        params = PriceModelParams(S0=50000, sigma=0.5)
+        gen = GBMPriceGenerator(params, seed=42)
+
+        frame = gen._build_price_frame(
+            prices=np.array([50000.0, 50500.0, 51000.0]),
+            log_prices=np.log(np.array([1.0, 1.01, 1.02])),
+            start_time=None,
+        )
+
+        assert list(frame["timestamp"]) == list(pd.date_range("2024-01-01", periods=3, freq="h"))
+        assert frame["price"].tolist() == [50000.0, 50500.0, 51000.0]
+        assert frame["returns"].iloc[0] == 0
+        assert np.allclose(frame["returns"].iloc[1:].values, np.diff(np.log(np.array([1.0, 1.01, 1.02]))))
+
     def test_basic_generation(self):
         """Test basic price path generation."""
         params = PriceModelParams(S0=50000, mu=0.1, sigma=0.5)
@@ -117,6 +132,20 @@ class TestMertonJumpDiffusion:
 
 class TestOrderBookSimulator:
     """Test order book simulation."""
+
+    def test_build_book_levels_respects_tick_size_and_size_floor(self):
+        sim = OrderBookSimulator(base_spread_bps=10, depth_levels=3, tick_size=0.5)
+        rng = np.random.default_rng(123)
+
+        bids, asks = sim._build_levels(mid_price=50000, half_spread=25, volatility_regime=5.0, rng=rng)
+
+        assert len(bids) == 3
+        assert len(asks) == 3
+        assert bids[0].price == 49975.0
+        assert bids[1].price == 49974.5
+        assert asks[0].price == 50025.0
+        assert asks[1].price == 50025.5
+        assert all(level.size >= 0.1 for level in bids + asks)
 
     def test_snapshot_generation(self):
         """Test order book snapshot generation."""

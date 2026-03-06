@@ -49,6 +49,34 @@ class GBMPriceGenerator:
             return rng
         return np.random.default_rng(self.seed)
 
+    @staticmethod
+    def _resolve_start_time(start_time: Optional[datetime]) -> datetime:
+        """Use a stable default epoch for deterministic synthetic datasets."""
+        return start_time if start_time is not None else datetime(2024, 1, 1)
+
+    def _build_price_frame(
+        self,
+        *,
+        prices: np.ndarray,
+        log_prices: np.ndarray,
+        start_time: Optional[datetime],
+        returns: Optional[np.ndarray] = None,
+        extra_columns: Optional[dict[str, np.ndarray]] = None,
+    ) -> pd.DataFrame:
+        """Build a standard output frame for synthetic spot paths."""
+        timestamps = [
+            self._resolve_start_time(start_time) + timedelta(hours=i)
+            for i in range(len(prices))
+        ]
+        frame = {
+            "timestamp": timestamps,
+            "price": prices,
+            "returns": returns if returns is not None else np.concatenate([[0], np.diff(log_prices)]),
+            "volatility": self.params.sigma,
+        }
+        frame.update(extra_columns or {})
+        return pd.DataFrame(frame)
+
     def generate(
         self,
         T: float,  # Time horizon in years
@@ -59,17 +87,12 @@ class GBMPriceGenerator:
         rng = self._get_rng(rng)
         n_steps = int(T / self.params.dt) + 1  # +1 to include start point
         dW = rng.normal(0, np.sqrt(self.params.dt), n_steps - 1)
-        log_returns = np.concatenate([[0], (self.params.mu - 0.5 * self.params.sigma**2) * self.params.dt + self.params.sigma * dW])
+        log_returns = np.concatenate(
+            [[0], (self.params.mu - 0.5 * self.params.sigma**2) * self.params.dt + self.params.sigma * dW]
+        )
         log_prices = np.cumsum(log_returns)
         prices = self.params.S0 * np.exp(log_prices)
-        if start_time is None: start_time = datetime(2024, 1, 1)
-        timestamps = [start_time + timedelta(hours=i) for i in range(n_steps)]
-        return pd.DataFrame({
-            "timestamp": timestamps,
-            "price": prices,
-            "returns": np.concatenate([[0], np.diff(log_prices)]),
-            "volatility": self.params.sigma
-        })
+        return self._build_price_frame(prices=prices, log_prices=log_prices, start_time=start_time)
 
 
 class MertonJumpDiffusion(GBMPriceGenerator):
@@ -102,16 +125,13 @@ class MertonJumpDiffusion(GBMPriceGenerator):
         log_returns[1:] += jumps * jump_sizes
         log_prices = np.cumsum(log_returns)
         prices = self.params.S0 * np.exp(log_prices)
-        if start_time is None: start_time = datetime(2024, 1, 1)
-        timestamps = [start_time + timedelta(hours=i) for i in range(n_steps)]
-        jumps_padded = np.concatenate([[0], jumps])
-        return pd.DataFrame({
-            "timestamp": timestamps,
-            "price": prices,
-            "returns": log_returns,
-            "jump_count": jumps_padded,
-            "volatility": self.params.sigma
-        })
+        return self._build_price_frame(
+            prices=prices,
+            log_prices=log_prices,
+            start_time=start_time,
+            returns=log_returns,
+            extra_columns={"jump_count": np.concatenate([[0], jumps])},
+        )
 
 
 class OrderBookSimulator:
@@ -130,6 +150,45 @@ class OrderBookSimulator:
         self.depth_levels = depth_levels
         self.tick_size = tick_size
 
+    @staticmethod
+    def _sample_level_size(
+        *,
+        base_size: float,
+        rng: np.random.Generator,
+    ) -> float:
+        """Sample one side's size with a hard minimum floor."""
+        return max(0.1, base_size * rng.lognormal(0, 0.5))
+
+    def _build_levels(
+        self,
+        *,
+        mid_price: float,
+        half_spread: float,
+        volatility_regime: float,
+        rng: np.random.Generator,
+    ) -> tuple[list[OrderBookLevel], list[OrderBookLevel]]:
+        """Build bid/ask ladders around the mid price."""
+        decay_rate = 0.3 * volatility_regime
+        bids: list[OrderBookLevel] = []
+        asks: list[OrderBookLevel] = []
+        for i in range(self.depth_levels):
+            base_size = 10 * np.exp(-decay_rate * i)
+            bids.append(
+                OrderBookLevel(
+                    price=round(mid_price - half_spread - i * self.tick_size, 2),
+                    size=round(self._sample_level_size(base_size=base_size, rng=rng), 4),
+                    num_orders=rng.poisson(3),
+                )
+            )
+            asks.append(
+                OrderBookLevel(
+                    price=round(mid_price + half_spread + i * self.tick_size, 2),
+                    size=round(self._sample_level_size(base_size=base_size, rng=rng), 4),
+                    num_orders=rng.poisson(3),
+                )
+            )
+        return bids, asks
+
     def generate_snapshot(
         self,
         mid_price: float,
@@ -141,23 +200,12 @@ class OrderBookSimulator:
         rng = np.random.default_rng() if rng is None else rng
         effective_spread = self.base_spread_bps * volatility_regime * spread_multiplier
         half_spread = mid_price * effective_spread / 10000 / 2
-        bids, asks = [], []
-        for i in range(self.depth_levels):
-            bid_price = mid_price - half_spread - i * self.tick_size; ask_price = mid_price + half_spread + i * self.tick_size
-            decay_rate = 0.3 * volatility_regime
-            base_size = 10 * np.exp(-decay_rate * i)
-            bid_size = max(0.1, base_size * rng.lognormal(0, 0.5))
-            ask_size = max(0.1, base_size * rng.lognormal(0, 0.5))
-            bids.append(OrderBookLevel(
-                price=round(bid_price, 2),
-                size=round(bid_size, 4),
-                num_orders=rng.poisson(3)
-            ))
-            asks.append(OrderBookLevel(
-                price=round(ask_price, 2),
-                size=round(ask_size, 4),
-                num_orders=rng.poisson(3)
-            ))
+        bids, asks = self._build_levels(
+            mid_price=mid_price,
+            half_spread=half_spread,
+            volatility_regime=volatility_regime,
+            rng=rng,
+        )
         return OrderBook(
             timestamp=datetime.now(timezone.utc),
             instrument="SYNTHETIC",

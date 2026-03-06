@@ -25,6 +25,11 @@ from scripts.governance.report_utils import (
     write_json as _write_json,
     write_markdown as _write_markdown,
 )
+from scripts.governance.status_action_utils import (
+    MANUAL_CHECKLIST_ITEMS,
+    build_close_gate_action_items,
+    build_incomplete_tasks,
+)
 
 DEFAULT_THRESHOLDS: dict[str, float] = {
     "min_sharpe": 0.5,
@@ -38,31 +43,6 @@ DEFAULT_CONSISTENCY_THRESHOLDS: dict[str, float] = {
     "max_abs_sharpe_diff": 1500.0,
     "max_abs_max_drawdown_diff": 0.20,
 }
-
-MANUAL_CHECKLIST_ITEMS: list[str] = [
-    "灰度发布完成",
-    "24h 观察完成",
-    "是否触发回滚已决策",
-    "收益归因表",
-    "变更与回滚记录",
-    "ADR",
-]
-
-CLOSE_GATE_BLOCKER_ACTIONS: dict[str, str] = {
-    "performance baseline passed": "Rerun algorithm performance baseline and fix regressions.",
-    "latency baseline passed": "Rerun latency benchmark and reduce latency regressions.",
-    "rollback_baseline_not_tagged": (
-        "Run `make prepare-rollback-tag` to create a rollback tag for the release candidate."
-    ),
-    "rollback version marked": (
-        "Run `make prepare-rollback-tag` to create a rollback tag for the release candidate."
-    ),
-    "minimum regression passed": "Fix the minimum regression suite and rerun it.",
-    "canary recommendation is PROCEED_CANARY": "Resolve canary blockers until recommendation becomes PROCEED_CANARY.",
-    "decision is APPROVE_CANARY": "Resolve decision blockers until decision becomes APPROVE_CANARY.",
-    "online_offline_replay_status=FAIL": "Resolve online/offline replay mismatches before close.",
-}
-
 
 def _to_text_list(value: Any) -> list[str]:
     if not isinstance(value, list):
@@ -107,29 +87,6 @@ def _evaluate_close_gate(signoff_json_path: Path) -> tuple[bool, str, dict[str, 
         return False, f"status={status}", payload
     return False, "status=UNKNOWN", payload
 
-
-def _close_gate_action_items(
-    signoff_status: str,
-    auto_blockers: list[str],
-    manual_missing: list[str],
-    role_signoffs_missing: list[str],
-    close_ready: bool,
-) -> list[str]:
-    action_items: list[str] = []
-    if signoff_status == "AUTO_BLOCKED":
-        mapped = [CLOSE_GATE_BLOCKER_ACTIONS.get(item, "") for item in auto_blockers]
-        action_items.extend(item for item in mapped if item)
-        if not action_items:
-            action_items.append("Resolve auto blockers to clear AUTO_BLOCKED status.")
-    if manual_missing:
-        action_items.append("Complete remaining manual checks.")
-    if role_signoffs_missing:
-        action_items.append("Collect all role sign-offs (Research/Engineering/Risk).")
-    if not action_items and not close_ready:
-        action_items.append("Review sign-off payload and set status to READY_FOR_CLOSE.")
-    return action_items
-
-
 def _build_close_gate_report(
     *,
     signoff_json_path: Path,
@@ -154,7 +111,7 @@ def _build_close_gate_report(
     signoff_status = str(signoff_payload.get("status", "")).strip().upper()
     auto_blockers = _to_text_list(signoff_payload.get("auto_blockers"))
     pending_items = _to_text_list(signoff_payload.get("pending_items"))
-    action_items = _close_gate_action_items(
+    action_items = build_close_gate_action_items(
         signoff_status=signoff_status,
         auto_blockers=auto_blockers,
         manual_missing=manual_missing,
@@ -682,26 +639,12 @@ def _build_report(
         "anomalies_attributed": len(risk_exceptions) == 0,
     }
 
-    incomplete_tasks = []
-    if not checklist["kpi_snapshot_updated"]:
-        incomplete_tasks.append("KPI 快照更新")
-    if not checklist["experiment_ids_assigned"]:
-        incomplete_tasks.append("实验编号分配完成")
-    if not checklist["change_log_complete"]:
-        incomplete_tasks.append("变更记录完整")
-    if not checklist["rollback_version_marked"]:
-        incomplete_tasks.append("回滚版本已标记")
-    if checklist["minimum_regression_passed"] is not True:
-        incomplete_tasks.append("最小回归通过")
-    if performance_required and checklist["performance_baseline_passed"] is not True:
-        incomplete_tasks.append("性能基线达标")
-    if latency_required and checklist["latency_baseline_passed"] is not True:
-        incomplete_tasks.append("延迟基线达标")
-    if not checklist["consistency_check_completed"]:
-        incomplete_tasks.append("一致性检查完成")
-    if not checklist["anomalies_attributed"]:
-        incomplete_tasks.append("异常项已归因")
-    incomplete_tasks.extend(MANUAL_CHECKLIST_ITEMS)
+    incomplete_tasks = build_incomplete_tasks(
+        checklist,
+        performance_required=performance_required,
+        latency_required=latency_required,
+        manual_items=MANUAL_CHECKLIST_ITEMS,
+    )
 
     return {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
