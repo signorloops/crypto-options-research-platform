@@ -18,16 +18,15 @@ RUN apt-get update && apt-get install -y \
 # Set working directory
 WORKDIR /app
 
-# Copy requirements first for better caching
+# Copy packaging metadata first for better layer reuse
 COPY pyproject.toml ./
-COPY requirements.txt ./
+
+# Copy application code before editable install
+COPY . .
 
 # Install Python dependencies
 RUN pip install --upgrade pip && \
     pip install -e "."
-
-# Copy application code
-COPY . .
 
 # Create non-root user for security
 RUN useradd -m -u 1000 corp && \
