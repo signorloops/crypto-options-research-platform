@@ -103,6 +103,40 @@ def test_scorecard_paths_and_report_generation():
     assert "INDIVIDUAL STRATEGY RESULTS" in report
 
 
+def test_scorecard_summary_sections_include_named_blocks():
+    scorecard = arena_module.StrategyScorecard(
+        strategy_name="rich",
+        total_pnl=150.0,
+        total_return_pct=0.0015,
+        annualized_return=0.12,
+        sharpe_ratio=1.2,
+        sortino_ratio=1.3,
+        max_drawdown=-0.1,
+        calmar_ratio=1.2,
+        total_trades=4,
+        win_rate=0.75,
+        avg_trade_pnl=0.001,
+        avg_win=60.0,
+        avg_loss=20.0,
+        profit_factor=3.0,
+        spread_capture=10.0,
+        adverse_selection_cost=0.5,
+        inventory_cost=1.0,
+        fill_rate=0.3,
+        daily_pnl_std=45.0,
+        worst_day=-20.0,
+        best_day=100.0,
+    )
+
+    lines = arena_module._scorecard_summary_sections(scorecard)
+
+    assert "Strategy: rich" in lines[1]
+    assert "Returns:" in lines
+    assert "Risk:" in lines
+    assert "Trading:" in lines
+    assert "Market Making:" in lines
+
+
 def test_scorecard_summary_metrics_helper_matches_expected_values():
     arena = StrategyArena(_market_data_frame(), initial_capital=100000.0)
     result = _make_backtest_result("rich", [0, 100, 80, 120, 150], sharpe=1.2)

@@ -27,6 +27,7 @@ from scripts.governance.weekly_close_gate_utils import (
     build_close_gate_summary,
     collect_open_labels,
 )
+from scripts.governance.weekly_git_utils import parse_recent_change_entries
 from scripts.governance.weekly_operating_parser_utils import (
     build_weekly_operating_argument_specs,
 )
@@ -228,14 +229,7 @@ def _collect_recent_changes(repo_root: Path, since_days: int) -> dict[str, Any]:
             "error": completed.stderr.strip(),
         }
 
-    entries = []
-    for raw in completed.stdout.splitlines():
-        parts = raw.split("\t", 2)
-        if len(parts) != 3:
-            continue
-        commit_hash, commit_date, subject = parts
-        entries.append({"date": commit_date, "commit": commit_hash[:8], "subject": subject})
-
+    entries = parse_recent_change_entries(completed.stdout)
     return {
         "executed": True,
         "since_days": since_days,

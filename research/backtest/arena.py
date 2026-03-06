@@ -109,35 +109,39 @@ class StrategyScorecard:
 
     def summary(self) -> str:
         """Generate formatted summary."""
-        return f"""
-{'='*60}
-Strategy: {self.strategy_name}
-{'='*60}
-Returns:
-  Total PnL:          ${self.total_pnl:,.2f} ({self.total_return_pct:.2%})
-  Annualized Return:  {self.annualized_return:.2%}
-  Sharpe Ratio:       {self.sharpe_ratio:.2f}
-  Deflated Sharpe:    {self.deflated_sharpe_ratio:.2f}
-  Sortino Ratio:      {self.sortino_ratio:.2f}
+        return "\n" + "\n".join(_scorecard_summary_sections(self)) + "\n"
 
-Risk:
-  Max Drawdown:       {self.max_drawdown:.2%}
-  Calmar Ratio:       {self.calmar_ratio:.2f}
-  Daily PnL Std:      ${self.daily_pnl_std:,.2f}
 
-Trading:
-  Total Trades:       {self.total_trades}
-  Win Rate:           {self.win_rate:.1%}
-  Avg Trade PnL:      ${self.avg_trade_pnl:.2f}
-  Profit Factor:      {self.profit_factor:.2f}
-
-Market Making:
-  Spread Capture:     ${self.spread_capture:,.2f}
-  Adverse Select:     ${self.adverse_selection_cost:,.2f}
-  Inventory Cost:     ${self.inventory_cost:,.2f}
-  Fill Rate:          {self.fill_rate:.1%}
-{'='*60}
-"""
+def _scorecard_summary_sections(scorecard: StrategyScorecard) -> List[str]:
+    return [
+        "=" * 60,
+        f"Strategy: {scorecard.strategy_name}",
+        "=" * 60,
+        "Returns:",
+        f"  Total PnL:          ${scorecard.total_pnl:,.2f} ({scorecard.total_return_pct:.2%})",
+        f"  Annualized Return:  {scorecard.annualized_return:.2%}",
+        f"  Sharpe Ratio:       {scorecard.sharpe_ratio:.2f}",
+        f"  Deflated Sharpe:    {scorecard.deflated_sharpe_ratio:.2f}",
+        f"  Sortino Ratio:      {scorecard.sortino_ratio:.2f}",
+        "",
+        "Risk:",
+        f"  Max Drawdown:       {scorecard.max_drawdown:.2%}",
+        f"  Calmar Ratio:       {scorecard.calmar_ratio:.2f}",
+        f"  Daily PnL Std:      ${scorecard.daily_pnl_std:,.2f}",
+        "",
+        "Trading:",
+        f"  Total Trades:       {scorecard.total_trades}",
+        f"  Win Rate:           {scorecard.win_rate:.1%}",
+        f"  Avg Trade PnL:      ${scorecard.avg_trade_pnl:.2f}",
+        f"  Profit Factor:      {scorecard.profit_factor:.2f}",
+        "",
+        "Market Making:",
+        f"  Spread Capture:     ${scorecard.spread_capture:,.2f}",
+        f"  Adverse Select:     ${scorecard.adverse_selection_cost:,.2f}",
+        f"  Inventory Cost:     ${scorecard.inventory_cost:,.2f}",
+        f"  Fill Rate:          {scorecard.fill_rate:.1%}",
+        "=" * 60,
+    ]
 
 
 def _build_empty_scorecard(result: BacktestResult) -> StrategyScorecard:
