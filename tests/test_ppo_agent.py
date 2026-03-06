@@ -1,9 +1,12 @@
 """
 Tests for PPO market making environment safeguards.
 """
+
 import numpy as np
 import pandas as pd
 import pytest
+
+pytest.importorskip("torch")
 
 from strategies.market_making.ppo_agent import MarketMakingEnv, PPOConfig, PPOMarketMaker
 

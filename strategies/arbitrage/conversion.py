@@ -1,4 +1,7 @@
 """Conversion and reversal arbitrage based on put-call parity."""
+
+from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, Literal, Optional
@@ -93,9 +96,7 @@ def _opportunity_from_resolved_inputs(
     resolved: tuple[float, float, float, float, datetime],
 ) -> Optional["ConversionOpportunity"]:
     call_price, put_price, spot_price, strike, expiry = resolved
-    parity = strategy.calculate_parity_deviation(
-        call_price, put_price, spot_price, strike, expiry
-    )
+    parity = strategy.calculate_parity_deviation(call_price, put_price, spot_price, strike, expiry)
     outcome = _conversion_outcome_from_parity(
         strategy=strategy,
         spot_price=spot_price,
@@ -122,6 +123,7 @@ def _opportunity_from_resolved_inputs(
 @dataclass
 class ConversionOpportunity:
     """转换/反转套利机会。"""
+
     underlying: str
     strike: float
     expiry: datetime
@@ -131,9 +133,9 @@ class ConversionOpportunity:
 
     strategy: Literal["conversion", "reversal"]
     synthetic_forward: float  # C - P
-    actual_forward: float     # S - K*exp(-rT)
-    deviation: float          # 偏离程度
-    profit: float             # 套利利润
+    actual_forward: float  # S - K*exp(-rT)
+    deviation: float  # 偏离程度
+    profit: float  # 套利利润
     annualized_return: float  # 年化收益率
 
 
@@ -174,8 +176,8 @@ class ConversionArbitrage:
         self,
         risk_free_rate: float = 0.05,
         min_profit_threshold: float = 0.001,  # 0.1% 最小利润
-        transaction_cost: float = 0.002,       # 单边交易成本
-        staking_yield: float = 0.0,            # ETH staking yield 等持有收益
+        transaction_cost: float = 0.002,  # 单边交易成本
+        staking_yield: float = 0.0,  # ETH staking yield 等持有收益
     ):
         self.risk_free_rate = risk_free_rate
         self.min_profit = min_profit_threshold
@@ -190,7 +192,7 @@ class ConversionArbitrage:
         put_price: float,
         spot_price: float,
         strike: float,
-        expiry: datetime
+        expiry: datetime,
     ) -> None:
         """Streaming更新: 维护最新期权/现货报价快照。"""
         self._market_snapshot[underlying] = {
@@ -211,7 +213,7 @@ class ConversionArbitrage:
         spot_price: float,
         strike: float,
         expiry: datetime,
-        carry_yield: Optional[float] = None
+        carry_yield: Optional[float] = None,
     ) -> Dict[str, float]:
         """计算期权平价偏离。"""
         # 合成远期价格
@@ -227,11 +229,11 @@ class ConversionArbitrage:
         deviation_pct = deviation / spot_price if spot_price > 0 else 0
 
         return {
-            'synthetic_forward': synthetic_fwd,
-            'theoretical_forward': theoretical_fwd,
-            'deviation': deviation,
-            'deviation_pct': deviation_pct,
-            'time_to_expiry': T
+            "synthetic_forward": synthetic_fwd,
+            "theoretical_forward": theoretical_fwd,
+            "deviation": deviation,
+            "deviation_pct": deviation_pct,
+            "time_to_expiry": T,
         }
 
     def check_opportunity(
@@ -241,7 +243,7 @@ class ConversionArbitrage:
         put_price: Optional[float] = None,
         spot_price: Optional[float] = None,
         strike: Optional[float] = None,
-        expiry: Optional[datetime] = None
+        expiry: Optional[datetime] = None,
     ) -> Optional[ConversionOpportunity]:
         """检查是否存在转换/反转套利机会。"""
         resolved = _resolve_opportunity_inputs(
@@ -273,22 +275,11 @@ class ConversionArbitrage:
             }
         """
         if opp.strategy == "conversion":
-            return {
-                'call': -1,      # 卖出看涨
-                'put': 1,        # 买入看跌
-                'underlying': 1  # 买入标的
-            }
+            return {"call": -1, "put": 1, "underlying": 1}  # 卖出看涨  # 买入看跌  # 买入标的
         else:  # reversal
-            return {
-                'call': 1,       # 买入看涨
-                'put': -1,       # 卖出看跌
-                'underlying': -1 # 卖出标的
-            }
+            return {"call": 1, "put": -1, "underlying": -1}  # 买入看涨  # 卖出看跌  # 卖出标的
 
-    def calculate_margin_requirement(
-        self,
-        opp: ConversionOpportunity
-    ) -> float:
+    def calculate_margin_requirement(self, opp: ConversionOpportunity) -> float:
         """
         计算保证金需求。
 
@@ -310,11 +301,7 @@ class ConversionArbitrage:
             naked_put_margin = opp.strike * 0.2
             return naked_put_margin + opp.call_price + opp.put_price
 
-    def calculate_pnl_scenarios(
-        self,
-        opp: ConversionOpportunity,
-        spot_at_expiry: float
-    ) -> float:
+    def calculate_pnl_scenarios(self, opp: ConversionOpportunity, spot_at_expiry: float) -> float:
         """计算转换/反转策略在到期现货价下的净 P&L。"""
         if opp.strategy == "conversion":
             call_pnl = -max(spot_at_expiry - opp.strike, 0) + opp.call_price
@@ -336,7 +323,7 @@ class ConversionArbitrage:
         put_price: float,
         spot_price: float,
         strike: float,
-        expiry: datetime
+        expiry: datetime,
     ) -> Dict[str, bool]:
         """
         验证期权价格是否满足无套利边界。
@@ -349,15 +336,17 @@ class ConversionArbitrage:
         T = _time_to_expiry_years(expiry)
         pv_strike = strike * np.exp(-self.risk_free_rate * T)
         # 看涨期权下界
-        call_lower_bound = max(spot_price - pv_strike, 0); call_bound_ok = call_price >= call_lower_bound
+        call_lower_bound = max(spot_price - pv_strike, 0)
+        call_bound_ok = call_price >= call_lower_bound
         # 看跌期权下界
-        put_lower_bound = max(pv_strike - spot_price, 0); put_bound_ok = put_price >= put_lower_bound
+        put_lower_bound = max(pv_strike - spot_price, 0)
+        put_bound_ok = put_price >= put_lower_bound
         # 平价偏离
         parity_deviation = abs(call_price - put_price - spot_price + pv_strike)
         parity_ok = parity_deviation < 3 * self.transaction_cost * spot_price
         return {
-            'call_lower_bound_satisfied': call_bound_ok,
-            'put_lower_bound_satisfied': put_bound_ok,
-            'parity_satisfied': parity_ok,
-            'all_bounds_satisfied': call_bound_ok and put_bound_ok and parity_ok
+            "call_lower_bound_satisfied": call_bound_ok,
+            "put_lower_bound_satisfied": put_bound_ok,
+            "parity_satisfied": parity_ok,
+            "all_bounds_satisfied": call_bound_ok and put_bound_ok and parity_ok,
         }

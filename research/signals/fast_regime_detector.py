@@ -13,6 +13,8 @@
 - 无损的降级机制
 """
 
+from __future__ import annotations
+
 import concurrent.futures
 import logging
 import threading
@@ -23,7 +25,6 @@ from enum import Enum
 from typing import Deque, Dict, List, Optional, Tuple
 
 import numpy as np
-
 
 logger = logging.getLogger(__name__)
 

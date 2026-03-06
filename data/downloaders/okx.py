@@ -3,6 +3,9 @@ OKX API client for market data (coin-margined options only).
 Supports spot, futures, perpetual swaps, and coin-margined options (BTC-USD, ETH-USD).
 Documentation: https://www.okx.com/docs-v5/en/#rest-api-public-data
 """
+
+from __future__ import annotations
+
 import asyncio
 import os
 from datetime import datetime, timedelta, timezone
@@ -30,7 +33,9 @@ OKX_STREAM_EXCEPTIONS = (
 )
 
 
-def _parse_term_structure_row(option_row: Dict[str, Any]) -> Optional[Dict[str, float | datetime | int]]:
+def _parse_term_structure_row(
+    option_row: Dict[str, Any],
+) -> Optional[Dict[str, float | datetime | int]]:
     """Parse one option row and keep only near-ATM, non-expired entries."""
     expiry_ts = option_row.get("expTime")
     strike = float(option_row.get("stk", 0))
@@ -113,7 +118,11 @@ async def _subscribe_okx_stream(
     """Create/connect an OKX stream and track it for lifecycle management."""
     from data.streaming import OKXStream
 
-    stream_kwargs = {"order_book_callback": callback} if stream_kind == "order_book" else {"trade_callback": callback}
+    stream_kwargs = (
+        {"order_book_callback": callback}
+        if stream_kind == "order_book"
+        else {"trade_callback": callback}
+    )
     stream = OKXStream(instruments, **stream_kwargs)
     try:
         await stream.connect()
@@ -189,10 +198,7 @@ class OKXClient(ExchangeInterface):
                 self._session = None
 
     async def _request(
-        self,
-        endpoint: str,
-        params: Optional[Dict] = None,
-        timeout: float = 30.0
+        self, endpoint: str, params: Optional[Dict] = None, timeout: float = 30.0
     ) -> Dict:
         """Make API request with timeout and OKX error handling."""
         if self._session is None:
@@ -201,10 +207,7 @@ class OKXClient(ExchangeInterface):
         headers = {"OK-ACCESS-KEY": self.api_key} if self.api_key else {}
         try:
             async with self._session.get(
-                url,
-                params=params,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=timeout)
+                url, params=params, headers=headers, timeout=aiohttp.ClientTimeout(total=timeout)
             ) as response:
                 response.raise_for_status()
                 data = await response.json()
@@ -216,9 +219,7 @@ class OKXClient(ExchangeInterface):
         raise OKXAPIError(data.get("msg", "Unknown error"), code=data.get("code"))
 
     async def get_instruments(
-        self,
-        currency: Optional[str] = None,
-        instrument_type: str = "SPOT"
+        self, currency: Optional[str] = None, instrument_type: str = "SPOT"
     ) -> List[str]:
         """
         Get available trading instruments.
@@ -242,10 +243,7 @@ class OKXClient(ExchangeInterface):
 
         return instruments
 
-    async def get_option_instruments(
-        self,
-        underlying: str = "BTC-USD"
-    ) -> List[OptionContract]:
+    async def get_option_instruments(self, underlying: str = "BTC-USD") -> List[OptionContract]:
         """Get live coin-margined option instruments for the specified underlying."""
         if underlying not in self.VALID_UNDERLYINGS:
             raise ValueError(
@@ -261,41 +259,24 @@ class OKXClient(ExchangeInterface):
             contracts.append(contract)
         return contracts
 
-    async def get_order_book(
-        self,
-        instrument: str,
-        depth: int = 10
-    ) -> OrderBook:
+    async def get_order_book(self, instrument: str, depth: int = 10) -> OrderBook:
         """Get order book snapshot."""
         result = await self._request(
-            "/api/v5/market/books",
-            {"instId": instrument, "sz": min(depth, 400)}
+            "/api/v5/market/books", {"instId": instrument, "sz": min(depth, 400)}
         )
 
         data = result.get("data", [{}])[0]
 
-        bids = [
-            OrderBookLevel(price=float(b[0]), size=float(b[1]))
-            for b in data.get("bids", [])
-        ]
-        asks = [
-            OrderBookLevel(price=float(a[0]), size=float(a[1]))
-            for a in data.get("asks", [])
-        ]
+        bids = [OrderBookLevel(price=float(b[0]), size=float(b[1])) for b in data.get("bids", [])]
+        asks = [OrderBookLevel(price=float(a[0]), size=float(a[1])) for a in data.get("asks", [])]
 
         return OrderBook(
-            timestamp=datetime.now(timezone.utc),
-            instrument=instrument,
-            bids=bids,
-            asks=asks
+            timestamp=datetime.now(timezone.utc), instrument=instrument, bids=bids, asks=asks
         )
 
     async def get_ticker(self, instrument: str) -> Tick:
         """Get latest ticker data."""
-        result = await self._request(
-            "/api/v5/market/ticker",
-            {"instId": instrument}
-        )
+        result = await self._request("/api/v5/market/ticker", {"instId": instrument})
 
         data = result.get("data", [{}])[0]
 
@@ -305,7 +286,7 @@ class OKXClient(ExchangeInterface):
             bid=float(data.get("bidPx", 0)),
             ask=float(data.get("askPx", 0)),
             bid_size=float(data.get("bidSz", 0)),
-            ask_size=float(data.get("askSz", 0))
+            ask_size=float(data.get("askSz", 0)),
         )
 
     async def get_klines(
@@ -314,14 +295,10 @@ class OKXClient(ExchangeInterface):
         interval: str = "1H",
         start: Optional[datetime] = None,
         end: Optional[datetime] = None,
-        limit: int = 100
+        limit: int = 100,
     ) -> pd.DataFrame:
         """Get OHLCV history from OKX market candles endpoint."""
-        params = {
-            "instId": instrument,
-            "bar": interval,
-            "limit": min(limit, 300)
-        }
+        params = {"instId": instrument, "bar": interval, "limit": min(limit, 300)}
         if start:
             params["after"] = str(int(start.timestamp() * 1000))
         if end:
@@ -331,9 +308,9 @@ class OKXClient(ExchangeInterface):
         if not data:
             return pd.DataFrame()
         # OKX format: [timestamp, open, high, low, close, vol, volCcy]
-        df = pd.DataFrame(data, columns=[
-            "timestamp", "open", "high", "low", "close", "volume", "vol_ccy"
-        ])
+        df = pd.DataFrame(
+            data, columns=["timestamp", "open", "high", "low", "close", "volume", "vol_ccy"]
+        )
         df["timestamp"] = pd.to_datetime(df["timestamp"].astype(float), unit="ms")
         for col in ["open", "high", "low", "close", "volume"]:
             df[col] = df[col].astype(float)
@@ -341,18 +318,12 @@ class OKXClient(ExchangeInterface):
 
     async def get_index_price(self, underlying: str) -> float:
         """Get index price for underlying (e.g., 'BTC-USD')."""
-        result = await self._request(
-            "/api/v5/market/index-tickers",
-            {"instId": underlying}
-        )
+        result = await self._request("/api/v5/market/index-tickers", {"instId": underlying})
 
         data = result.get("data", [{}])[0]
         return float(data.get("idxPx", 0))
 
-    async def get_option_market_data(
-        self,
-        underlying: str = "BTC-USD"
-    ) -> List[Dict]:
+    async def get_option_market_data(self, underlying: str = "BTC-USD") -> List[Dict]:
         """
         Get option market data including IV, Greeks (coin-margined only).
 
@@ -379,40 +350,34 @@ class OKXClient(ExchangeInterface):
         return await self.get_ticker(instrument)
 
     async def get_trades(
-        self,
-        instrument: str,
-        start: datetime,
-        end: datetime,
-        limit: int = 1000
+        self, instrument: str, start: datetime, end: datetime, limit: int = 1000
     ) -> List[Trade]:
         """Get historical trades."""
         params = {
             "instId": instrument,
             "limit": min(limit, 100),
             "begin": str(int(start.timestamp() * 1000)),
-            "end": str(int(end.timestamp() * 1000))
+            "end": str(int(end.timestamp() * 1000)),
         }
 
         result = await self._request("/api/v5/market/history-trades", params)
 
         trades = []
         for t in result.get("data", []):
-            trades.append(Trade(
-                timestamp=datetime.fromtimestamp(int(t["ts"]) / 1000, tz=timezone.utc),
-                instrument=instrument,
-                price=float(t["px"]),
-                size=float(t["sz"]),
-                side=OrderSide.BUY if t.get("side") == "buy" else OrderSide.SELL,
-                trade_id=t.get("tradeId", "")
-            ))
+            trades.append(
+                Trade(
+                    timestamp=datetime.fromtimestamp(int(t["ts"]) / 1000, tz=timezone.utc),
+                    instrument=instrument,
+                    price=float(t["px"]),
+                    size=float(t["sz"]),
+                    side=OrderSide.BUY if t.get("side") == "buy" else OrderSide.SELL,
+                    trade_id=t.get("tradeId", ""),
+                )
+            )
 
         return trades
 
-    async def get_historical_volatility(
-        self,
-        currency: str,
-        period_days: int = 30
-    ) -> float:
+    async def get_historical_volatility(self, currency: str, period_days: int = 30) -> float:
         """Get historical realized volatility from index price."""
         underlying = f"{currency}-USD"
         end = datetime.now(timezone.utc)
@@ -434,9 +399,7 @@ class OKXClient(ExchangeInterface):
         return float(annual_vol)
 
     async def get_option_volatility_history(
-        self,
-        underlying: str = "BTC-USD",
-        period_days: int = 30
+        self, underlying: str = "BTC-USD", period_days: int = 30
     ) -> pd.DataFrame:
         """Get daily IV index candle history from OKX for a supported underlying."""
         if underlying not in self.VALID_UNDERLYINGS:
@@ -463,10 +426,7 @@ class OKXClient(ExchangeInterface):
             logger.error(f"Failed to get IV history: {e}")
             return pd.DataFrame()
 
-    async def get_current_iv_term_structure(
-        self,
-        underlying: str = "BTC-USD"
-    ) -> pd.DataFrame:
+    async def get_current_iv_term_structure(self, underlying: str = "BTC-USD") -> pd.DataFrame:
         """Get current ATM-implied-volatility term structure across expiries."""
         market_data = await self.get_option_market_data(underlying)
         if not market_data:
@@ -477,16 +437,17 @@ class OKXClient(ExchangeInterface):
             if parsed is None:
                 continue
             key = str(parsed.pop("expiry_ts"))
-            if key not in expiry_data or float(parsed["moneyness"]) < float(expiry_data[key]["moneyness"]):
+            if key not in expiry_data or float(parsed["moneyness"]) < float(
+                expiry_data[key]["moneyness"]
+            ):
                 expiry_data[key] = parsed
-        if not expiry_data: return pd.DataFrame()
+        if not expiry_data:
+            return pd.DataFrame()
         df = pd.DataFrame(list(expiry_data.values()))
         return df.sort_values("days_to_expiry").drop(columns=["moneyness"]).reset_index(drop=True)
 
     async def subscribe_order_book(
-        self,
-        instruments: List[str],
-        callback: Callable[[OrderBook], None]
+        self, instruments: List[str], callback: Callable[[OrderBook], None]
     ) -> None:
         """Subscribe to real-time order book updates via WebSocket."""
         await _subscribe_okx_stream(
@@ -497,9 +458,7 @@ class OKXClient(ExchangeInterface):
         )
 
     async def subscribe_trades(
-        self,
-        instruments: List[str],
-        callback: Callable[[Trade], None]
+        self, instruments: List[str], callback: Callable[[Trade], None]
     ) -> None:
         """Subscribe to real-time trade updates via WebSocket."""
         await _subscribe_okx_stream(

@@ -35,8 +35,11 @@ from core.types import Greeks, MarketState, OrderBook, OrderBookLevel, Position
 from research.hedging.adaptive_delta import AdaptiveDeltaHedger
 from research.pricing.inverse_options import InverseOptionPricer
 from research.risk.circuit_breaker import CircuitBreaker, PortfolioState
-from research.signals.regime_detector import VolatilityRegimeDetector
-from strategies.market_making.integrated_strategy import IntegratedMarketMakingStrategy
+from research.signals.regime_detector import RegimeConfig, VolatilityRegimeDetector
+from strategies.market_making.integrated_strategy import (
+    IntegratedMarketMakingStrategy,
+    IntegratedStrategyConfig,
+)
 
 DEFAULT_LATENCY_TARGETS_MS = {
     "greeks_calculation": 4.0,
@@ -46,6 +49,8 @@ DEFAULT_LATENCY_TARGETS_MS = {
     "quote_generation": 10.0,
     "end_to_end": 100.0,
 }
+
+BENCHMARK_STRATEGY_INITIAL_CAPITAL = 1_000_000.0
 
 
 @contextmanager
@@ -121,6 +126,20 @@ class LatencyBenchmark:
         for ret in rng.normal(0, 0.001, count):
             detector.update(ret)
 
+    @staticmethod
+    def _build_benchmark_regime_config(iterations: int) -> RegimeConfig:
+        """Keep benchmark measurements in steady state after initial warmup fit."""
+        return RegimeConfig(retrain_interval=max(10_000, int(iterations) + 1))
+
+    def _build_benchmark_strategy(self) -> IntegratedMarketMakingStrategy:
+        """Build a strategy instance with stable benchmark-only risk settings."""
+        return IntegratedMarketMakingStrategy(
+            IntegratedStrategyConfig(
+                initial_capital=BENCHMARK_STRATEGY_INITIAL_CAPITAL,
+                regime_detector=self._build_benchmark_regime_config(self.iterations),
+            )
+        )
+
     def _benchmark_registry(self) -> Dict[str, Callable[[], Dict]]:
         return {
             "greeks_calculation": self.benchmark_greeks_calculation,
@@ -181,7 +200,7 @@ class LatencyBenchmark:
         """Benchmark regime detector update."""
         self._log(f"Benchmarking Regime Detector ({self.iterations} iterations)...")
 
-        detector = VolatilityRegimeDetector()
+        detector = VolatilityRegimeDetector(self._build_benchmark_regime_config(self.iterations))
         self._warmup_regime_detector(detector, count=50, seed=42)
 
         rng = np.random.default_rng(43)
@@ -228,7 +247,7 @@ class LatencyBenchmark:
         """Benchmark full quote generation."""
         self._log(f"Benchmarking Quote Generation ({self.iterations} iterations)...")
 
-        strategy = IntegratedMarketMakingStrategy()
+        strategy = self._build_benchmark_strategy()
         self._warmup_regime_detector(strategy.regime_detector, count=100, seed=42)
 
         # Create market state
@@ -260,35 +279,58 @@ class LatencyBenchmark:
             target_ms=DEFAULT_LATENCY_TARGETS_MS["quote_generation"],
         )
 
+    @staticmethod
+    def _end_to_end_inputs(timestamp: datetime, step: int) -> tuple[MarketState, Position]:
+        """Build deterministic market state and position for end-to-end benchmark."""
+        price = 50000.0 + np.sin(step / 100) * 1000
+        event_time = timestamp + timedelta(milliseconds=step)
+        order_book = OrderBook(
+            timestamp=event_time,
+            instrument="BTC-USD",
+            bids=[OrderBookLevel(price=price - 5, size=1.0)],
+            asks=[OrderBookLevel(price=price + 5, size=1.0)],
+        )
+        state = MarketState(
+            timestamp=event_time,
+            instrument="BTC-USD",
+            spot_price=price,
+            order_book=order_book,
+            recent_trades=[],
+        )
+        position = Position("BTC-USD", np.sin(step / 50) * 5, 50000.0)
+        return state, position
+
+    def _warmup_end_to_end_strategy(
+        self,
+        strategy: IntegratedMarketMakingStrategy,
+        *,
+        timestamp: datetime,
+        warmup_steps: int,
+    ) -> None:
+        """Prime the full quote pipeline before recording steady-state latency."""
+        for step in range(max(0, int(warmup_steps))):
+            state, position = self._end_to_end_inputs(timestamp, step)
+            with _suppressed_benchmark_noise(self._quiet):
+                strategy.quote(state, position)
+
     def benchmark_end_to_end(self) -> Dict:
         """Benchmark end-to-end strategy execution."""
         self._log(f"Benchmarking End-to-End ({self.iterations} iterations)...")
 
-        strategy = IntegratedMarketMakingStrategy()
+        strategy = self._build_benchmark_strategy()
         self._warmup_regime_detector(strategy.regime_detector, count=100, seed=42)
 
         timestamp = datetime.now(timezone.utc)
+        pipeline_warmup = self._warmup_sample_count(cap=100)
+        self._warmup_end_to_end_strategy(
+            strategy,
+            timestamp=timestamp,
+            warmup_steps=pipeline_warmup,
+        )
 
         latencies = []
         for i in range(self.iterations):
-            # Vary price slightly to simulate market
-            price = 50000.0 + np.sin(i / 100) * 1000
-
-            order_book = OrderBook(
-                timestamp=timestamp + timedelta(milliseconds=i),
-                instrument="BTC-USD",
-                bids=[OrderBookLevel(price=price - 5, size=1.0)],
-                asks=[OrderBookLevel(price=price + 5, size=1.0)],
-            )
-            state = MarketState(
-                timestamp=timestamp + timedelta(milliseconds=i),
-                instrument="BTC-USD",
-                spot_price=price,
-                order_book=order_book,
-                recent_trades=[],
-            )
-            position = Position("BTC-USD", np.sin(i / 50) * 5, 50000.0)
-
+            state, position = self._end_to_end_inputs(timestamp, i + pipeline_warmup)
             latency = self._measure(strategy.quote, state, position)
             latencies.append(latency)
 

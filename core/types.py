@@ -1,6 +1,9 @@
 """
 Core type definitions for the crypto options research platform.
 """
+
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -22,6 +25,7 @@ class OrderSide(Enum):
 @dataclass
 class Tick:
     """Market tick data."""
+
     timestamp: datetime
     instrument: str
     bid: float
@@ -41,6 +45,7 @@ class Tick:
 @dataclass
 class Trade:
     """Trade execution data."""
+
     timestamp: datetime
     instrument: str
     price: float
@@ -52,6 +57,7 @@ class Trade:
 @dataclass
 class OrderBookLevel:
     """Single level in order book."""
+
     price: float
     size: float
     num_orders: Optional[int] = None
@@ -60,6 +66,7 @@ class OrderBookLevel:
 @dataclass
 class OrderBook:
     """Order book snapshot."""
+
     timestamp: datetime
     instrument: str
     bids: List[OrderBookLevel]
@@ -96,6 +103,7 @@ class OrderBook:
 @dataclass
 class Greeks:
     """Option Greeks."""
+
     delta: float
     gamma: float
     theta: float
@@ -108,6 +116,7 @@ class Greeks:
 @dataclass
 class OptionContract:
     """Option contract specification (coin-margined only)."""
+
     underlying: str  # BTC-USD, ETH-USD (coin-margined)
     strike: float
     expiry: datetime
@@ -162,6 +171,7 @@ class OptionContract:
 @dataclass
 class MarketState:
     """Complete market state for strategy decisions."""
+
     timestamp: datetime
     instrument: str
     spot_price: float
@@ -179,6 +189,7 @@ class MarketState:
 @dataclass
 class Quote:
     """Market making quote."""
+
     bid_price: float
     bid_size: float
     ask_price: float
@@ -196,6 +207,7 @@ class Quote:
 @dataclass
 class QuoteAction:
     """Strategy output with metadata."""
+
     bid_price: float
     bid_size: float
     ask_price: float
@@ -207,13 +219,14 @@ class QuoteAction:
             bid_price=self.bid_price,
             bid_size=self.bid_size,
             ask_price=self.ask_price,
-            ask_size=self.ask_size
+            ask_size=self.ask_size,
         )
 
 
 @dataclass
 class Fill:
     """Execution fill."""
+
     timestamp: datetime
     instrument: str
     side: OrderSide
@@ -231,7 +244,12 @@ def _same_direction_position(size: float, signed_fill: float) -> bool:
 
 
 def _avg_entry_after_same_direction(
-    *, current_size: float, current_avg: float, signed_fill: float, fill_price: float, new_size: float
+    *,
+    current_size: float,
+    current_avg: float,
+    signed_fill: float,
+    fill_price: float,
+    new_size: float,
 ) -> float:
     if np.isclose(new_size, 0.0):
         return 0.0
@@ -276,6 +294,7 @@ def _next_average_entry(
 @dataclass
 class Position:
     """Current position."""
+
     instrument: str
     size: float  # Positive = long, negative = short
     avg_entry_price: float
@@ -318,16 +337,13 @@ class Position:
             new_size=new_size,
         )
 
-        return Position(
-            instrument=self.instrument,
-            size=new_size,
-            avg_entry_price=new_avg
-        )
+        return Position(instrument=self.instrument, size=new_size, avg_entry_price=new_avg)
 
 
 @dataclass
 class Portfolio:
     """Portfolio state."""
+
     positions: Dict[str, Position] = field(default_factory=dict)
     cash: float = 0.0
 
@@ -348,10 +364,7 @@ class Portfolio:
 
     def total_notional(self, mark_prices: Dict[str, float]) -> float:
         """Total notional exposure."""
-        return sum(
-            abs(pos.size) * mark_prices.get(inst, 0)
-            for inst, pos in self.positions.items()
-        )
+        return sum(abs(pos.size) * mark_prices.get(inst, 0) for inst, pos in self.positions.items())
 
 
 # Type aliases

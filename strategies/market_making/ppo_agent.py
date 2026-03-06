@@ -1,4 +1,7 @@
 """PPO-based reinforcement learning market-making strategy."""
+
+from __future__ import annotations
+
 from collections import deque
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
@@ -19,6 +22,7 @@ logger = get_logger(__name__)
 @dataclass
 class PPOConfig:
     """Configuration for PPO strategy."""
+
     # Network architecture
     hidden_dim: int = 256
     use_lstm: bool = True
@@ -51,12 +55,8 @@ class PPOConfig:
 def _ppo_spread_offsets_and_size_scale(
     *, action: np.ndarray, config: PPOConfig
 ) -> tuple[float, float, float]:
-    bid_offset_bps = float(
-        np.clip(action[0], config.min_spread_bps / 2, config.max_spread_bps / 2)
-    )
-    ask_offset_bps = float(
-        np.clip(action[1], config.min_spread_bps / 2, config.max_spread_bps / 2)
-    )
+    bid_offset_bps = float(np.clip(action[0], config.min_spread_bps / 2, config.max_spread_bps / 2))
+    ask_offset_bps = float(np.clip(action[1], config.min_spread_bps / 2, config.max_spread_bps / 2))
     size_scale = float(np.clip(action[2], 0.1, 2.0))
     return bid_offset_bps, ask_offset_bps, size_scale
 
@@ -206,14 +206,18 @@ def _ppo_quote_size_and_metadata(
         quote_size=quote_size,
         inventory_limit=strategy.config.inventory_limit,
     )
-    return bid_size, ask_size, _ppo_quote_metadata(
-        strategy_name=strategy.name,
-        bid_offset_bps=bid_offset_bps,
-        ask_offset_bps=ask_offset_bps,
-        inventory_skew_bps=inventory_skew_bps,
-        size_scale=size_scale,
-        value_estimate=value,
-        trained=strategy.network is not None and strategy.optimizer is not None,
+    return (
+        bid_size,
+        ask_size,
+        _ppo_quote_metadata(
+            strategy_name=strategy.name,
+            bid_offset_bps=bid_offset_bps,
+            ask_offset_bps=ask_offset_bps,
+            inventory_skew_bps=inventory_skew_bps,
+            size_scale=size_scale,
+            value_estimate=value,
+            trained=strategy.network is not None and strategy.optimizer is not None,
+        ),
     )
 
 
@@ -226,7 +230,7 @@ class MarketMakingActorCritic(nn.Module):
         action_dim: int,
         hidden_dim: int = 256,
         use_lstm: bool = True,
-        lstm_hidden_dim: int = 256
+        lstm_hidden_dim: int = 256,
     ):
         super().__init__()
         self.use_lstm = use_lstm
@@ -235,7 +239,7 @@ class MarketMakingActorCritic(nn.Module):
             nn.Linear(state_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU()
+            nn.ReLU(),
         )
 
         if self.use_lstm:
@@ -292,8 +296,8 @@ class MarketMakingEnv:
         self.episode_start = 0
         self.rng = np.random.default_rng(random_seed)
 
-        self.price_mean = market_data['price'].mean()
-        self.price_std = market_data['price'].std()
+        self.price_mean = market_data["price"].mean()
+        self.price_std = market_data["price"].std()
         self.position = 0.0
         self.cash = 0.0
         self.trades: List[Dict] = []
@@ -334,9 +338,15 @@ class MarketMakingEnv:
     ) -> Tuple[float, float]:
         fill_prob_bid = max(0.05, min(0.6, 0.3 * (20 / max(bid_offset, 5))))
         fill_prob_ask = max(0.05, min(0.6, 0.3 * (20 / max(ask_offset, 5))))
-        volume_factor = min(2.0, max(0.0, float(recent_volume))) if np.isfinite(recent_volume) else 1.0
-        fill_prob_bid = float(np.clip(fill_prob_bid * volume_factor, 0.0, self.max_fill_probability))
-        fill_prob_ask = float(np.clip(fill_prob_ask * volume_factor, 0.0, self.max_fill_probability))
+        volume_factor = (
+            min(2.0, max(0.0, float(recent_volume))) if np.isfinite(recent_volume) else 1.0
+        )
+        fill_prob_bid = float(
+            np.clip(fill_prob_bid * volume_factor, 0.0, self.max_fill_probability)
+        )
+        fill_prob_ask = float(
+            np.clip(fill_prob_ask * volume_factor, 0.0, self.max_fill_probability)
+        )
         return fill_prob_bid, fill_prob_ask
 
     def _simulate_bid_fill(
@@ -385,7 +395,7 @@ class MarketMakingEnv:
 
     @staticmethod
     def _reward_penalty(position: float, bid_offset: float, ask_offset: float) -> float:
-        penalty = 0.01 * (position ** 2)
+        penalty = 0.01 * (position**2)
         spread = bid_offset + ask_offset
         if spread > 80:
             penalty += 0.001 * (spread - 80)
@@ -395,11 +405,19 @@ class MarketMakingEnv:
         """Execute one environment step."""
         bid_offset, ask_offset, size_scale = self._sanitize_action(action)
         current_data = self.market_data.iloc[self.episode_start + self.current_step]
-        mid_price = current_data['price']
-        bid_price, ask_price = mid_price * (1 - bid_offset / 10000), mid_price * (1 + ask_offset / 10000)
+        mid_price = current_data["price"]
+        bid_price, ask_price = mid_price * (1 - bid_offset / 10000), mid_price * (
+            1 + ask_offset / 10000
+        )
         quote_size = size_scale
         done = (next_step := self.current_step + 1) >= self.episode_length
-        reward, info = 0.0, {'fills': 0, 'pnl': 0.0, 'applied_bid_offset_bps': bid_offset, 'applied_ask_offset_bps': ask_offset, 'applied_size_scale': size_scale}
+        reward, info = 0.0, {
+            "fills": 0,
+            "pnl": 0.0,
+            "applied_bid_offset_bps": bid_offset,
+            "applied_ask_offset_bps": ask_offset,
+            "applied_size_scale": size_scale,
+        }
         if not done:
             recent_volatility, recent_volume = self._estimate_recent_market_conditions()
             fill_prob_bid, fill_prob_ask = self._compute_fill_probabilities(
@@ -422,7 +440,8 @@ class MarketMakingEnv:
                 info=info,
             )
         reward -= self._reward_penalty(self.position, bid_offset, ask_offset)
-        self.current_step += 1; next_state = self._get_state()
+        self.current_step += 1
+        next_state = self._get_state()
         return next_state, reward, done, info
 
     def _sanitize_action(self, action: np.ndarray) -> Tuple[float, float, float]:
@@ -455,8 +474,12 @@ class MarketMakingEnv:
             return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         returns_10 = self.market_data.iloc[idx - 10 : idx]["price"].pct_change().dropna()
         ret_1 = float(returns_10.iloc[-1]) if len(returns_10) > 0 else 0.0
-        ret_5 = float(self.market_data.iloc[idx]["price"] / self.market_data.iloc[idx - 5]["price"] - 1.0)
-        ret_10 = float(self.market_data.iloc[idx]["price"] / self.market_data.iloc[idx - 10]["price"] - 1.0)
+        ret_5 = float(
+            self.market_data.iloc[idx]["price"] / self.market_data.iloc[idx - 5]["price"] - 1.0
+        )
+        ret_10 = float(
+            self.market_data.iloc[idx]["price"] / self.market_data.iloc[idx - 10]["price"] - 1.0
+        )
         momentum = float(returns_10.mean()) if len(returns_10) > 0 else 0.0
         realized_skew = float(returns_10.skew()) if len(returns_10) > 2 else 0.0
         realized_kurt = float(returns_10.kurt()) if len(returns_10) > 3 else 0.0
@@ -491,23 +514,49 @@ class MarketMakingEnv:
 
     def _get_state(self) -> np.ndarray:
         """Compute current state vector."""
-        idx = self.episode_start + self.current_step; current = self.market_data.iloc[idx]
-        price_norm = (current["price"] - self.price_mean) / self.price_std; inventory_norm = self.position / 10.0
+        idx = self.episode_start + self.current_step
+        current = self.market_data.iloc[idx]
+        price_norm = (current["price"] - self.price_mean) / self.price_std
+        inventory_norm = self.position / 10.0
         volatility = self._rolling_volatility(idx)
         ret_1, ret_5, ret_10, momentum, realized_skew, realized_kurt = self._return_block(idx)
-        time_left = 1.0 - (self.current_step / self.episode_length); vol_now, vol_mean, volume_z = self._volume_block(idx)
-        spread_bps = self._safe_column_value(current, "spread_bps", max(5.0, min(120.0, float(volatility * 25.0))))
+        time_left = 1.0 - (self.current_step / self.episode_length)
+        vol_now, vol_mean, volume_z = self._volume_block(idx)
+        spread_bps = self._safe_column_value(
+            current, "spread_bps", max(5.0, min(120.0, float(volatility * 25.0)))
+        )
         imbalance = self._safe_column_value(current, "imbalance", np.clip(ret_1 * 50.0, -1.0, 1.0))
         bid_norm, ask_norm = self._normalized_bid_ask_depth(current, float(imbalance))
-        delta, vega = self._safe_column_value(current, "delta", 0.0), self._safe_column_value(current, "vega", 0.0)
-        return np.array([
-            price_norm, inventory_norm, volatility, float(volatility),
-            float(imbalance), spread_bps / 100.0, float(ret_1), float(ret_5),
-            float(ret_10), float(momentum), vol_now / (vol_mean + 1e-8), float(volume_z),
-            float(bid_norm), float(ask_norm), np.sign(self.position), abs(self.position) / 10.0,
-            min(1.0, abs(self.position) / 10.0), time_left, float(realized_skew), float(realized_kurt), float(delta),
-            float(vega),
-        ], dtype=np.float32)
+        delta, vega = self._safe_column_value(current, "delta", 0.0), self._safe_column_value(
+            current, "vega", 0.0
+        )
+        return np.array(
+            [
+                price_norm,
+                inventory_norm,
+                volatility,
+                float(volatility),
+                float(imbalance),
+                spread_bps / 100.0,
+                float(ret_1),
+                float(ret_5),
+                float(ret_10),
+                float(momentum),
+                vol_now / (vol_mean + 1e-8),
+                float(volume_z),
+                float(bid_norm),
+                float(ask_norm),
+                np.sign(self.position),
+                abs(self.position) / 10.0,
+                min(1.0, abs(self.position) / 10.0),
+                time_left,
+                float(realized_skew),
+                float(realized_kurt),
+                float(delta),
+                float(vega),
+            ],
+            dtype=np.float32,
+        )
 
 
 class PPOMarketMaker(MarketMakingStrategy):
@@ -539,11 +588,10 @@ class PPOMarketMaker(MarketMakingStrategy):
                 action_dim,
                 self.config.hidden_dim,
                 use_lstm=self.config.use_lstm,
-                lstm_hidden_dim=self.config.lstm_hidden_dim
+                lstm_hidden_dim=self.config.lstm_hidden_dim,
             )
             self.optimizer = torch.optim.Adam(
-                self.network.parameters(),
-                lr=self.config.learning_rate
+                self.network.parameters(), lr=self.config.learning_rate
             )
 
     def _build_policy_state_tensor(self, state_vec: np.ndarray) -> torch.Tensor:
@@ -582,23 +630,64 @@ class PPOMarketMaker(MarketMakingStrategy):
 
     def _market_state_to_vector(self, state: MarketState, position: Position) -> np.ndarray:
         """Convert MarketState to numpy vector for network."""
-        mid = state.order_book.mid_price or 1.0; price_norm = np.log(mid) / 10.0 - 1.0 if mid > 0 else 0.0
-        inventory_norm = position.size / self.config.inventory_limit; volatility_5 = state.features.get('volatility_5', 0.5); volatility_20 = state.features.get('volatility_20', volatility_5)
+        mid = state.order_book.mid_price or 1.0
+        price_norm = np.log(mid) / 10.0 - 1.0 if mid > 0 else 0.0
+        inventory_norm = position.size / self.config.inventory_limit
+        volatility_5 = state.features.get("volatility_5", 0.5)
+        volatility_20 = state.features.get("volatility_20", volatility_5)
         imbalance = state.order_book.imbalance() if state.order_book else 0.0
-        spread_bps = state.order_book.spread / mid * 10000 if state.order_book and state.order_book.spread and mid > 0 else 20.0
-        ret_1, ret_5, ret_10 = state.features.get('return_1', 0.0), state.features.get('return_5', 0.0), state.features.get('return_10', 0.0)
-        momentum, volume_ratio, volume_z = state.features.get('momentum', 0.0), state.features.get('volume_ratio', 1.0), state.features.get('volume_zscore', 0.0)
+        spread_bps = (
+            state.order_book.spread / mid * 10000
+            if state.order_book and state.order_book.spread and mid > 0
+            else 20.0
+        )
+        ret_1, ret_5, ret_10 = (
+            state.features.get("return_1", 0.0),
+            state.features.get("return_5", 0.0),
+            state.features.get("return_10", 0.0),
+        )
+        momentum, volume_ratio, volume_z = (
+            state.features.get("momentum", 0.0),
+            state.features.get("volume_ratio", 1.0),
+            state.features.get("volume_zscore", 0.0),
+        )
         bid_norm, ask_norm = self._depth_norms_from_order_book(state)
-        inventory_abs = abs(position.size) / max(self.config.inventory_limit, 1e-8); inv_util = min(1.0, inventory_abs); time_left = state.features.get('time_left', 0.5)
-        realized_skew, realized_kurt = state.features.get('realized_skew', 0.0), state.features.get('realized_kurt', 0.0); delta, vega = (state.greeks.delta, state.greeks.vega) if state.greeks is not None else (0.0, 0.0)
-        return np.array([
-            price_norm, inventory_norm, volatility_5, volatility_20,
-            imbalance, spread_bps / 100.0, ret_1, ret_5,
-            ret_10, momentum, volume_ratio, volume_z,
-            bid_norm, ask_norm, np.sign(position.size), inventory_abs,
-            inv_util, time_left, realized_skew, realized_kurt, delta,
-            vega,
-        ], dtype=np.float32)
+        inventory_abs = abs(position.size) / max(self.config.inventory_limit, 1e-8)
+        inv_util = min(1.0, inventory_abs)
+        time_left = state.features.get("time_left", 0.5)
+        realized_skew, realized_kurt = state.features.get("realized_skew", 0.0), state.features.get(
+            "realized_kurt", 0.0
+        )
+        delta, vega = (
+            (state.greeks.delta, state.greeks.vega) if state.greeks is not None else (0.0, 0.0)
+        )
+        return np.array(
+            [
+                price_norm,
+                inventory_norm,
+                volatility_5,
+                volatility_20,
+                imbalance,
+                spread_bps / 100.0,
+                ret_1,
+                ret_5,
+                ret_10,
+                momentum,
+                volume_ratio,
+                volume_z,
+                bid_norm,
+                ask_norm,
+                np.sign(position.size),
+                inventory_abs,
+                inv_util,
+                time_left,
+                realized_skew,
+                realized_kurt,
+                delta,
+                vega,
+            ],
+            dtype=np.float32,
+        )
 
     def train(self, historical_data: pd.DataFrame) -> None:
         """Train PPO agent on historical data."""
@@ -649,9 +738,7 @@ class PPOMarketMaker(MarketMakingStrategy):
                 self._update()
         return timestep, episode_reward
 
-    def _step_training_transition(
-        self, state: np.ndarray
-    ) -> tuple[np.ndarray, float, bool]:
+    def _step_training_transition(self, state: np.ndarray) -> tuple[np.ndarray, float, bool]:
         state_tensor = torch.FloatTensor(state)
         action, value, log_prob = self.network.get_action(state_tensor)
         next_state, reward, done, _ = self.env.step(action)
@@ -736,9 +823,7 @@ class PPOMarketMaker(MarketMakingStrategy):
         value_loss = nn.MSELoss()(current_values.squeeze(), returns)
         entropy = dist.entropy().mean()
         loss = (
-            policy_loss
-            + self.config.value_coef * value_loss
-            - self.config.entropy_coef * entropy
+            policy_loss + self.config.value_coef * value_loss - self.config.entropy_coef * entropy
         )
         self.optimizer.zero_grad()
         loss.backward()
@@ -753,7 +838,13 @@ class PPOMarketMaker(MarketMakingStrategy):
         self.log_probs = []
         self.dones = []
 
-    def _compute_gae(self, rewards: torch.Tensor, values: torch.Tensor, dones: torch.Tensor, next_value: Optional[float] = None) -> torch.Tensor:
+    def _compute_gae(
+        self,
+        rewards: torch.Tensor,
+        values: torch.Tensor,
+        dones: torch.Tensor,
+        next_value: Optional[float] = None,
+    ) -> torch.Tensor:
         """Compute Generalized Advantage Estimation."""
         advantages = torch.zeros_like(rewards)
         last_advantage = 0
@@ -769,7 +860,10 @@ class PPOMarketMaker(MarketMakingStrategy):
                 next_non_terminal = 1.0 - dones[t]
                 delta = rewards[t] + self.config.gamma * next_val * next_non_terminal - values[t]
 
-            advantages[t] = last_advantage = delta + self.config.gamma * self.config.gae_lambda * next_non_terminal * last_advantage
+            advantages[t] = last_advantage = (
+                delta
+                + self.config.gamma * self.config.gae_lambda * next_non_terminal * last_advantage
+            )
 
         return advantages
 
@@ -782,7 +876,7 @@ class PPOMarketMaker(MarketMakingStrategy):
                 "hidden_dim": self.config.hidden_dim,
                 "learning_rate": self.config.learning_rate,
                 "gamma": self.config.gamma,
-            }
+            },
         }
 
     def reset(self) -> None:

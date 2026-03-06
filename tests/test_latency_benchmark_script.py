@@ -41,6 +41,28 @@ def test_regime_detector_benchmark_does_not_mutate_global_numpy_rng():
     assert actual_next == expected_next
 
 
+def test_regime_detector_benchmark_uses_steady_state_retrain_interval(monkeypatch):
+    module = _load_module()
+    bench = module.LatencyBenchmark(iterations=10)
+    captured = {}
+
+    class _DummyDetector:
+        def __init__(self, config=None):
+            captured["config"] = config
+
+        def update(self, *_args, **_kwargs):
+            return None
+
+    monkeypatch.setattr(module, "VolatilityRegimeDetector", _DummyDetector)
+    monkeypatch.setattr(bench, "_warmup_regime_detector", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(bench, "_measure", lambda func, *args, **kwargs: 1.0)
+
+    bench.benchmark_regime_detector()
+
+    assert captured["config"] is not None
+    assert captured["config"].retrain_interval > bench.iterations
+
+
 def test_constructor_rejects_non_positive_iterations():
     module = _load_module()
     with pytest.raises(ValueError):
@@ -233,7 +255,7 @@ def test_end_to_end_summary_excludes_warmup_samples(monkeypatch):
     bench = module.LatencyBenchmark(iterations=10)
 
     class _DummyStrategy:
-        def __init__(self):
+        def __init__(self, config=None):
             self.regime_detector = object()
 
         def quote(self, *_args, **_kwargs):
@@ -270,3 +292,56 @@ def test_end_to_end_summary_excludes_warmup_samples(monkeypatch):
 
     assert captured["name"] == "End-to-End"
     assert captured["warmup_samples"] > 0
+
+
+def test_end_to_end_benchmark_uses_risk_stable_strategy_config(monkeypatch):
+    module = _load_module()
+    bench = module.LatencyBenchmark(iterations=1)
+    captured = {}
+
+    class _DummyStrategy:
+        def __init__(self, config=None):
+            captured["config"] = config
+            self.regime_detector = object()
+
+        def quote(self, *_args, **_kwargs):
+            return None
+
+    monkeypatch.setattr(module, "IntegratedMarketMakingStrategy", _DummyStrategy)
+    monkeypatch.setattr(bench, "_measure", lambda func, *args, **kwargs: 1.0)
+    monkeypatch.setattr(bench, "_warmup_regime_detector", lambda *_args, **_kwargs: None)
+
+    bench.benchmark_end_to_end()
+
+    assert captured["config"] is not None
+    assert captured["config"].initial_capital >= 1_000_000.0
+    assert captured["config"].regime_detector.retrain_interval > bench.iterations
+
+
+def test_end_to_end_benchmark_warms_quote_pipeline_before_measuring(monkeypatch):
+    module = _load_module()
+    bench = module.LatencyBenchmark(iterations=5)
+    observed = {"quote_calls": 0, "measure_calls": 0}
+
+    class _DummyStrategy:
+        def __init__(self, config=None):
+            self.regime_detector = object()
+
+        def quote(self, *_args, **_kwargs):
+            observed["quote_calls"] += 1
+            return None
+
+    monkeypatch.setattr(module, "IntegratedMarketMakingStrategy", _DummyStrategy)
+    monkeypatch.setattr(bench, "_warmup_regime_detector", lambda *_args, **_kwargs: None)
+
+    def _measure(func, *args, **kwargs):
+        observed["measure_calls"] += 1
+        func(*args, **kwargs)
+        return 1.0
+
+    monkeypatch.setattr(bench, "_measure", _measure)
+
+    bench.benchmark_end_to_end()
+
+    assert observed["measure_calls"] == 5
+    assert observed["quote_calls"] > observed["measure_calls"]

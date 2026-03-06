@@ -1,4 +1,7 @@
 """VPIN (volume-synchronized probability of informed trading) calculator."""
+
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
@@ -26,8 +29,10 @@ def _full_bucket_components(
         empty_float = np.array([], dtype=float)
         empty_ts = np.array([], dtype=timestamps.dtype)
         return empty_float, empty_float, empty_ts, empty_float, empty_float, empty_float
-    boundaries = (np.arange(1, n_full + 1, dtype=float) * bucket_size)
-    boundary_idx = np.clip(np.searchsorted(cum_total, boundaries, side="left"), 0, len(cum_total) - 1)
+    boundaries = np.arange(1, n_full + 1, dtype=float) * bucket_size
+    boundary_idx = np.clip(
+        np.searchsorted(cum_total, boundaries, side="left"), 0, len(cum_total) - 1
+    )
     trade_starts = cum_total[boundary_idx] - volumes[boundary_idx]
     partial_to_boundary = boundaries - trade_starts
     buy_prefix = np.where(boundary_idx > 0, cum_buy[boundary_idx - 1], 0.0)
@@ -40,7 +45,14 @@ def _full_bucket_components(
     full_sell = np.diff(np.concatenate(([0.0], cum_sell_at_boundaries)))
     full_totals = np.full(n_full, bucket_size, dtype=float)
     full_timestamps = timestamps[boundary_idx]
-    return full_buy, full_sell, full_timestamps, full_totals, cum_buy_at_boundaries, cum_sell_at_boundaries
+    return (
+        full_buy,
+        full_sell,
+        full_timestamps,
+        full_totals,
+        cum_buy_at_boundaries,
+        cum_sell_at_boundaries,
+    )
 
 
 def _append_partial_bucket(
@@ -94,13 +106,16 @@ def _volume_inputs_from_df(
 @dataclass
 class VPINResult:
     """Result of VPIN calculation."""
+
     timestamps: np.ndarray
     vpin_values: np.ndarray
     buy_volumes: np.ndarray
     sell_volumes: np.ndarray
     volume_buckets: np.ndarray
 
-    def get_high_toxicity_periods(self, threshold: float = 0.4) -> List[Tuple[pd.Timestamp, pd.Timestamp]]:
+    def get_high_toxicity_periods(
+        self, threshold: float = 0.4
+    ) -> List[Tuple[pd.Timestamp, pd.Timestamp]]:
         """Identify periods of high toxicity."""
         high_toxicity = self.vpin_values > threshold
         periods = []
@@ -190,15 +205,15 @@ class VPINCalculator:
 
     def calculate(self, trades_df: pd.DataFrame) -> VPINResult:
         """Calculate VPIN from trade data."""
-        required_cols = ['timestamp', 'price', 'size']
+        required_cols = ["timestamp", "price", "size"]
         missing = set(required_cols) - set(trades_df.columns)
         if missing:
             raise ValueError(f"Missing required columns: {missing}")
         df = trades_df.copy()
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        df = df.sort_values('timestamp').reset_index(drop=True)
-        if 'side' not in df.columns or df['side'].isna().all():
-            df['side'] = self._estimate_trade_direction(df)
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        df = df.sort_values("timestamp").reset_index(drop=True)
+        if "side" not in df.columns or df["side"].isna().all():
+            df["side"] = self._estimate_trade_direction(df)
         bucket_timestamps, buy_arr, sell_arr, total_arr = self._create_volume_buckets(df)
         if len(total_arr) < self.num_buckets:
             return _fallback_vpin_result(df)
@@ -214,7 +229,7 @@ class VPINCalculator:
             vpin_values=vpin_values,
             buy_volumes=buy_arr,
             sell_volumes=sell_arr,
-            volume_buckets=np.arange(n)
+            volume_buckets=np.arange(n),
         )
 
     def _estimate_trade_direction(self, df: pd.DataFrame) -> pd.Series:
@@ -225,24 +240,40 @@ class VPINCalculator:
         If trade price < last trade price: sell
         If equal, use previous direction (recursive)
         """
-        price_diff = df['price'].diff()
+        price_diff = df["price"].diff()
 
-        sides = pd.Series(np.nan, index=df.index, dtype='object')
-        sides[price_diff > 0] = 'buy'
-        sides[price_diff < 0] = 'sell'
+        sides = pd.Series(np.nan, index=df.index, dtype="object")
+        sides[price_diff > 0] = "buy"
+        sides[price_diff < 0] = "sell"
         # Forward-fill stable-price trades; default first side to buy.
-        return sides.ffill().fillna('buy')
+        return sides.ffill().fillna("buy")
 
-    def _create_volume_buckets(self, df: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def _create_volume_buckets(
+        self, df: pd.DataFrame
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Create volume-synchronized buckets via cumsum/searchsorted."""
-        if (inputs := _volume_inputs_from_df(df)) is None: return _empty_bucket_arrays()
+        if (inputs := _volume_inputs_from_df(df)) is None:
+            return _empty_bucket_arrays()
         volumes, cum_total, total_volume, sides, timestamps = inputs
-        bucket_size = float(self.volume_bucket_size); n_full = int(total_volume // bucket_size); residual = total_volume - n_full * bucket_size
+        bucket_size = float(self.volume_bucket_size)
+        n_full = int(total_volume // bucket_size)
+        residual = total_volume - n_full * bucket_size
         n_buckets = n_full + (1 if (include_partial := residual >= bucket_size * 0.5) else 0)
-        if n_buckets == 0: return _empty_bucket_arrays()
-        is_buy = sides == 'buy'; buy_trade_vol, sell_trade_vol = np.where(is_buy, volumes, 0.0), np.where(is_buy, 0.0, volumes)
+        if n_buckets == 0:
+            return _empty_bucket_arrays()
+        is_buy = sides == "buy"
+        buy_trade_vol, sell_trade_vol = np.where(is_buy, volumes, 0.0), np.where(
+            is_buy, 0.0, volumes
+        )
         cum_buy, cum_sell = np.cumsum(buy_trade_vol), np.cumsum(sell_trade_vol)
-        full_buy, full_sell, full_timestamps, full_totals, cum_buy_at_boundaries, cum_sell_at_boundaries = _full_bucket_components(
+        (
+            full_buy,
+            full_sell,
+            full_timestamps,
+            full_totals,
+            cum_buy_at_boundaries,
+            cum_sell_at_boundaries,
+        ) = _full_bucket_components(
             cum_total=cum_total,
             volumes=volumes,
             is_buy=is_buy,
@@ -323,15 +354,17 @@ class OrderFlowToxicityAnalyzer:
     def __init__(self):
         self.vpin_calc = VPINCalculator()
 
-    def analyze(self, trades_df: pd.DataFrame, price_df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+    def analyze(
+        self, trades_df: pd.DataFrame, price_df: Optional[pd.DataFrame] = None
+    ) -> pd.DataFrame:
         """Perform full toxicity analysis."""
         df = trades_df.copy()
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
         vpin_result = self.vpin_calc.calculate(df)
-        df['minute'] = df['timestamp'].dt.floor('1min')
-        grouped = df.groupby('minute')
-        large_threshold = float(df['size'].quantile(0.95))
-        vpin_ts = np.array(vpin_result.timestamps, dtype='datetime64[ns]')
+        df["minute"] = df["timestamp"].dt.floor("1min")
+        grouped = df.groupby("minute")
+        large_threshold = float(df["size"].quantile(0.95))
+        vpin_ts = np.array(vpin_result.timestamps, dtype="datetime64[ns]")
         vpin_vals = np.array(vpin_result.vpin_values, dtype=float)
         if len(vpin_ts) == 0:
             return pd.DataFrame()
@@ -349,21 +382,23 @@ class OrderFlowToxicityAnalyzer:
             ]
         )
 
-    def detect_anomalies(self, analysis_df: pd.DataFrame, zscore_threshold: float = 2.0) -> pd.DataFrame:
+    def detect_anomalies(
+        self, analysis_df: pd.DataFrame, zscore_threshold: float = 2.0
+    ) -> pd.DataFrame:
         """Detect anomalous periods in the analysis."""
         df = analysis_df.copy()
 
         # Calculate z-scores for key metrics
-        for col in ['vpin', 'trade_count', 'volume_imbalance', 'large_trade_ratio']:
+        for col in ["vpin", "trade_count", "volume_imbalance", "large_trade_ratio"]:
             mean = df[col].mean()
             std = df[col].std()
-            df[f'{col}_zscore'] = (df[col] - mean) / (std + 1e-8)
+            df[f"{col}_zscore"] = (df[col] - mean) / (std + 1e-8)
 
         # Flag anomalies
-        df['is_anomaly'] = (
-            (df['vpin_zscore'] > zscore_threshold) |
-            (df['trade_count_zscore'] > zscore_threshold) |
-            (abs(df['volume_imbalance_zscore']) > zscore_threshold)
+        df["is_anomaly"] = (
+            (df["vpin_zscore"] > zscore_threshold)
+            | (df["trade_count_zscore"] > zscore_threshold)
+            | (abs(df["volume_imbalance_zscore"]) > zscore_threshold)
         )
 
         return df

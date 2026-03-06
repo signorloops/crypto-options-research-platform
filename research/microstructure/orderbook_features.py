@@ -2,6 +2,9 @@
 Order book feature extraction for market microstructure analysis.
 Extracts features that predict short-term price movements and toxicity.
 """
+
+from __future__ import annotations
+
 from collections import deque
 from dataclasses import dataclass
 from typing import Dict, List, Optional
@@ -14,6 +17,7 @@ from scipy import stats
 @dataclass
 class OrderBookFeatures:
     """Complete set of order book features."""
+
     timestamp: pd.Timestamp
 
     # Basic features
@@ -58,30 +62,30 @@ class OrderBookFeatures:
     def to_dict(self) -> Dict[str, float]:
         """Convert to dictionary."""
         return {
-            'timestamp': self.timestamp,
-            'mid_price': self.mid_price,
-            'spread': self.spread,
-            'spread_bps': self.spread_bps,
-            'best_bid': self.best_bid,
-            'best_ask': self.best_ask,
-            'bid_depth_5': self.bid_depth_5,
-            'ask_depth_5': self.ask_depth_5,
-            'bid_depth_10': self.bid_depth_10,
-            'ask_depth_10': self.ask_depth_10,
-            'depth_imbalance': self.depth_imbalance,
-            'vwap_bid': self.vwap_bid,
-            'vwap_ask': self.vwap_ask,
-            'vwap_mid': self.vwap_mid,
-            'microprice': self.microprice,
-            'microprice_bias': self.microprice_bias,
-            'bid_slope': self.bid_slope,
-            'ask_slope': self.ask_slope,
-            'bid_queue_ratio': self.bid_queue_ratio,
-            'ask_queue_ratio': self.ask_queue_ratio,
-            'realized_vol_1min': self.realized_vol_1min,
-            'realized_vol_5min': self.realized_vol_5min,
-            'trade_flow_imbalance': self.trade_flow_imbalance,
-            'volume_order_imbalance': self.volume_order_imbalance
+            "timestamp": self.timestamp,
+            "mid_price": self.mid_price,
+            "spread": self.spread,
+            "spread_bps": self.spread_bps,
+            "best_bid": self.best_bid,
+            "best_ask": self.best_ask,
+            "bid_depth_5": self.bid_depth_5,
+            "ask_depth_5": self.ask_depth_5,
+            "bid_depth_10": self.bid_depth_10,
+            "ask_depth_10": self.ask_depth_10,
+            "depth_imbalance": self.depth_imbalance,
+            "vwap_bid": self.vwap_bid,
+            "vwap_ask": self.vwap_ask,
+            "vwap_mid": self.vwap_mid,
+            "microprice": self.microprice,
+            "microprice_bias": self.microprice_bias,
+            "bid_slope": self.bid_slope,
+            "ask_slope": self.ask_slope,
+            "bid_queue_ratio": self.bid_queue_ratio,
+            "ask_queue_ratio": self.ask_queue_ratio,
+            "realized_vol_1min": self.realized_vol_1min,
+            "realized_vol_5min": self.realized_vol_5min,
+            "trade_flow_imbalance": self.trade_flow_imbalance,
+            "volume_order_imbalance": self.volume_order_imbalance,
         }
 
 
@@ -208,9 +212,7 @@ class OrderBookFeatureExtractor:
 
     def _append_history(self, timestamp: pd.Timestamp, mid: float, spread: float) -> None:
         """Append latest top-of-book snapshot to rolling history."""
-        self._history.append(
-            {"timestamp": timestamp, "mid_price": mid, "spread": spread}
-        )
+        self._history.append({"timestamp": timestamp, "mid_price": mid, "spread": spread})
 
     @staticmethod
     def _compute_queue_ratios(
@@ -258,18 +260,27 @@ class OrderBookFeatureExtractor:
         )
 
     def extract(
-        self,
-        order_book: 'OrderBook',
-        recent_trades: Optional[List['Trade']] = None
+        self, order_book: "OrderBook", recent_trades: Optional[List["Trade"]] = None
     ) -> OrderBookFeatures:
         """Extract features from order book and recent trades."""
-        timestamp = order_book.timestamp; basic = self._extract_basic_features(order_book); depth = self._extract_depth_features(order_book)
-        vwap_bid, vwap_ask = self._vwap(order_book.bids, 5), self._vwap(order_book.asks, 5); vwap_mid = (vwap_bid + vwap_ask) / 2
-        microprice, microprice_bias = self._compute_microprice_features(order_book, best_bid=basic["best_bid"], best_ask=basic["best_ask"], mid=basic["mid"])
-        bid_slope = self._calc_slope(order_book.bids); ask_slope = self._calc_slope(order_book.asks); bid_queue_ratio, ask_queue_ratio = self._compute_queue_ratios(order_book, depth["bid_depth_5"], depth["ask_depth_5"])
+        timestamp = order_book.timestamp
+        basic = self._extract_basic_features(order_book)
+        depth = self._extract_depth_features(order_book)
+        vwap_bid, vwap_ask = self._vwap(order_book.bids, 5), self._vwap(order_book.asks, 5)
+        vwap_mid = (vwap_bid + vwap_ask) / 2
+        microprice, microprice_bias = self._compute_microprice_features(
+            order_book, best_bid=basic["best_bid"], best_ask=basic["best_ask"], mid=basic["mid"]
+        )
+        bid_slope = self._calc_slope(order_book.bids)
+        ask_slope = self._calc_slope(order_book.asks)
+        bid_queue_ratio, ask_queue_ratio = self._compute_queue_ratios(
+            order_book, depth["bid_depth_5"], depth["ask_depth_5"]
+        )
         self._append_history(timestamp, basic["mid"], basic["spread"])
         realized_vol_1min, realized_vol_5min = self._compute_realized_volatility()
-        trade_flow_imbalance, volume_order_imbalance = self._compute_trade_flow_features(recent_trades, depth["depth_imbalance"])
+        trade_flow_imbalance, volume_order_imbalance = self._compute_trade_flow_features(
+            recent_trades, depth["depth_imbalance"]
+        )
         derived: Dict[str, float | Optional[float]] = {
             "vwap_bid": vwap_bid,
             "vwap_ask": vwap_ask,
@@ -307,9 +318,7 @@ class FeaturePipeline:
         self._features: List[OrderBookFeatures] = []
 
     def process_stream(
-        self,
-        order_books: List['OrderBook'],
-        trades: Optional[List['Trade']] = None
+        self, order_books: List["OrderBook"], trades: Optional[List["Trade"]] = None
     ) -> pd.DataFrame:
         """
         Process a stream of order books into feature DataFrame.
@@ -322,8 +331,7 @@ class FeaturePipeline:
             if trades:
                 ob_time = ob.timestamp
                 recent_trades = [
-                    t for t in trades
-                    if abs((t.timestamp - ob_time).total_seconds()) < 60
+                    t for t in trades if abs((t.timestamp - ob_time).total_seconds()) < 60
                 ]
 
             features = self.extractor.extract(ob, recent_trades)

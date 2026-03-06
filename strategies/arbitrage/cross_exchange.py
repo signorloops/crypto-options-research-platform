@@ -10,6 +10,9 @@
     - 同一加密货币在不同交易所的价格差异
     - 需要考虑提币时间、手续费、流动性
 """
+
+from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, Dict, List, Optional
@@ -18,6 +21,7 @@ from typing import Callable, Dict, List, Optional
 @dataclass
 class ArbitrageOpportunity:
     """套利机会数据结构。"""
+
     buy_exchange: str
     sell_exchange: str
     instrument: str
@@ -31,6 +35,7 @@ class ArbitrageOpportunity:
 @dataclass
 class TriangularOpportunity:
     """三角套利机会。"""
+
     exchange: str
     path: List[str]
     start_amount: float
@@ -42,6 +47,7 @@ class TriangularOpportunity:
 @dataclass
 class ExchangeFees:
     """交易所费率结构。"""
+
     maker_fee: float  # 挂单费率
     taker_fee: float  # 吃单费率
     withdrawal_fee: float = 0.0  # 提币费
@@ -60,9 +66,7 @@ def _iter_triangular_paths(start_currency: str, currencies: List[str]) -> List[L
         for c in currencies:
             if c == start_currency or c == b:
                 continue
-            paths.append(
-                [f"{start_currency}/{b}", f"{b}/{c}", f"{c}/{start_currency}"]
-            )
+            paths.append([f"{start_currency}/{b}", f"{b}/{c}", f"{c}/{start_currency}"])
     return paths
 
 
@@ -130,23 +134,21 @@ class CrossExchangeArbitrage:
         instrument: str,
         price: float,
         timestamp: Optional[datetime] = None,
-        max_age_ms: float = 100.0
+        max_age_ms: float = 100.0,
     ) -> None:
         """更新价格缓存并触发跨交易所机会扫描。"""
         from dataclasses import dataclass
+
         @dataclass
         class PriceEntry:
             price: float
             timestamp: datetime
             received_at: datetime
+
         now = datetime.now(timezone.utc)
         if instrument not in self.price_cache:
             self.price_cache[instrument] = {}
-        entry = PriceEntry(
-            price=price,
-            timestamp=timestamp or now,
-            received_at=now
-        )
+        entry = PriceEntry(price=price, timestamp=timestamp or now, received_at=now)
         if timestamp:
             age_ms = (now - timestamp).total_seconds() * 1000
             if age_ms > max_age_ms:
@@ -159,7 +161,9 @@ class CrossExchangeArbitrage:
         """Extract numeric price from either cached entry object or raw float."""
         return float(entry.price) if hasattr(entry, "price") else float(entry)
 
-    def _resolve_prices(self, instrument: str, max_age_ms: Optional[float] = None) -> Dict[str, float]:
+    def _resolve_prices(
+        self, instrument: str, max_age_ms: Optional[float] = None
+    ) -> Dict[str, float]:
         """Resolve per-exchange prices with optional freshness filter."""
         price_entries = self.price_cache.get(instrument, {})
         if max_age_ms is None:
@@ -260,9 +264,7 @@ class CrossExchangeArbitrage:
         )
 
     def calculate_required_capital(
-        self,
-        opportunity: ArbitrageOpportunity,
-        position_size: float
+        self, opportunity: ArbitrageOpportunity, position_size: float
     ) -> Dict[str, float]:
         """计算执行套利所需资金、保证金、总占用与预期收益。"""
         buy_capital = position_size * opportunity.buy_price
@@ -273,17 +275,19 @@ class CrossExchangeArbitrage:
         sell_fees = self.exchange_fees.get(opportunity.sell_exchange, ExchangeFees(0.001, 0.001))
 
         gross_profit = position_size * (opportunity.sell_price - opportunity.buy_price)
-        total_fees = position_size * opportunity.buy_price * buy_fees.taker_fee + \
-                     position_size * opportunity.sell_price * sell_fees.taker_fee
+        total_fees = (
+            position_size * opportunity.buy_price * buy_fees.taker_fee
+            + position_size * opportunity.sell_price * sell_fees.taker_fee
+        )
 
         expected_profit = gross_profit - total_fees
 
         return {
-            'buy_capital': buy_capital,
-            'sell_collateral': sell_collateral,
-            'total_required': buy_capital + sell_collateral,
-            'expected_profit': expected_profit,
-            'roi_pct': expected_profit / (buy_capital + sell_collateral) * 100
+            "buy_capital": buy_capital,
+            "sell_collateral": sell_collateral,
+            "total_required": buy_capital + sell_collateral,
+            "expected_profit": expected_profit,
+            "roi_pct": expected_profit / (buy_capital + sell_collateral) * 100,
         }
 
     def estimate_execution_time(self, exchange_a: str, exchange_b: str) -> float:
@@ -312,7 +316,7 @@ class CrossExchangeArbitrage:
         self,
         opportunity: ArbitrageOpportunity,
         position_size: Optional[float] = None,
-        latency_ms: float = 80.0
+        latency_ms: float = 80.0,
     ) -> Dict[str, float]:
         """
         执行仿真: 估算滑点、延迟冲击和实际利润。
@@ -348,7 +352,7 @@ class CrossExchangeArbitrage:
         pair_prices: Dict[str, float],
         start_currency: str = "USDT",
         start_amount: float = 1.0,
-        min_profit_pct: float = 0.001
+        min_profit_pct: float = 0.001,
     ) -> Optional[TriangularOpportunity]:
         """检查简化三角套利（3条边）: A/B -> B/C -> C/A。"""
         currencies = _currency_universe(pair_prices)
@@ -368,6 +372,6 @@ class CrossExchangeArbitrage:
                     start_amount=float(start_amount),
                     end_amount=float(end_amount),
                     profit_pct=float(profit_pct * 100),
-                    timestamp=datetime.now(timezone.utc)
+                    timestamp=datetime.now(timezone.utc),
                 )
         return None

@@ -3,6 +3,8 @@ Deribit historical data downloader and API client.
 Deribit provides free historical data for research purposes.
 """
 
+from __future__ import annotations
+
 import asyncio
 import os
 from datetime import datetime, timedelta, timezone
@@ -526,9 +528,11 @@ class DeribitDataDownloader:
         self, instrument: str, timestamps: List[datetime], use_cache: bool = True
     ) -> pd.DataFrame:
         """Download order book snapshots at specific times."""
-        if (cached := self._get_cached_order_book_snapshots(
-            instrument=instrument, timestamps=timestamps, use_cache=use_cache
-        )) is not None:
+        if (
+            cached := self._get_cached_order_book_snapshots(
+                instrument=instrument, timestamps=timestamps, use_cache=use_cache
+            )
+        ) is not None:
             return cached
         snapshots = []
         logger.info("Downloading order book snapshots", extra=log_extra(count=len(timestamps)))

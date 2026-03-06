@@ -2,6 +2,9 @@
 Avellaneda-Stoikov market making strategy.
 Classic optimal market making model from the seminal 2008 paper.
 """
+
+from __future__ import annotations
+
 from dataclasses import dataclass
 from collections import deque
 from typing import Dict, Tuple
@@ -15,14 +18,15 @@ from strategies.base import MarketMakingStrategy
 @dataclass
 class ASConfig:
     """Configuration for Avellaneda-Stoikov strategy."""
-    gamma: float = 0.1          # Risk aversion coefficient
-    sigma: float = 0.5          # Volatility (annualized)
-    k: float = 1.5              # Order arrival intensity parameter
-    T: float = 1.0              # Trading horizon (in years)
-    quote_size: float = 1.0     # Quote size
+
+    gamma: float = 0.1  # Risk aversion coefficient
+    sigma: float = 0.5  # Volatility (annualized)
+    k: float = 1.5  # Order arrival intensity parameter
+    T: float = 1.0  # Trading horizon (in years)
+    quote_size: float = 1.0  # Quote size
     inventory_limit: float = 10.0  # Maximum inventory
     use_bounded_inventory: bool = True  # GLFT-style bounded inventory
-    inventory_saturation: float = 0.8   # How fast inventory penalty saturates
+    inventory_saturation: float = 0.8  # How fast inventory penalty saturates
     enable_online_calibration: bool = False
     calibration_window: int = 60
     annualization_periods: float = 365.25 * 24 * 3600
@@ -40,7 +44,9 @@ def _extract_trade_intensity(state: MarketState) -> float:
     return float(max(0.0, intensity_feature))
 
 
-def _estimate_sigma_from_returns(returns_window: deque, annualization_periods: float) -> float | None:
+def _estimate_sigma_from_returns(
+    returns_window: deque, annualization_periods: float
+) -> float | None:
     """Estimate annualized sigma when enough returns are available."""
     if len(returns_window) < 5:
         return None
@@ -217,12 +223,23 @@ class AvellanedaStoikov(MarketMakingStrategy):
     def quote(self, state: MarketState, position: Position) -> QuoteAction:
         """Generate quotes using the Avellaneda-Stoikov model."""
         mid = state.order_book.mid_price
-        if mid is None: raise ValueError("Cannot quote without valid order book")
-        q = position.size; calibration_meta = self._update_online_calibration(state, q)  # Current inventory
+        if mid is None:
+            raise ValueError("Cannot quote without valid order book")
+        q = position.size
+        calibration_meta = self._update_online_calibration(state, q)  # Current inventory
         gamma, sigma, k = self.config.gamma, self.config.sigma, self.config.k
-        time_remaining = self._compute_time_remaining(state); inventory_ratio, effective_q = self._compute_effective_inventory(q)
+        time_remaining = self._compute_time_remaining(state)
+        inventory_ratio, effective_q = self._compute_effective_inventory(q)
         reservation_price = mid - effective_q * gamma * sigma**2 * time_remaining
-        spread_component, execution_component, inventory_premium, half_spread = self._compute_spread_components(gamma=gamma, sigma=sigma, k=k, time_remaining=time_remaining, inventory_ratio=inventory_ratio)
+        spread_component, execution_component, inventory_premium, half_spread = (
+            self._compute_spread_components(
+                gamma=gamma,
+                sigma=sigma,
+                k=k,
+                time_remaining=time_remaining,
+                inventory_ratio=inventory_ratio,
+            )
+        )
         bid_price, ask_price = reservation_price - half_spread, reservation_price + half_spread
         bid_size, ask_size = self._compute_quote_sizes(q, inventory_ratio)
         return QuoteAction(
@@ -241,7 +258,7 @@ class AvellanedaStoikov(MarketMakingStrategy):
                 "execution_component": execution_component,
                 "inventory_premium": inventory_premium,
                 **calibration_meta,
-            }
+            },
         )
 
     def get_internal_state(self) -> Dict:
@@ -252,7 +269,7 @@ class AvellanedaStoikov(MarketMakingStrategy):
             "sigma": self.config.sigma,
             "k": self.config.k,
             "elapsed_time": elapsed,
-            "time_remaining": max(0, self.config.T - elapsed / (365.25 * 24 * 3600))
+            "time_remaining": max(0, self.config.T - elapsed / (365.25 * 24 * 3600)),
         }
 
     def reset(self) -> None:
