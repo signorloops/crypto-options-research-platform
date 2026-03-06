@@ -125,6 +125,31 @@ def test_scorecard_summary_metrics_helper_matches_expected_values():
     assert metrics["best_day"] == 100.0
 
 
+def test_scorecard_metric_helpers_split_return_and_trade_components():
+    arena = StrategyArena(_market_data_frame(), initial_capital=100000.0)
+    result = _make_backtest_result("rich", [0, 100, 80, 120, 150], sharpe=1.2)
+    pnl_series = result.pnl_series
+    daily_returns = pnl_series.diff().dropna()
+
+    return_metrics = arena_module._scorecard_return_metrics(
+        result=result,
+        initial_capital=arena.initial_capital,
+        periods_per_year=arena._periods_per_year(pnl_series),
+        periods_observed=max(len(pnl_series) - 1, 1),
+    )
+    trade_metrics = arena_module._scorecard_trade_metrics(
+        result=result,
+        daily_returns=daily_returns,
+        periods_per_year=arena._periods_per_year(pnl_series),
+    )
+
+    assert return_metrics["total_pnl"] == 150.0
+    assert return_metrics["annualized_return"] > 0.0
+    assert trade_metrics["win_rate"] == pytest.approx(0.75)
+    assert trade_metrics["profit_factor"] > 1.0
+    assert trade_metrics["best_day"] == 100.0
+
+
 def test_comparison_helpers_format_rows_and_metric_values():
     arena = StrategyArena(_market_data_frame(), initial_capital=100000.0)
     rich_result = _make_backtest_result("rich", [0, 100, 80, 120, 150], sharpe=1.2)
@@ -184,6 +209,27 @@ def test_run_tournament_with_mocked_engine(monkeypatch):
     assert len(comparison) == 2
     assert set(comparison["Strategy"]) == {"S1", "S2"}
     assert s1.reset_calls == 1 and s2.reset_calls == 1
+
+
+def test_run_single_strategy_returns_result_and_scorecard(monkeypatch):
+    class _FakeEngine:
+        def __init__(self, strategy, initial_crypto_balance, transaction_cost_bps):
+            self.strategy = strategy
+
+        def run(self, market_data):
+            return _make_backtest_result(self.strategy.name, [0, 90, 110], sharpe=0.9)
+
+    monkeypatch.setattr(arena_module, "BacktestEngine", _FakeEngine)
+
+    arena = StrategyArena(_market_data_frame(), initial_capital=100000.0)
+    strategy = _DummyStrategy(name="Solo")
+
+    result, scorecard = arena._run_single_strategy(strategy, verbose=False)
+
+    assert strategy.reset_calls == 1
+    assert result.strategy_name == "Solo"
+    assert scorecard.strategy_name == "Solo"
+    assert scorecard.total_pnl == 110.0
 
 
 def test_rolling_sharpe_series_handles_short_and_long_inputs():

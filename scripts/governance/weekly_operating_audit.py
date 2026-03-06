@@ -27,6 +27,9 @@ from scripts.governance.weekly_close_gate_utils import (
     build_close_gate_summary,
     collect_open_labels,
 )
+from scripts.governance.weekly_operating_parser_utils import (
+    build_weekly_operating_argument_specs,
+)
 from scripts.governance.weekly_operating_cli_utils import (
     collect_issue_messages,
     resolve_input_files,
@@ -431,94 +434,10 @@ def _to_markdown(report: dict[str, Any]) -> str:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Generate weekly operating KPI/risk audit.")
-    parser.add_argument("--results-dir", default="results", help="Directory for backtest outputs.")
-    parser.add_argument("--pattern", default="backtest*.json", help="Glob pattern in results dir.")
-    parser.add_argument(
-        "--inputs",
-        nargs="*",
-        help="Optional explicit input JSON files. If set, results-dir/pattern is ignored.",
-    )
-    parser.add_argument(
-        "--thresholds",
-        default="config/weekly_operating_thresholds.json",
-        help="Path to thresholds JSON. Uses defaults when file is missing.",
-    )
-    parser.add_argument(
-        "--consistency-thresholds",
-        default="config/consistency_thresholds.json",
-        help="Path to consistency thresholds JSON. Uses defaults when file is missing.",
-    )
-    parser.add_argument(
-        "--output-md",
-        default="artifacts/weekly-operating-audit.md",
-        help="Output markdown report path.",
-    )
-    parser.add_argument(
-        "--output-json",
-        default="artifacts/weekly-operating-audit.json",
-        help="Output JSON report path.",
-    )
-    parser.add_argument(
-        "--strict",
-        action="store_true",
-        help="Exit non-zero when risk exceptions exist or no strategy rows can be extracted.",
-    )
-    parser.add_argument(
-        "--strict-close",
-        action="store_true",
-        help="Exit non-zero unless weekly sign-off status is READY_FOR_CLOSE.",
-    )
-    parser.add_argument(
-        "--signoff-json",
-        default="artifacts/weekly-signoff-pack.json",
-        help="Path to weekly sign-off JSON used by --strict-close.",
-    )
-    parser.add_argument(
-        "--close-gate-only",
-        action="store_true",
-        help="Only validate close gate status from --signoff-json.",
-    )
-    parser.add_argument(
-        "--close-gate-output-md",
-        default="artifacts/weekly-close-gate.md",
-        help="Output markdown path for close gate summary.",
-    )
-    parser.add_argument(
-        "--close-gate-output-json",
-        default="artifacts/weekly-close-gate.json",
-        help="Output JSON path for close gate summary.",
-    )
-    parser.add_argument(
-        "--regression-cmd",
-        default="",
-        help="Optional regression command to execute and include in the audit report.",
-    )
-    parser.add_argument(
-        "--performance-json",
-        default="artifacts/algorithm-performance-baseline.json",
-        help="Path to algorithm performance baseline JSON report.",
-    )
-    parser.add_argument(
-        "--require-performance",
-        action="store_true",
-        help="Mark audit as incomplete when performance baseline report is missing or failing.",
-    )
-    parser.add_argument(
-        "--latency-json",
-        default="artifacts/performance/latency_benchmark_report.json",
-        help="Path to latency benchmark JSON report.",
-    )
-    parser.add_argument(
-        "--require-latency",
-        action="store_true",
-        help="Mark audit as incomplete when latency benchmark report is missing or failing.",
-    )
-    parser.add_argument(
-        "--change-log-days",
-        type=int,
-        default=7,
-        help="Look-back window (days) for auto-generated change log.",
-    )
+    for spec in build_weekly_operating_argument_specs():
+        flags = spec["flags"]
+        kwargs = {key: value for key, value in spec.items() if key not in {"flags", "dest"}}
+        parser.add_argument(*flags, dest=spec["dest"], **kwargs)
     return parser
 
 

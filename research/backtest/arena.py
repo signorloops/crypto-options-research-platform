@@ -264,6 +264,56 @@ def _build_scorecard_from_result(
     )
 
 
+def _scorecard_return_metrics(
+    *,
+    result: BacktestResult,
+    initial_capital: float,
+    periods_per_year: float,
+    periods_observed: int,
+) -> dict[str, float]:
+    total_pnl = result.total_pnl_usd
+    total_return_pct = total_pnl / initial_capital
+    annualized_return = _annualized_return_from_total(
+        total_return_pct=total_return_pct,
+        periods_per_year=periods_per_year,
+        periods_observed=periods_observed,
+    )
+    return {
+        "total_pnl": total_pnl,
+        "total_return_pct": total_return_pct,
+        "annualized_return": annualized_return,
+        "sharpe": result.sharpe_ratio,
+        "deflated_sharpe": getattr(result, "deflated_sharpe_ratio", 0.0),
+        "calmar": _calmar_ratio(
+            annualized_return=annualized_return,
+            max_drawdown=result.max_drawdown,
+        ),
+    }
+
+
+def _scorecard_trade_metrics(
+    *,
+    result: BacktestResult,
+    daily_returns: pd.Series,
+    periods_per_year: float,
+) -> dict[str, float]:
+    win_rate, avg_win, avg_loss, profit_factor = _compute_trade_stats(
+        result.trade_count,
+        daily_returns,
+    )
+    daily_pnl_std, worst_day, best_day = _daily_pnl_stats(daily_returns)
+    return {
+        "sortino": _compute_sortino_ratio(daily_returns, periods_per_year),
+        "win_rate": win_rate,
+        "avg_win": avg_win,
+        "avg_loss": avg_loss,
+        "profit_factor": profit_factor,
+        "daily_pnl_std": daily_pnl_std,
+        "worst_day": worst_day,
+        "best_day": best_day,
+    }
+
+
 def _comparison_row(name: str, scorecard: StrategyScorecard) -> dict:
     return {
         "Strategy": name,
@@ -318,36 +368,18 @@ def _scorecard_summary_metrics(
     periods_observed: int,
     daily_returns: pd.Series,
 ) -> dict[str, float]:
-    total_pnl = result.total_pnl_usd
-    total_return_pct = total_pnl / initial_capital
-    annualized_return = _annualized_return_from_total(
-        total_return_pct=total_return_pct,
-        periods_per_year=periods_per_year,
-        periods_observed=periods_observed,
-    )
-    win_rate, avg_win, avg_loss, profit_factor = _compute_trade_stats(
-        result.trade_count,
-        daily_returns,
-    )
-    daily_pnl_std, worst_day, best_day = _daily_pnl_stats(daily_returns)
     return {
-        "total_pnl": total_pnl,
-        "total_return_pct": total_return_pct,
-        "annualized_return": annualized_return,
-        "sharpe": result.sharpe_ratio,
-        "deflated_sharpe": getattr(result, "deflated_sharpe_ratio", 0.0),
-        "sortino": _compute_sortino_ratio(daily_returns, periods_per_year),
-        "calmar": _calmar_ratio(
-            annualized_return=annualized_return,
-            max_drawdown=result.max_drawdown,
+        **_scorecard_return_metrics(
+            result=result,
+            initial_capital=initial_capital,
+            periods_per_year=periods_per_year,
+            periods_observed=periods_observed,
         ),
-        "win_rate": win_rate,
-        "avg_win": avg_win,
-        "avg_loss": avg_loss,
-        "profit_factor": profit_factor,
-        "daily_pnl_std": daily_pnl_std,
-        "worst_day": worst_day,
-        "best_day": best_day,
+        **_scorecard_trade_metrics(
+            result=result,
+            daily_returns=daily_returns,
+            periods_per_year=periods_per_year,
+        ),
     }
 
 
@@ -419,6 +451,31 @@ def _arena_report_rankings_lines(arena: "StrategyArena") -> List[str]:
     return lines
 
 
+def _build_backtest_engine(
+    *,
+    strategy: MarketMakingStrategy,
+    initial_capital: float,
+    transaction_cost_bps: float,
+) -> BacktestEngine:
+    return BacktestEngine(
+        strategy=strategy,
+        initial_crypto_balance=initial_capital,
+        transaction_cost_bps=transaction_cost_bps,
+    )
+
+
+def _log_strategy_result(strategy_name: str, result: BacktestResult) -> None:
+    logger.info(
+        "Strategy results",
+        extra=log_extra(
+            strategy=strategy_name,
+            pnl=result.total_pnl_usd,
+            trades=result.trade_count,
+            sharpe=result.sharpe_ratio,
+        ),
+    )
+
+
 class StrategyArena:
     """Fair comparison framework for market making strategies."""
 
@@ -458,29 +515,30 @@ class StrategyArena:
         self.results = {}
         self.scorecards = {}
         for strategy in strategies:
-            if verbose: logger.info("Running strategy", extra=log_extra(strategy=strategy.name))
-            strategy.reset()
-            engine = BacktestEngine(
-                strategy=strategy,
-                initial_crypto_balance=self.initial_capital,
-                transaction_cost_bps=self.transaction_cost_bps,
-            )
-            result = engine.run(self.market_data)
+            result, scorecard = self._run_single_strategy(strategy, verbose=verbose)
             self.results[strategy.name] = result
-            scorecard = self._calculate_scorecard(result)
             self.scorecards[strategy.name] = scorecard
-            if verbose:
-                logger.info(
-                    "Strategy results",
-                    extra=log_extra(
-                        strategy=strategy.name,
-                        pnl=result.total_pnl_usd,
-                        trades=result.trade_count,
-                        sharpe=result.sharpe_ratio,
-                    ),
-                )
         self._apply_deflated_sharpe()
         return self._create_comparison_df()
+
+    def _run_single_strategy(
+        self,
+        strategy: MarketMakingStrategy,
+        *,
+        verbose: bool,
+    ) -> tuple[BacktestResult, StrategyScorecard]:
+        if verbose:
+            logger.info("Running strategy", extra=log_extra(strategy=strategy.name))
+        strategy.reset()
+        result = _build_backtest_engine(
+            strategy=strategy,
+            initial_capital=self.initial_capital,
+            transaction_cost_bps=self.transaction_cost_bps,
+        ).run(self.market_data)
+        scorecard = self._calculate_scorecard(result)
+        if verbose:
+            _log_strategy_result(strategy.name, result)
+        return result, scorecard
 
     def _apply_deflated_sharpe(self) -> None:
         """Apply multiple-testing correction to Sharpe across all compared strategies."""
