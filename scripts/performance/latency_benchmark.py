@@ -11,12 +11,25 @@ Target: P95 < 100ms
 """
 
 import argparse
+import gc
+import io
+import json
+import logging
+import sys
 import time
+import warnings
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta, timezone
-from typing import Callable, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
+
+# Allow `python scripts/...` execution without package installation.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from core.types import Greeks, MarketState, OrderBook, OrderBookLevel, Position
 from research.hedging.adaptive_delta import AdaptiveDeltaHedger
@@ -24,6 +37,53 @@ from research.pricing.inverse_options import InverseOptionPricer
 from research.risk.circuit_breaker import CircuitBreaker, PortfolioState
 from research.signals.regime_detector import VolatilityRegimeDetector
 from strategies.market_making.integrated_strategy import IntegratedMarketMakingStrategy
+
+DEFAULT_LATENCY_TARGETS_MS = {
+    "greeks_calculation": 4.0,
+    "circuit_breaker": 2.0,
+    "regime_detector": 3.0,
+    "adaptive_hedger": 1.0,
+    "quote_generation": 10.0,
+    "end_to_end": 100.0,
+}
+
+
+@contextmanager
+def _suppressed_benchmark_noise(enabled: bool):
+    """Silence nested benchmark output without swallowing exceptions."""
+    if not enabled:
+        yield
+        return
+
+    stderr = io.StringIO()
+    stdout = io.StringIO()
+    logger_names = [
+        "research.risk.circuit_breaker",
+        "research.signals.regime_detector",
+        "hmmlearn",
+        "hmmlearn.base",
+    ]
+    configured = []
+    for name in logger_names:
+        logger = logging.getLogger(name)
+        configured.append((logger, logger.disabled, logger.level, logger.propagate))
+        logger.disabled = True
+        logger.propagate = False
+        logger.setLevel(logging.CRITICAL + 1)
+
+    with (
+        warnings.catch_warnings(),
+        redirect_stdout(stdout),
+        redirect_stderr(stderr),
+    ):
+        warnings.simplefilter("ignore")
+        try:
+            yield
+        finally:
+            for logger, disabled, level, propagate in configured:
+                logger.disabled = disabled
+                logger.setLevel(level)
+                logger.propagate = propagate
 
 
 class LatencyBenchmark:
@@ -44,7 +104,8 @@ class LatencyBenchmark:
     def _measure(self, func: Callable, *args, **kwargs) -> float:
         """Measure execution time of a function."""
         start = time.perf_counter()
-        func(*args, **kwargs)
+        with _suppressed_benchmark_noise(self._quiet):
+            func(*args, **kwargs)
         end = time.perf_counter()
         return (end - start) * 1000  # Convert to milliseconds
 
@@ -65,6 +126,11 @@ class LatencyBenchmark:
             "end_to_end": self.benchmark_end_to_end,
         }
 
+    @staticmethod
+    def _run_benchmark_with_gc_isolation(benchmark: Callable[[], Dict]) -> Dict:
+        gc.collect()
+        return benchmark()
+
     def benchmark_greeks_calculation(self) -> Dict:
         """Benchmark Greeks calculation."""
         self._log(f"Benchmarking Greeks calculation ({self.iterations} iterations)...")
@@ -79,7 +145,11 @@ class LatencyBenchmark:
             latencies.append(latency)
 
         self.results["greeks_calculation"] = latencies
-        return self._summarize("Greeks Calculation", latencies, target_ms=15)
+        return self._summarize(
+            "Greeks Calculation",
+            latencies,
+            target_ms=DEFAULT_LATENCY_TARGETS_MS["greeks_calculation"],
+        )
 
     def benchmark_circuit_breaker(self) -> Dict:
         """Benchmark circuit breaker risk check."""
@@ -96,7 +166,11 @@ class LatencyBenchmark:
             latencies.append(latency)
 
         self.results["circuit_breaker"] = latencies
-        return self._summarize("Circuit Breaker", latencies, target_ms=10)
+        return self._summarize(
+            "Circuit Breaker",
+            latencies,
+            target_ms=DEFAULT_LATENCY_TARGETS_MS["circuit_breaker"],
+        )
 
     def benchmark_regime_detector(self) -> Dict:
         """Benchmark regime detector update."""
@@ -114,7 +188,11 @@ class LatencyBenchmark:
             latencies.append(latency)
 
         self.results["regime_detector"] = latencies
-        return self._summarize("Regime Detector", latencies, target_ms=5)
+        return self._summarize(
+            "Regime Detector",
+            latencies,
+            target_ms=DEFAULT_LATENCY_TARGETS_MS["regime_detector"],
+        )
 
     def benchmark_adaptive_hedger(self) -> Dict:
         """Benchmark adaptive hedger decision."""
@@ -135,7 +213,11 @@ class LatencyBenchmark:
             latencies.append(latency)
 
         self.results["adaptive_hedger"] = latencies
-        return self._summarize("Adaptive Hedger", latencies, target_ms=5)
+        return self._summarize(
+            "Adaptive Hedger",
+            latencies,
+            target_ms=DEFAULT_LATENCY_TARGETS_MS["adaptive_hedger"],
+        )
 
     def benchmark_quote_generation(self) -> Dict:
         """Benchmark full quote generation."""
@@ -167,7 +249,11 @@ class LatencyBenchmark:
             latencies.append(latency)
 
         self.results["quote_generation"] = latencies
-        return self._summarize("Quote Generation", latencies, target_ms=35)
+        return self._summarize(
+            "Quote Generation",
+            latencies,
+            target_ms=DEFAULT_LATENCY_TARGETS_MS["quote_generation"],
+        )
 
     def benchmark_end_to_end(self) -> Dict:
         """Benchmark end-to-end strategy execution."""
@@ -202,7 +288,11 @@ class LatencyBenchmark:
             latencies.append(latency)
 
         self.results["end_to_end"] = latencies
-        return self._summarize("End-to-End", latencies, target_ms=100)
+        return self._summarize(
+            "End-to-End",
+            latencies,
+            target_ms=DEFAULT_LATENCY_TARGETS_MS["end_to_end"],
+        )
 
     def _summarize(self, name: str, latencies: List[float], target_ms: float) -> Dict:
         """Summarize benchmark results."""
@@ -248,7 +338,7 @@ class LatencyBenchmark:
         results = []
         for name in selected:
             benchmark = registry[name]
-            result = benchmark()
+            result = self._run_benchmark_with_gc_isolation(benchmark)
             results.append(result)
             self._log()
 
@@ -306,6 +396,33 @@ class LatencyBenchmark:
         return report
 
 
+def _json_safe_value(value: Any) -> Any:
+    if isinstance(value, np.bool_):
+        return bool(value)
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        return float(value)
+    return value
+
+
+def _build_json_report(results_df: pd.DataFrame) -> dict[str, Any]:
+    benchmarks = [
+        {key: _json_safe_value(value) for key, value in record.items()}
+        for record in results_df.to_dict(orient="records")
+    ]
+    checks_passed = sum(1 for row in benchmarks if bool(row.get("meets_target")))
+    return {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "summary": {
+            "all_passed": bool(all(bool(row.get("meets_target")) for row in benchmarks)),
+            "checks_passed": checks_passed,
+            "checks_total": len(benchmarks),
+        },
+        "benchmarks": benchmarks,
+    }
+
+
 def main():
     """Run latency benchmarks."""
     parser = argparse.ArgumentParser(description="Run latency benchmark suite.")
@@ -320,6 +437,12 @@ def main():
         type=str,
         default="artifacts/performance/latency_benchmark_report.md",
         help="Path to save markdown report",
+    )
+    parser.add_argument(
+        "--output-json",
+        type=str,
+        default="artifacts/performance/latency_benchmark_report.json",
+        help="Path to save JSON report",
     )
     parser.add_argument(
         "--benchmarks",
@@ -339,12 +462,12 @@ def main():
     results_df = benchmark.run_all_benchmarks(quiet=args.quiet, selected_benchmarks=selected)
 
     # Save report
-    import os
-
-    report_parent = os.path.dirname(args.report_path)
-    if report_parent:
-        os.makedirs(report_parent, exist_ok=True)
-    benchmark.generate_report(save_path=args.report_path)
+    report_path = Path(args.report_path)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    benchmark.generate_report(save_path=str(report_path))
+    json_path = Path(args.output_json)
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    json_path.write_text(json.dumps(_build_json_report(results_df), indent=2), encoding="utf-8")
 
     if args.fail_on_target_miss and not benchmark.last_all_passed:
         raise SystemExit(1)

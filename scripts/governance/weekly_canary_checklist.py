@@ -50,6 +50,10 @@ def _build_report(audit: dict[str, Any], attribution: dict[str, Any]) -> dict[st
         blockers.append(f"consistency_exceptions={consistency_exceptions}")
     if not regression_ok:
         blockers.append("minimum_regression_failed")
+    if checklist.get("performance_baseline_passed") is False:
+        blockers.append("performance_baseline_failed")
+    if checklist.get("latency_baseline_passed") is False:
+        blockers.append("latency_baseline_failed")
     if checklist.get("rollback_version_marked") is not True:
         blockers.append("rollback_baseline_not_tagged")
     elif checklist.get("rollback_marker_from_tag") is not True:
@@ -68,6 +72,8 @@ def _build_report(audit: dict[str, Any], attribution: dict[str, Any]) -> dict[st
             "risk_exceptions": risk_exceptions,
             "consistency_exceptions": consistency_exceptions,
             "minimum_regression_passed": regression_ok,
+            "performance_baseline_passed": checklist.get("performance_baseline_passed"),
+            "latency_baseline_passed": checklist.get("latency_baseline_passed"),
             "rollback_version_marked": checklist.get("rollback_version_marked"),
             "rollback_marker_from_tag": checklist.get("rollback_marker_from_tag"),
         },
@@ -101,6 +107,8 @@ def _to_markdown(report: dict[str, Any]) -> str:
     lines.append(f"- Risk exceptions: `{pre['risk_exceptions']}`")
     lines.append(f"- Consistency exceptions: `{pre['consistency_exceptions']}`")
     lines.append(f"- Minimum regression passed: `{_fmt_bool(pre['minimum_regression_passed'])}`")
+    lines.append(f"- Performance baseline passed: `{_fmt_bool(pre['performance_baseline_passed'])}`")
+    lines.append(f"- Latency baseline passed: `{_fmt_bool(pre['latency_baseline_passed'])}`")
     lines.append(f"- Rollback baseline marked: `{_fmt_bool(pre['rollback_version_marked'])}`")
     lines.append(f"- Rollback baseline from tag: `{_fmt_bool(pre['rollback_marker_from_tag'])}`")
     lines.append("")

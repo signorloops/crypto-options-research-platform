@@ -95,3 +95,33 @@ def test_main_strict_returns_nonzero_when_hold(tmp_path, monkeypatch):
     assert exit_code == 2
     generated = json.loads(output_json.read_text(encoding="utf-8"))
     assert generated["decision"] == "HOLD_AND_REMEDIATE"
+
+
+def test_build_report_adds_actionable_follow_up_tasks_from_canary_blockers():
+    module = _load_module()
+    audit = {
+        "summary": {"exceptions": 0, "consistency_exceptions": 0},
+        "checklist": {
+            "minimum_regression_passed": True,
+            "rollback_version_marked": False,
+            "rollback_marker_from_tag": False,
+        },
+        "rollback_marker": {"tag": "HEAD-abc123", "source": "commit"},
+        "incomplete_tasks": [],
+    }
+    canary = {
+        "recommendation": "HOLD",
+        "blockers": [
+            "performance_baseline_failed",
+            "latency_baseline_failed",
+            "rollback_baseline_not_tagged",
+        ],
+        "warnings": [],
+    }
+
+    report = module._build_report(audit, canary)
+
+    assert report["decision"] == "HOLD_AND_REMEDIATE"
+    assert "Rerun algorithm performance baseline and fix regressions" in report["follow_up_tasks"]
+    assert "Rerun latency benchmark and reduce latency regressions" in report["follow_up_tasks"]
+    assert "Run `make prepare-rollback-tag` to create a rollback tag for the release candidate" in report["follow_up_tasks"]

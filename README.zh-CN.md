@@ -145,14 +145,18 @@ make workspace-slim-clean
 make complexity-audit
 make complexity-audit-regression
 make algorithm-performance-baseline
+make latency-benchmark
+make prepare-rollback-tag
 make algorithm-freeze-check
 
 # 每周治理链路与发布前硬门禁
-# （weekly-operating-audit 会先执行并强制校验 algorithm-performance-baseline）
+# （weekly-operating-audit 会先执行并强制校验 algorithm-performance-baseline 与 latency-benchmark）
+# （prepare-rollback-tag 会在 canary / signoff 之前为当前发布候选创建或复用本地回滚 tag）
 make weekly-operating-audit
 make weekly-close-gate
 
 # 生产偏离快照
+# （默认使用仓库内 fixture，可通过 LIVE_CEX_FILE / LIVE_DEFI_FILE 覆盖为外部数据）
 make live-deviation-snapshot
 
 # 检查部署配置是否误用旧入口模块名

@@ -149,3 +149,33 @@ def test_main_returns_nonzero_on_invalid_positive_numeric_args(tmp_path, monkeyp
     assert run_called["value"] is False
     assert output_md.exists() is False
     assert output_json.exists() is False
+
+
+def test_main_uses_tightened_default_thresholds(tmp_path, monkeypatch):
+    module = _load_module()
+    output_md = tmp_path / "artifacts" / "algorithm-performance-baseline.md"
+    output_json = tmp_path / "artifacts" / "algorithm-performance-baseline.json"
+    captured = {}
+
+    def _capture_args(args):
+        captured["var"] = args.var_p95_threshold_ms
+        captured["backtest"] = args.backtest_p95_threshold_ms
+        return _sample_report(all_passed=True)
+
+    monkeypatch.setattr(module, "_run_suite", _capture_args)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "algorithm_performance_baseline.py",
+            "--output-md",
+            str(output_md),
+            "--output-json",
+            str(output_json),
+        ],
+    )
+
+    exit_code = module.main()
+
+    assert exit_code == 0
+    assert captured == {"var": 25.0, "backtest": 30.0}

@@ -1,4 +1,4 @@
-.PHONY: help install install-dev install-dev-full workspace-slim-report workspace-slim-clean workspace-slim-clean-venv test test-unit test-integration test-cov lint lint-fix format format-check type-check quality branch-name-guard check-service-entrypoint docs-link-check complexity-audit complexity-audit-regression algorithm-performance-baseline algorithm-freeze-check daily-regression live-deviation-snapshot weekly-operating-audit weekly-close-gate weekly-pnl-attribution weekly-canary-checklist weekly-decision-log weekly-manual-prefill weekly-signoff-pack weekly-consistency-replay weekly-adr-draft clean
+.PHONY: help install install-dev install-dev-full workspace-slim-report workspace-slim-clean workspace-slim-clean-venv test test-unit test-integration test-cov lint lint-fix format format-check type-check quality branch-name-guard check-service-entrypoint docs-link-check complexity-audit complexity-audit-regression algorithm-performance-baseline latency-benchmark prepare-rollback-tag algorithm-freeze-check daily-regression live-deviation-snapshot weekly-operating-audit weekly-close-gate weekly-pnl-attribution weekly-canary-checklist weekly-decision-log weekly-manual-prefill weekly-signoff-pack weekly-consistency-replay weekly-adr-draft clean
 
 # Detect Python interpreter with project minimum version (3.9+).
 PYTHON_CANDIDATES := ./venv/bin/python ./.venv/bin/python ./env/bin/python python3.13 python3.12 python3.11 python3.10 python3.9 python3 python
@@ -25,6 +25,9 @@ BLACK := $(PYTHON) -m black
 MYPY := $(PYTHON) -m mypy
 ADR_OWNER ?= TBD
 BASELINE_COMPLEXITY_JSON ?= config/complexity_baseline.json
+LIVE_CEX_FILE ?= tests/fixtures/live_deviation/governance_cex.csv
+LIVE_DEFI_FILE ?= tests/fixtures/live_deviation/governance_defi.csv
+LIVE_DEVIATION_THRESHOLD_BPS ?= 300
 
 SRC_DIRS := core data research strategies utils config execution tests scripts
 
@@ -52,6 +55,8 @@ help:
 	@echo "  complexity-audit Run strict complexity governance checks"
 	@echo "  complexity-audit-regression Run strict complexity check against baseline (fail only on regressions)"
 	@echo "  algorithm-performance-baseline Generate VaR/backtest latency baseline report"
+	@echo "  latency-benchmark Generate quote/risk/end-to-end latency benchmark report"
+	@echo "  prepare-rollback-tag Create or reuse a local rollback tag for the current release candidate"
 	@echo "  algorithm-freeze-check Run full algorithm consistency freeze checklist"
 	@echo "  daily-regression Run daily regression gate report"
 	@echo "  live-deviation-snapshot Generate live CEX-vs-DeFi deviation snapshot report"
@@ -153,6 +158,7 @@ algorithm-freeze-check:
 	$(MAKE) branch-name-guard
 	$(MAKE) complexity-audit-regression BASELINE_COMPLEXITY_JSON=$(BASELINE_COMPLEXITY_JSON)
 	$(MAKE) algorithm-performance-baseline
+	$(MAKE) latency-benchmark
 	$(MAKE) daily-regression
 
 algorithm-performance-baseline:
@@ -160,6 +166,17 @@ algorithm-performance-baseline:
 		--output-md artifacts/algorithm-performance-baseline.md \
 		--output-json artifacts/algorithm-performance-baseline.json \
 		--strict
+
+latency-benchmark:
+	$(PYTHON) scripts/performance/latency_benchmark.py \
+		--report-path artifacts/performance/latency_benchmark_report.md \
+		--output-json artifacts/performance/latency_benchmark_report.json \
+		--quiet \
+		--fail-on-target-miss
+
+prepare-rollback-tag:
+	$(PYTHON) scripts/governance/prepare_rollback_tag.py \
+		--output-json artifacts/rollback-tag.json
 
 daily-regression:
 	$(PYTHON) scripts/governance/daily_regression_gate.py \
@@ -170,11 +187,15 @@ daily-regression:
 
 live-deviation-snapshot:
 	$(PYTHON) scripts/governance/live_deviation_snapshot.py \
+		--cex-file $(LIVE_CEX_FILE) \
+		--defi-file $(LIVE_DEFI_FILE) \
+		--threshold-bps $(LIVE_DEVIATION_THRESHOLD_BPS) \
 		--output-md artifacts/live-deviation-snapshot.md \
 		--output-json artifacts/live-deviation-snapshot.json
 
 weekly-operating-audit:
 	$(MAKE) algorithm-performance-baseline
+	$(MAKE) latency-benchmark
 	$(PYTHON) scripts/governance/weekly_operating_audit.py \
 		--inputs \
 			tests/fixtures/weekly_operating/backtest_results_20260209_174752.json \
@@ -183,16 +204,19 @@ weekly-operating-audit:
 		--thresholds config/weekly_operating_thresholds.json \
 		--consistency-thresholds config/consistency_thresholds.json \
 		--performance-json artifacts/algorithm-performance-baseline.json \
+		--latency-json artifacts/performance/latency_benchmark_report.json \
 		--output-md artifacts/weekly-operating-audit.md \
 		--output-json artifacts/weekly-operating-audit.json \
 		--regression-cmd "$(PYTHON) -m pytest -q --noconftest tests/test_pricing_inverse.py tests/test_volatility.py tests/test_hawkes_comparison.py tests/test_research_dashboard.py" \
 		--require-performance \
+		--require-latency \
 		--strict
 	$(MAKE) weekly-pnl-attribution
 	$(MAKE) weekly-canary-checklist
 	$(MAKE) weekly-adr-draft ADR_OWNER="$(ADR_OWNER)"
 	$(MAKE) weekly-decision-log
 	$(MAKE) weekly-manual-prefill
+	$(MAKE) live-deviation-snapshot
 	$(MAKE) weekly-consistency-replay
 	$(MAKE) weekly-signoff-pack
 

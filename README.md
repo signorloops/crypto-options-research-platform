@@ -145,14 +145,18 @@ make workspace-slim-clean
 make complexity-audit
 make complexity-audit-regression
 make algorithm-performance-baseline
+make latency-benchmark
+make prepare-rollback-tag
 make algorithm-freeze-check
 
 # Weekly governance pipeline and pre-release hard gates
-# (weekly-operating-audit runs and enforces algorithm-performance-baseline)
+# (weekly-operating-audit runs and enforces both algorithm-performance-baseline and latency-benchmark)
+# (prepare-rollback-tag creates or reuses a local rollback tag before canary / signoff review)
 make weekly-operating-audit
 make weekly-close-gate
 
 # Production deviation snapshot
+# (defaults use repository fixtures; override LIVE_CEX_FILE / LIVE_DEFI_FILE for external data)
 make live-deviation-snapshot
 
 # Check deployment config for legacy entrypoint names

@@ -78,6 +78,7 @@ def test_build_report_extracts_snapshot_and_flags_exceptions(tmp_path):
     assert report["checklist"]["experiment_ids_assigned"] is True
     assert report["checklist"]["change_log_complete"] is True
     assert report["checklist"]["rollback_version_marked"] is True
+    assert report["checklist"]["rollback_marker_from_tag"] is True
     assert "异常项已归因" in report["incomplete_tasks"]
 
 
@@ -116,6 +117,7 @@ def test_build_report_treats_commit_fallback_and_shallow_log_as_incomplete(tmp_p
 
     assert report["checklist"]["change_log_complete"] is False
     assert report["checklist"]["rollback_version_marked"] is False
+    assert report["checklist"]["rollback_marker_from_tag"] is False
 
 
 def test_main_strict_exits_nonzero_when_exceptions_exist(tmp_path, monkeypatch):
@@ -368,6 +370,72 @@ def test_build_report_does_not_require_performance_by_default(tmp_path):
     assert "性能基线达标" not in report["incomplete_tasks"]
 
 
+def test_build_report_requires_latency_baseline_when_requested(tmp_path):
+    module = _load_module()
+    result_path = tmp_path / "results" / "backtest_results_latency_required.json"
+    _write(
+        result_path,
+        json.dumps(
+            {
+                "Stable": {
+                    "summary": {
+                        "total_pnl": 101.0,
+                        "sharpe_ratio": 1.1,
+                        "max_drawdown": -0.08,
+                    }
+                }
+            }
+        ),
+    )
+
+    report = module._build_report(
+        [result_path],
+        dict(module.DEFAULT_THRESHOLDS),
+        latency_result={
+            "executed": False,
+            "summary": {"all_passed": None},
+            "error": "missing_latency_json",
+        },
+        latency_required=True,
+    )
+
+    assert report["checklist"]["latency_baseline_passed"] is False
+    assert "延迟基线达标" in report["incomplete_tasks"]
+
+
+def test_build_report_does_not_require_latency_by_default(tmp_path):
+    module = _load_module()
+    result_path = tmp_path / "results" / "backtest_results_latency_optional.json"
+    _write(
+        result_path,
+        json.dumps(
+            {
+                "Stable": {
+                    "summary": {
+                        "total_pnl": 111.0,
+                        "sharpe_ratio": 1.0,
+                        "max_drawdown": -0.07,
+                    }
+                }
+            }
+        ),
+    )
+
+    report = module._build_report(
+        [result_path],
+        dict(module.DEFAULT_THRESHOLDS),
+        latency_result={
+            "executed": False,
+            "summary": {"all_passed": None},
+            "error": "missing_latency_json",
+        },
+        latency_required=False,
+    )
+
+    assert report["checklist"]["latency_baseline_passed"] is None
+    assert "延迟基线达标" not in report["incomplete_tasks"]
+
+
 def test_main_strict_exits_nonzero_when_consistency_exceptions_exist(tmp_path, monkeypatch):
     module = _load_module()
     older = tmp_path / "results" / "backtest_results_old2.json"
@@ -499,6 +567,129 @@ def test_main_require_performance_strict_fails_when_json_missing(tmp_path, monke
     report = json.loads(report_json.read_text(encoding="utf-8"))
     assert report["checklist"]["performance_baseline_passed"] is False
     assert report["performance_baseline"]["error"] == "missing_performance_json"
+
+
+def test_main_require_latency_strict_fails_when_json_missing(tmp_path, monkeypatch):
+    module = _load_module()
+    result_path = tmp_path / "results" / "backtest_results_latency_missing.json"
+    _write(
+        result_path,
+        json.dumps(
+            {
+                "Stable": {
+                    "summary": {
+                        "total_pnl": 120.0,
+                        "sharpe_ratio": 1.1,
+                        "max_drawdown": -0.08,
+                    }
+                }
+            }
+        ),
+    )
+    thresholds_path = tmp_path / "thresholds.json"
+    consistency_thresholds_path = tmp_path / "consistency_thresholds.json"
+    report_md = tmp_path / "artifacts" / "weekly-operating-audit.md"
+    report_json = tmp_path / "artifacts" / "weekly-operating-audit.json"
+    missing_latency = tmp_path / "artifacts" / "missing-latency.json"
+    _write(thresholds_path, json.dumps(module.DEFAULT_THRESHOLDS))
+    _write(consistency_thresholds_path, json.dumps(module.DEFAULT_CONSISTENCY_THRESHOLDS))
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "weekly_operating_audit.py",
+            "--inputs",
+            str(result_path),
+            "--thresholds",
+            str(thresholds_path),
+            "--consistency-thresholds",
+            str(consistency_thresholds_path),
+            "--latency-json",
+            str(missing_latency),
+            "--require-latency",
+            "--output-md",
+            str(report_md),
+            "--output-json",
+            str(report_json),
+            "--strict",
+        ],
+    )
+
+    exit_code = module.main()
+
+    assert exit_code == 2
+    report = json.loads(report_json.read_text(encoding="utf-8"))
+    assert report["checklist"]["latency_baseline_passed"] is False
+    assert report["latency_baseline"]["error"] == "missing_latency_json"
+
+
+def test_main_require_latency_passes_when_baseline_passed(tmp_path, monkeypatch):
+    module = _load_module()
+    result_path = tmp_path / "results" / "backtest_results_latency_ok.json"
+    _write(
+        result_path,
+        json.dumps(
+            {
+                "Stable": {
+                    "summary": {
+                        "total_pnl": 90.0,
+                        "sharpe_ratio": 1.0,
+                        "max_drawdown": -0.06,
+                    }
+                }
+            }
+        ),
+    )
+    thresholds_path = tmp_path / "thresholds.json"
+    consistency_thresholds_path = tmp_path / "consistency_thresholds.json"
+    latency_path = tmp_path / "artifacts" / "latency-benchmark.json"
+    report_md = tmp_path / "artifacts" / "weekly-operating-audit.md"
+    report_json = tmp_path / "artifacts" / "weekly-operating-audit.json"
+    _write(thresholds_path, json.dumps(module.DEFAULT_THRESHOLDS))
+    _write(consistency_thresholds_path, json.dumps(module.DEFAULT_CONSISTENCY_THRESHOLDS))
+    _write(
+        latency_path,
+        json.dumps(
+            {
+                "summary": {"all_passed": True, "checks_passed": 2, "checks_total": 2},
+                "benchmarks": [
+                    {"name": "Quote Generation", "p95_ms": 4.2, "target_ms": 35.0},
+                    {"name": "End-to-End", "p95_ms": 65.0, "target_ms": 100.0},
+                ],
+            }
+        ),
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "weekly_operating_audit.py",
+            "--inputs",
+            str(result_path),
+            "--thresholds",
+            str(thresholds_path),
+            "--consistency-thresholds",
+            str(consistency_thresholds_path),
+            "--latency-json",
+            str(latency_path),
+            "--require-latency",
+            "--output-md",
+            str(report_md),
+            "--output-json",
+            str(report_json),
+            "--strict",
+        ],
+    )
+
+    exit_code = module.main()
+
+    assert exit_code == 0
+    report = json.loads(report_json.read_text(encoding="utf-8"))
+    assert report["checklist"]["latency_baseline_passed"] is True
+    assert report["latency_baseline"]["executed"] is True
+    assert report["latency_baseline"]["summary"]["all_passed"] is True
 
 
 def test_main_require_performance_passes_when_baseline_passed(tmp_path, monkeypatch):
@@ -688,6 +879,56 @@ def test_main_close_gate_only_strict_passes_when_ready(tmp_path, monkeypatch):
     assert report["status"] == "PASS"
     assert report["signoff_status"] == "READY_FOR_CLOSE"
     assert "Status: PASS" in report["pr_brief"]
+
+
+def test_close_gate_report_lists_actionable_auto_blocker_remediations():
+    module = _load_module()
+    signoff_json = Path("/tmp/demo-signoff.json")
+    report = module._build_close_gate_report(
+        signoff_json_path=signoff_json,
+        close_ready=False,
+        close_detail="status=AUTO_BLOCKED",
+        signoff_payload={
+            "status": "AUTO_BLOCKED",
+            "auto_blockers": [
+                "performance baseline passed",
+                "latency baseline passed",
+                "rollback_baseline_not_tagged",
+            ],
+            "pending_items": [],
+            "manual_items": [],
+            "role_signoffs": [],
+        },
+    )
+
+    assert "Rerun algorithm performance baseline and fix regressions." in report["action_items"]
+    assert "Rerun latency benchmark and reduce latency regressions." in report["action_items"]
+    assert "Run `make prepare-rollback-tag` to create a rollback tag for the release candidate." in report["action_items"]
+    assert "Next actions:" in report["pr_brief"]
+
+
+def test_close_gate_report_maps_current_signoff_auto_check_labels_to_actions():
+    module = _load_module()
+    report = module._build_close_gate_report(
+        signoff_json_path=Path("/tmp/demo-signoff-current.json"),
+        close_ready=False,
+        close_detail="status=AUTO_BLOCKED",
+        signoff_payload={
+            "status": "AUTO_BLOCKED",
+            "auto_blockers": [
+                "rollback version marked",
+                "canary recommendation is PROCEED_CANARY",
+                "decision is APPROVE_CANARY",
+            ],
+            "pending_items": [],
+            "manual_items": [],
+            "role_signoffs": [],
+        },
+    )
+
+    assert "Run `make prepare-rollback-tag` to create a rollback tag for the release candidate." in report["action_items"]
+    assert "Resolve canary blockers until recommendation becomes PROCEED_CANARY." in report["action_items"]
+    assert "Resolve decision blockers until decision becomes APPROVE_CANARY." in report["action_items"]
 
 
 def test_main_strict_close_fails_when_signoff_not_ready(tmp_path, monkeypatch):

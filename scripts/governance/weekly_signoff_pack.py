@@ -111,6 +111,14 @@ def _build_report(
             "passed": bool(checklist.get("minimum_regression_passed")),
         },
         {
+            "label": "performance baseline passed",
+            "passed": checklist.get("performance_baseline_passed") is not False,
+        },
+        {
+            "label": "latency baseline passed",
+            "passed": checklist.get("latency_baseline_passed") is not False,
+        },
+        {
             "label": "rollback version marked",
             "passed": bool(checklist.get("rollback_version_marked")),
         },

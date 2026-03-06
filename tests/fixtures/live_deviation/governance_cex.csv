@@ -1,0 +1,3 @@
+timestamp,symbol,option_type,maturity,delta,price,exchange
+2024-01-01T00:00:00Z,BTC-OPT,call,2024-03-29,0.25,1200,okx
+2024-01-01T00:01:00Z,BTC-OPT,put,2024-03-29,-0.25,980,okx

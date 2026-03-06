@@ -19,6 +19,27 @@ from scripts.governance.report_utils import (
     write_markdown as _write_markdown,
 )
 
+BLOCKER_REMEDIATIONS: dict[str, str] = {
+    "performance_baseline_failed": "Rerun algorithm performance baseline and fix regressions",
+    "latency_baseline_failed": "Rerun latency benchmark and reduce latency regressions",
+    "rollback_baseline_not_tagged": (
+        "Run `make prepare-rollback-tag` to create a rollback tag for the release candidate"
+    ),
+    "minimum_regression_failed": "Fix the minimum regression suite and rerun it",
+}
+
+
+def _dedupe_keep_order(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in items:
+        text = str(item).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
+
 
 def _build_report(audit: dict[str, Any], canary: dict[str, Any]) -> dict[str, Any]:
     summary = audit.get("summary", {})
@@ -31,6 +52,10 @@ def _build_report(audit: dict[str, Any], canary: dict[str, Any]) -> dict[str, An
     decision = "APPROVE_CANARY" if recommendation == "PROCEED_CANARY" else "HOLD_AND_REMEDIATE"
     decision_reason = (
         "All automated gates passed." if decision == "APPROVE_CANARY" else "; ".join(blockers)
+    )
+    follow_up_tasks = _dedupe_keep_order(
+        list(audit.get("incomplete_tasks", []))
+        + [BLOCKER_REMEDIATIONS.get(blocker, "") for blocker in blockers]
     )
 
     return {
@@ -51,7 +76,7 @@ def _build_report(audit: dict[str, Any], canary: dict[str, Any]) -> dict[str, An
             "reference": rollback.get("tag", ""),
             "source": rollback.get("source", ""),
         },
-        "follow_up_tasks": list(audit.get("incomplete_tasks", [])),
+        "follow_up_tasks": follow_up_tasks,
     }
 
 

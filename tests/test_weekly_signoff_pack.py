@@ -161,6 +161,39 @@ def test_build_report_treats_lowercase_online_offline_fail_as_blocking():
     assert "online_offline_replay_status=FAIL" in report["auto_blockers"]
 
 
+def test_build_report_auto_blocked_when_performance_or_latency_baseline_fails():
+    module = _load_module()
+    report = module._build_report(
+        audit={
+            "summary": {"exceptions": 0, "consistency_exceptions": 0},
+            "checklist": {
+                "minimum_regression_passed": True,
+                "rollback_version_marked": True,
+                "performance_baseline_passed": False,
+                "latency_baseline_passed": False,
+            },
+            "incomplete_tasks": [],
+        },
+        canary={"recommendation": "PROCEED_CANARY", "blockers": []},
+        decision={"decision": "APPROVE_CANARY", "follow_up_tasks": []},
+        attribution={"attribution_snapshot": [{"strategy": "demo"}]},
+        manual_status={
+            "gray_release_completed": True,
+            "observation_24h_completed": True,
+            "rollback_decision_recorded": True,
+            "pnl_attribution_confirmed": True,
+            "change_and_rollback_recorded": True,
+            "adr_signed": True,
+            "signoffs": {"research": "r", "engineering": "e", "risk": "k"},
+        },
+        consistency_replay={"status": "PASS"},
+    )
+
+    assert report["status"] == "AUTO_BLOCKED"
+    assert "performance baseline passed" in report["auto_blockers"]
+    assert "latency baseline passed" in report["auto_blockers"]
+
+
 def test_build_report_adds_pending_item_when_online_offline_data_is_pending():
     module = _load_module()
     report = module._build_report(

@@ -202,3 +202,35 @@ def test_script_runs_via_file_entrypoint(tmp_path):
     assert completed.returncode == 0, completed.stderr
     assert output_md.exists()
     assert output_json.exists()
+
+
+def test_governance_fixture_files_generate_non_empty_snapshot(tmp_path):
+    cex_path = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "live_deviation" / "governance_cex.csv"
+    defi_path = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "live_deviation" / "governance_defi.csv"
+    output_md = tmp_path / "artifacts" / "live-deviation-snapshot.md"
+    output_json = tmp_path / "artifacts" / "live-deviation-snapshot.json"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT_PATH),
+            "--cex-file",
+            str(cex_path),
+            "--defi-file",
+            str(defi_path),
+            "--threshold-bps",
+            "300",
+            "--output-md",
+            str(output_md),
+            "--output-json",
+            str(output_json),
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(output_json.read_text(encoding="utf-8"))
+    assert payload["summary"]["n_rows"] > 0

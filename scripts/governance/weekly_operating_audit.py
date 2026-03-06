@@ -48,6 +48,21 @@ MANUAL_CHECKLIST_ITEMS: list[str] = [
     "ADR",
 ]
 
+CLOSE_GATE_BLOCKER_ACTIONS: dict[str, str] = {
+    "performance baseline passed": "Rerun algorithm performance baseline and fix regressions.",
+    "latency baseline passed": "Rerun latency benchmark and reduce latency regressions.",
+    "rollback_baseline_not_tagged": (
+        "Run `make prepare-rollback-tag` to create a rollback tag for the release candidate."
+    ),
+    "rollback version marked": (
+        "Run `make prepare-rollback-tag` to create a rollback tag for the release candidate."
+    ),
+    "minimum regression passed": "Fix the minimum regression suite and rerun it.",
+    "canary recommendation is PROCEED_CANARY": "Resolve canary blockers until recommendation becomes PROCEED_CANARY.",
+    "decision is APPROVE_CANARY": "Resolve decision blockers until decision becomes APPROVE_CANARY.",
+    "online_offline_replay_status=FAIL": "Resolve online/offline replay mismatches before close.",
+}
+
 def _to_text_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -92,6 +107,28 @@ def _evaluate_close_gate(signoff_json_path: Path) -> tuple[bool, str, dict[str, 
     return False, "status=UNKNOWN", payload
 
 
+def _close_gate_action_items(
+    signoff_status: str,
+    auto_blockers: list[str],
+    manual_missing: list[str],
+    role_signoffs_missing: list[str],
+    close_ready: bool,
+) -> list[str]:
+    action_items: list[str] = []
+    if signoff_status == "AUTO_BLOCKED":
+        mapped = [CLOSE_GATE_BLOCKER_ACTIONS.get(item, "") for item in auto_blockers]
+        action_items.extend(item for item in mapped if item)
+        if not action_items:
+            action_items.append("Resolve auto blockers to clear AUTO_BLOCKED status.")
+    if manual_missing:
+        action_items.append("Complete remaining manual checks.")
+    if role_signoffs_missing:
+        action_items.append("Collect all role sign-offs (Research/Engineering/Risk).")
+    if not action_items and not close_ready:
+        action_items.append("Review sign-off payload and set status to READY_FOR_CLOSE.")
+    return action_items
+
+
 def _build_close_gate_report(
     *,
     signoff_json_path: Path,
@@ -116,15 +153,13 @@ def _build_close_gate_report(
     signoff_status = str(signoff_payload.get("status", "")).strip().upper()
     auto_blockers = _to_text_list(signoff_payload.get("auto_blockers"))
     pending_items = _to_text_list(signoff_payload.get("pending_items"))
-    action_items: list[str] = []
-    if signoff_status == "AUTO_BLOCKED":
-        action_items.append("Resolve auto blockers to clear AUTO_BLOCKED status.")
-    if manual_missing:
-        action_items.append("Complete remaining manual checks.")
-    if role_signoffs_missing:
-        action_items.append("Collect all role sign-offs (Research/Engineering/Risk).")
-    if not action_items and not close_ready:
-        action_items.append("Review sign-off payload and set status to READY_FOR_CLOSE.")
+    action_items = _close_gate_action_items(
+        signoff_status=signoff_status,
+        auto_blockers=auto_blockers,
+        manual_missing=manual_missing,
+        role_signoffs_missing=role_signoffs_missing,
+        close_ready=close_ready,
+    )
     pr_brief_lines = [
         "### Weekly Close Gate",
         f"- Status: {'PASS' if close_ready else 'FAIL'} (`{close_detail}`)",
@@ -464,6 +499,8 @@ def _build_report(
     rollback_marker: dict[str, Any] | None = None,
     performance_result: dict[str, Any] | None = None,
     performance_required: bool = False,
+    latency_result: dict[str, Any] | None = None,
+    latency_required: bool = False,
 ) -> dict[str, Any]:
     latest_by_strategy: dict[str, dict[str, Any]] = {}
     previous_by_strategy: dict[str, dict[str, Any]] = {}
@@ -587,6 +624,25 @@ def _build_report(
         performance_check = False
     else:
         performance_check = perf_all_passed
+    latency_report = (
+        dict(latency_result)
+        if latency_result is not None
+        else {
+            "executed": False,
+            "summary": {"all_passed": None},
+            "error": "",
+            "path": "",
+        }
+    )
+    latency_all_passed = (
+        bool(latency_report.get("summary", {}).get("all_passed"))
+        if latency_report.get("summary", {}).get("all_passed") is not None
+        else None
+    )
+    if latency_required and latency_all_passed is None:
+        latency_check = False
+    else:
+        latency_check = latency_all_passed
 
     checklist = {
         "kpi_snapshot_updated": bool(snapshot_rows),
@@ -602,12 +658,16 @@ def _build_report(
         "rollback_version_marked": bool(
             rollback_marker and rollback_marker.get("source") == "tag" and rollback_marker.get("tag")
         ),
+        "rollback_marker_from_tag": bool(
+            rollback_marker and rollback_marker.get("source") == "tag" and rollback_marker.get("tag")
+        ),
         "minimum_regression_passed": (
             bool(regression_result["passed"])
             if regression_result is not None and regression_result.get("executed")
             else None
         ),
         "performance_baseline_passed": performance_check,
+        "latency_baseline_passed": latency_check,
         "consistency_check_completed": (
             len(parse_errors) == 0
             and consistency_baseline_available
@@ -630,6 +690,8 @@ def _build_report(
         incomplete_tasks.append("最小回归通过")
     if performance_required and checklist["performance_baseline_passed"] is not True:
         incomplete_tasks.append("性能基线达标")
+    if latency_required and checklist["latency_baseline_passed"] is not True:
+        incomplete_tasks.append("延迟基线达标")
     if not checklist["consistency_check_completed"]:
         incomplete_tasks.append("一致性检查完成")
     if not checklist["anomalies_attributed"]:
@@ -685,6 +747,7 @@ def _build_report(
             else {"executed": False, "tag": "", "error": "", "source": ""}
         ),
         "performance_baseline": performance_report,
+        "latency_baseline": latency_report,
     }
 
 
@@ -792,6 +855,7 @@ def _to_markdown(report: dict[str, Any]) -> str:
         ("回滚版本已标记", report["checklist"]["rollback_version_marked"]),
         ("最小回归通过", report["checklist"]["minimum_regression_passed"]),
         ("性能基线达标", report["checklist"]["performance_baseline_passed"]),
+        ("延迟基线达标", report["checklist"]["latency_baseline_passed"]),
         ("一致性检查完成", report["checklist"]["consistency_check_completed"]),
         ("风险例外报告输出", report["checklist"]["risk_exception_report_output"]),
         ("异常项已归因", report["checklist"]["anomalies_attributed"]),
@@ -836,6 +900,33 @@ def _to_markdown(report: dict[str, Any]) -> str:
         lines.append("_not available_")
         if performance.get("error"):
             lines.append(f"- Error: `{performance['error']}`")
+    lines.append("")
+    lines.append("## Latency Baseline")
+    lines.append("")
+    latency = report["latency_baseline"]
+    if latency.get("executed"):
+        latency_summary = latency.get("summary", {})
+        lines.append(f"- All passed: `{latency_summary.get('all_passed')}`")
+        lines.append(
+            f"- Checks passed: `{latency_summary.get('checks_passed')}/{latency_summary.get('checks_total')}`"
+        )
+        benchmarks = latency.get("benchmarks", [])
+        if isinstance(benchmarks, list) and benchmarks:
+            benchmark_rows = [
+                {
+                    "name": row.get("name", ""),
+                    "p95_ms": _fmt(_to_float(row.get("p95_ms")), 4),
+                    "target_ms": _fmt(_to_float(row.get("target_ms")), 4),
+                    "meets_target": row.get("meets_target"),
+                }
+                for row in benchmarks
+            ]
+            lines.append("")
+            lines.append(_format_table(benchmark_rows, ["name", "p95_ms", "target_ms", "meets_target"]))
+    else:
+        lines.append("_not available_")
+        if latency.get("error"):
+            lines.append(f"- Error: `{latency['error']}`")
     lines.append("")
     lines.append("## Change Log (Auto)")
     lines.append("")
@@ -953,6 +1044,16 @@ def main() -> int:
         help="Mark audit as incomplete when performance baseline report is missing or failing.",
     )
     parser.add_argument(
+        "--latency-json",
+        default="artifacts/performance/latency_benchmark_report.json",
+        help="Path to latency benchmark JSON report.",
+    )
+    parser.add_argument(
+        "--require-latency",
+        action="store_true",
+        help="Mark audit as incomplete when latency benchmark report is missing or failing.",
+    )
+    parser.add_argument(
         "--change-log-days",
         type=int,
         default=7,
@@ -1046,6 +1147,28 @@ def main() -> int:
             "error": "missing_performance_json",
             "path": str(performance_json_path),
         }
+    latency_json_path = (repo_root / args.latency_json).resolve()
+    if latency_json_path.exists():
+        try:
+            latency_result = _load_json(latency_json_path)
+            if "executed" not in latency_result:
+                latency_result["executed"] = True
+            latency_result["path"] = str(latency_json_path)
+            latency_result["error"] = ""
+        except JSON_REPORT_EXCEPTIONS as exc:
+            latency_result = {
+                "executed": False,
+                "summary": {"all_passed": None},
+                "error": str(exc),
+                "path": str(latency_json_path),
+            }
+    else:
+        latency_result = {
+            "executed": False,
+            "summary": {"all_passed": None},
+            "error": "missing_latency_json",
+            "path": str(latency_json_path),
+        }
 
     report = _build_report(
         input_files,
@@ -1056,6 +1179,8 @@ def main() -> int:
         rollback_marker=rollback_marker,
         performance_result=performance_result,
         performance_required=args.require_performance,
+        latency_result=latency_result,
+        latency_required=args.require_latency,
     )
 
     md_path = (repo_root / args.output_md).resolve()
@@ -1088,6 +1213,11 @@ def main() -> int:
             return 2
     if args.require_performance and report["checklist"]["performance_baseline_passed"] is not True:
         print("Weekly operating audit: performance baseline missing or failing.")
+        had_issue = True
+        if args.strict:
+            return 2
+    if args.require_latency and report["checklist"]["latency_baseline_passed"] is not True:
+        print("Weekly operating audit: latency baseline missing or failing.")
         had_issue = True
         if args.strict:
             return 2

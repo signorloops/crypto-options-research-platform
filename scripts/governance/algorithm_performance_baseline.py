@@ -214,13 +214,13 @@ def main() -> int:
     parser.add_argument(
         "--var-p95-threshold-ms",
         type=float,
-        default=250.0,
+        default=25.0,
         help="P95 latency threshold for VaR Monte Carlo path.",
     )
     parser.add_argument(
         "--backtest-p95-threshold-ms",
         type=float,
-        default=1200.0,
+        default=30.0,
         help="P95 latency threshold for backtest engine path.",
     )
     parser.add_argument(
