@@ -95,6 +95,28 @@ def test_create_integrated_manager_prefers_explicit_values_over_env(monkeypatch)
     assert manager.enable_redis is False
 
 
+def test_manager_factory_kwargs_reuses_resolved_config():
+    import data.integrated_manager as module
+
+    kwargs = module._manager_factory_kwargs(
+        config={
+            "duckdb_path": "/tmp/from-env.duckdb",
+            "redis_host": "redis.env",
+            "redis_port": 6380,
+        },
+        enable_redis=False,
+        enable_duckdb=True,
+    )
+
+    assert kwargs == {
+        "duckdb_path": "/tmp/from-env.duckdb",
+        "redis_host": "redis.env",
+        "redis_port": 6380,
+        "enable_redis": False,
+        "enable_duckdb": True,
+    }
+
+
 def test_resolve_manager_config_uses_explicit_then_env_then_defaults():
     import data.integrated_manager as module
 
@@ -172,6 +194,40 @@ def test_manager_init_helpers_return_expected_defaults(tmp_path):
         "redis": None,
         "greeks_manager": None,
         "_state_lock": None,
+    }
+
+
+def test_manager_assignment_and_log_helpers_apply_expected_state(tmp_path):
+    import data.integrated_manager as module
+
+    cache = DataCache(base_dir=tmp_path / "cache")
+    init_config = module._manager_init_config(
+        parquet_cache=cache,
+        duckdb_path="/tmp/demo.duckdb",
+        redis_host="redis.demo",
+        redis_port=6381,
+        enable_redis=False,
+        enable_duckdb=True,
+    )
+    runtime_defaults = module._manager_runtime_defaults()
+    manager = object.__new__(module.IntegratedDataManager)
+
+    module._apply_manager_state(manager, init_config, runtime_defaults)
+    log_fields = module._manager_log_fields(init_config)
+
+    assert manager.parquet_manager.cache.raw_dir == cache.raw_dir
+    assert manager.duckdb_path == "/tmp/demo.duckdb"
+    assert manager.redis_host == "redis.demo"
+    assert manager.redis_port == 6381
+    assert manager.enable_redis is False
+    assert manager.enable_duckdb is True
+    assert manager.duckdb is None
+    assert manager.redis is None
+    assert log_fields == {
+        "duckdb_enabled": True,
+        "redis_enabled": False,
+        "duckdb_path": "/tmp/demo.duckdb",
+        "redis_host": None,
     }
 
 

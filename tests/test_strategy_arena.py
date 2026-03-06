@@ -103,6 +103,18 @@ def test_scorecard_paths_and_report_generation():
     assert "INDIVIDUAL STRATEGY RESULTS" in report
 
 
+def test_arena_report_body_lines_include_results_and_rankings():
+    arena = StrategyArena(_market_data_frame(), initial_capital=100000.0)
+    rich_result = _make_backtest_result("rich", [0, 100, 80, 120, 150], sharpe=1.2)
+    arena.scorecards = {"rich": arena._calculate_scorecard(rich_result)}
+
+    lines = arena_module._arena_report_body_lines(arena)
+
+    assert lines[1] == "INDIVIDUAL STRATEGY RESULTS"
+    assert any("Strategy: rich" in line for line in lines)
+    assert "STRATEGY RANKINGS" in lines
+
+
 def test_scorecard_summary_sections_include_named_blocks():
     scorecard = arena_module.StrategyScorecard(
         strategy_name="rich",
@@ -135,6 +147,40 @@ def test_scorecard_summary_sections_include_named_blocks():
     assert "Risk:" in lines
     assert "Trading:" in lines
     assert "Market Making:" in lines
+
+
+def test_scorecard_section_helpers_render_titles_and_lines():
+    scorecard = arena_module.StrategyScorecard(
+        strategy_name="rich",
+        total_pnl=150.0,
+        total_return_pct=0.0015,
+        annualized_return=0.12,
+        sharpe_ratio=1.2,
+        sortino_ratio=1.3,
+        max_drawdown=-0.1,
+        calmar_ratio=1.2,
+        total_trades=4,
+        win_rate=0.75,
+        avg_trade_pnl=0.001,
+        avg_win=60.0,
+        avg_loss=20.0,
+        profit_factor=3.0,
+        spread_capture=10.0,
+        adverse_selection_cost=0.5,
+        inventory_cost=1.0,
+        fill_rate=0.3,
+        daily_pnl_std=45.0,
+        worst_day=-20.0,
+        best_day=100.0,
+    )
+
+    sections = arena_module._scorecard_section_specs(scorecard)
+    rendered = arena_module._render_scorecard_section(*sections[0])
+
+    assert sections[0][0] == "Returns:"
+    assert any("Total PnL" in line for line in sections[0][1])
+    assert rendered[0] == "Returns:"
+    assert any("Sharpe Ratio" in line for line in rendered)
 
 
 def test_scorecard_payload_helpers_return_expected_defaults_and_fields():

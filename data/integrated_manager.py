@@ -65,6 +65,30 @@ def _manager_runtime_defaults() -> Dict[str, Any]:
     }
 
 
+def _apply_manager_state(manager: Any, init_config: Dict[str, Any], runtime_defaults: Dict[str, Any]) -> None:
+    """Apply normalized init and runtime config onto a manager instance."""
+    manager.parquet_manager = init_config["parquet_manager"]
+    manager.enable_duckdb = init_config["enable_duckdb"]
+    manager.duckdb_path = init_config["duckdb_path"]
+    manager.enable_redis = init_config["enable_redis"]
+    manager.redis_host = init_config["redis_host"]
+    manager.redis_port = init_config["redis_port"]
+    manager.duckdb = runtime_defaults["duckdb"]
+    manager.redis = runtime_defaults["redis"]
+    manager.greeks_manager = runtime_defaults["greeks_manager"]
+    manager._state_lock = runtime_defaults["_state_lock"]
+
+
+def _manager_log_fields(init_config: Dict[str, Any]) -> Dict[str, Any]:
+    """Build structured init log fields from normalized config."""
+    return {
+        "duckdb_enabled": init_config["enable_duckdb"],
+        "redis_enabled": init_config["enable_redis"],
+        "duckdb_path": init_config["duckdb_path"] or "memory",
+        "redis_host": init_config["redis_host"] if init_config["enable_redis"] else None,
+    }
+
+
 def _resolve_manager_config(
     *,
     duckdb_path: Optional[str],
@@ -93,6 +117,22 @@ def _resolve_manager_config_from_environ(
         redis_port=redis_port,
         env=os.environ,
     )
+
+
+def _manager_factory_kwargs(
+    *,
+    config: Dict[str, Any],
+    enable_redis: bool,
+    enable_duckdb: bool,
+) -> Dict[str, Any]:
+    """Build constructor kwargs from resolved config and feature flags."""
+    return {
+        "duckdb_path": config["duckdb_path"],
+        "redis_host": config["redis_host"],
+        "redis_port": config["redis_port"],
+        "enable_redis": enable_redis,
+        "enable_duckdb": enable_duckdb,
+    }
 
 
 async def _resolve_greeks_request(
@@ -262,24 +302,10 @@ class IntegratedDataManager(_IntegratedRealtimeCacheMixin):
             enable_duckdb=enable_duckdb,
         )
         runtime_defaults = _manager_runtime_defaults()
-        self.parquet_manager = init_config["parquet_manager"]
-        self.enable_duckdb = init_config["enable_duckdb"]
-        self.duckdb_path = init_config["duckdb_path"]
-        self.enable_redis = init_config["enable_redis"]
-        self.redis_host = init_config["redis_host"]
-        self.redis_port = init_config["redis_port"]
-        self.duckdb = runtime_defaults["duckdb"]
-        self.redis = runtime_defaults["redis"]
-        self.greeks_manager = runtime_defaults["greeks_manager"]
-        self._state_lock = runtime_defaults["_state_lock"]
+        _apply_manager_state(self, init_config, runtime_defaults)
         logger.info(
             "IntegratedDataManager initialized",
-            extra=log_extra(
-                duckdb_enabled=enable_duckdb,
-                redis_enabled=enable_redis,
-                duckdb_path=duckdb_path or "memory",
-                redis_host=redis_host if enable_redis else None,
-            ),
+            extra=log_extra(**_manager_log_fields(init_config)),
         )
 
     def _get_state_lock(self) -> asyncio.Lock:
@@ -579,11 +605,10 @@ def create_integrated_manager(
         redis_host=redis_host,
         redis_port=redis_port,
     )
-
     return IntegratedDataManager(
-        duckdb_path=config["duckdb_path"],
-        redis_host=config["redis_host"],
-        redis_port=config["redis_port"],
-        enable_redis=enable_redis,
-        enable_duckdb=enable_duckdb,
+        **_manager_factory_kwargs(
+            config=config,
+            enable_redis=enable_redis,
+            enable_duckdb=enable_duckdb,
+        )
     )

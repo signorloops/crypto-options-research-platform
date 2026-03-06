@@ -112,34 +112,62 @@ class StrategyScorecard:
         return "\n" + "\n".join(_scorecard_summary_sections(self)) + "\n"
 
 
+def _render_scorecard_section(title: str, lines: List[str]) -> List[str]:
+    return [title, *lines, ""]
+
+
+def _scorecard_section_specs(scorecard: StrategyScorecard) -> List[Tuple[str, List[str]]]:
+    return [
+        (
+            "Returns:",
+            [
+                f"  Total PnL:          ${scorecard.total_pnl:,.2f} ({scorecard.total_return_pct:.2%})",
+                f"  Annualized Return:  {scorecard.annualized_return:.2%}",
+                f"  Sharpe Ratio:       {scorecard.sharpe_ratio:.2f}",
+                f"  Deflated Sharpe:    {scorecard.deflated_sharpe_ratio:.2f}",
+                f"  Sortino Ratio:      {scorecard.sortino_ratio:.2f}",
+            ],
+        ),
+        (
+            "Risk:",
+            [
+                f"  Max Drawdown:       {scorecard.max_drawdown:.2%}",
+                f"  Calmar Ratio:       {scorecard.calmar_ratio:.2f}",
+                f"  Daily PnL Std:      ${scorecard.daily_pnl_std:,.2f}",
+            ],
+        ),
+        (
+            "Trading:",
+            [
+                f"  Total Trades:       {scorecard.total_trades}",
+                f"  Win Rate:           {scorecard.win_rate:.1%}",
+                f"  Avg Trade PnL:      ${scorecard.avg_trade_pnl:.2f}",
+                f"  Profit Factor:      {scorecard.profit_factor:.2f}",
+            ],
+        ),
+        (
+            "Market Making:",
+            [
+                f"  Spread Capture:     ${scorecard.spread_capture:,.2f}",
+                f"  Adverse Select:     ${scorecard.adverse_selection_cost:,.2f}",
+                f"  Inventory Cost:     ${scorecard.inventory_cost:,.2f}",
+                f"  Fill Rate:          {scorecard.fill_rate:.1%}",
+            ],
+        ),
+    ]
+
+
 def _scorecard_summary_sections(scorecard: StrategyScorecard) -> List[str]:
+    sections = [
+        line
+        for title, lines in _scorecard_section_specs(scorecard)
+        for line in _render_scorecard_section(title, lines)
+    ]
     return [
         "=" * 60,
         f"Strategy: {scorecard.strategy_name}",
         "=" * 60,
-        "Returns:",
-        f"  Total PnL:          ${scorecard.total_pnl:,.2f} ({scorecard.total_return_pct:.2%})",
-        f"  Annualized Return:  {scorecard.annualized_return:.2%}",
-        f"  Sharpe Ratio:       {scorecard.sharpe_ratio:.2f}",
-        f"  Deflated Sharpe:    {scorecard.deflated_sharpe_ratio:.2f}",
-        f"  Sortino Ratio:      {scorecard.sortino_ratio:.2f}",
-        "",
-        "Risk:",
-        f"  Max Drawdown:       {scorecard.max_drawdown:.2%}",
-        f"  Calmar Ratio:       {scorecard.calmar_ratio:.2f}",
-        f"  Daily PnL Std:      ${scorecard.daily_pnl_std:,.2f}",
-        "",
-        "Trading:",
-        f"  Total Trades:       {scorecard.total_trades}",
-        f"  Win Rate:           {scorecard.win_rate:.1%}",
-        f"  Avg Trade PnL:      ${scorecard.avg_trade_pnl:.2f}",
-        f"  Profit Factor:      {scorecard.profit_factor:.2f}",
-        "",
-        "Market Making:",
-        f"  Spread Capture:     ${scorecard.spread_capture:,.2f}",
-        f"  Adverse Select:     ${scorecard.adverse_selection_cost:,.2f}",
-        f"  Inventory Cost:     ${scorecard.inventory_cost:,.2f}",
-        f"  Fill Rate:          {scorecard.fill_rate:.1%}",
+        *sections[:-1],
         "=" * 60,
     ]
 
@@ -467,6 +495,16 @@ def _arena_report_rankings_lines(arena: "StrategyArena") -> List[str]:
     return lines
 
 
+def _arena_report_body_lines(arena: "StrategyArena") -> List[str]:
+    return [
+        "\n" + "=" * 70,
+        "INDIVIDUAL STRATEGY RESULTS",
+        "=" * 70,
+        *_strategy_summary_lines(arena.scorecards),
+        *_arena_report_rankings_lines(arena),
+    ]
+
+
 def _build_backtest_engine(
     *,
     strategy: MarketMakingStrategy,
@@ -766,11 +804,7 @@ class StrategyArena:
     def generate_report(self, output_file: Optional[str] = None) -> str:
         """Generate a text report and optionally persist it to disk."""
         lines = _arena_report_header_lines(self)
-        lines.append("\n" + "=" * 70)
-        lines.append("INDIVIDUAL STRATEGY RESULTS")
-        lines.append("=" * 70)
-        lines.extend(_strategy_summary_lines(self.scorecards))
-        lines.extend(_arena_report_rankings_lines(self))
+        lines.extend(_arena_report_body_lines(self))
         report = "\n".join(lines)
         if output_file:
             with open(output_file, "w") as f:
