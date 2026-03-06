@@ -29,6 +29,9 @@ from scripts.governance.status_action_utils import (
     build_close_gate_action_items,
     build_incomplete_tasks,
 )
+from scripts.governance.weekly_operating_data_utils import (
+    collect_strategy_snapshots,
+)
 from scripts.governance.weekly_operating_render_utils import (
     build_close_gate_markdown,
     build_close_gate_pr_brief,
@@ -158,88 +161,6 @@ def _to_float(value: Any) -> float | None:
     if f in (float("inf"), float("-inf")):
         return None
     return f
-
-
-def _pick_first_numeric(maps: Sequence[dict[str, Any]], keys: Sequence[str]) -> float | None:
-    for mapping in maps:
-        for key in keys:
-            if key in mapping:
-                value = _to_float(mapping.get(key))
-                if value is not None:
-                    return value
-    return None
-
-
-def _pick_first_text(maps: Sequence[dict[str, Any]], keys: Sequence[str]) -> str | None:
-    for mapping in maps:
-        for key in keys:
-            value = mapping.get(key)
-            if value is None:
-                continue
-            text = str(value).strip()
-            if text:
-                return text
-    return None
-
-
-def _infer_experiment_id(source: Path) -> str:
-    stem = source.stem.strip().replace(" ", "_")
-    return f"AUTO-{stem}"
-
-
-def _extract_strategy_rows(raw: dict[str, Any], source: Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for strategy, payload in raw.items():
-        if not isinstance(payload, dict):
-            continue
-
-        summary = payload.get("summary")
-        metrics = payload.get("metrics")
-        risk = payload.get("risk")
-        summary_map = summary if isinstance(summary, dict) else {}
-        metrics_map = metrics if isinstance(metrics, dict) else {}
-        risk_map = risk if isinstance(risk, dict) else {}
-        candidates = [summary_map, metrics_map, risk_map, payload]
-
-        pnl = _pick_first_numeric(candidates, ["total_pnl", "final_pnl", "pnl"])
-        sharpe = _pick_first_numeric(candidates, ["sharpe_ratio", "sharpe", "deflated_sharpe"])
-        max_dd_raw = _pick_first_numeric(candidates, ["max_drawdown", "max_dd"])
-        max_dd_abs = abs(max_dd_raw) if max_dd_raw is not None else None
-        var_breach_rate = _pick_first_numeric(
-            candidates,
-            [
-                "var_breach_rate",
-                "var_exception_rate",
-                "var_breach_ratio",
-                "var_breach",
-            ],
-        )
-        fill_error = _pick_first_numeric(
-            candidates,
-            [
-                "fill_calibration_error",
-                "fill_error",
-                "calibration_error",
-            ],
-        )
-        experiment_id = _pick_first_text(
-            candidates, ["experiment_id", "experiment", "exp_id"]
-        ) or _infer_experiment_id(source)
-
-        rows.append(
-            {
-                "strategy": str(strategy),
-                "source_file": source.name,
-                "pnl": pnl,
-                "sharpe": sharpe,
-                "max_drawdown_abs": max_dd_abs,
-                "var_breach_rate": var_breach_rate,
-                "fill_calibration_error": fill_error,
-                "experiment_id": experiment_id,
-            }
-        )
-    return rows
-
 
 def _fmt(v: float | None, digits: int = 6) -> str:
     if v is None:
@@ -403,30 +324,13 @@ def _build_report(
     latency_result: dict[str, Any] | None = None,
     latency_required: bool = False,
 ) -> dict[str, Any]:
-    latest_by_strategy: dict[str, dict[str, Any]] = {}
-    previous_by_strategy: dict[str, dict[str, Any]] = {}
-    parse_errors: list[dict[str, str]] = []
     consistency_thresholds_final = (
         dict(consistency_thresholds)
         if consistency_thresholds is not None
         else dict(DEFAULT_CONSISTENCY_THRESHOLDS)
     )
     files_sorted = sorted(input_files, key=lambda p: p.stat().st_mtime, reverse=True)
-
-    for path in files_sorted:
-        try:
-            raw = _load_json(path)
-            rows = _extract_strategy_rows(raw, path)
-        except JSON_REPORT_EXCEPTIONS as exc:  # pragma: no cover - defensive parser boundary
-            parse_errors.append({"file": str(path), "error": str(exc)})
-            continue
-
-        for row in rows:
-            strategy = row["strategy"]
-            if strategy not in latest_by_strategy:
-                latest_by_strategy[strategy] = row
-            elif strategy not in previous_by_strategy:
-                previous_by_strategy[strategy] = row
+    latest_by_strategy, previous_by_strategy, parse_errors = collect_strategy_snapshots(files_sorted)
 
     snapshot_rows = _evaluate_rows(
         sorted(latest_by_strategy.values(), key=lambda r: r["strategy"]), thresholds

@@ -281,6 +281,27 @@ class IntegratedDataManager(_IntegratedRealtimeCacheMixin):
 
     # ==================== DuckDB Analytics Methods ====================
 
+    def _require_duckdb(self) -> DuckDBCache:
+        """Return initialized DuckDB backend or raise a consistent error."""
+        duckdb = self.duckdb
+        if duckdb is None:
+            raise RuntimeError("DuckDB not initialized")
+        return duckdb
+
+    def _build_exchange_cache_target(
+        self,
+        *,
+        exchange: str,
+        data_type: str,
+        instrument: str,
+    ) -> tuple[str, str]:
+        """Build sanitized parquet glob and DuckDB table name for cached exchange data."""
+        safe_instrument = instrument.replace("/", "_").replace("-", "_")
+        cache_base = Path(self.parquet_manager.cache.raw_dir)
+        pattern = str(cache_base / exchange / data_type / safe_instrument / "**/*.parquet")
+        table_name = f"{exchange}_{data_type}_{safe_instrument}"
+        return pattern, table_name
+
     def load_parquet_to_duckdb(
         self, pattern: str, table_name: str, columns: Optional[List[str]] = None
     ) -> int:
@@ -295,10 +316,7 @@ class IntegratedDataManager(_IntegratedRealtimeCacheMixin):
         Returns:
             Number of rows loaded
         """
-        if not self.duckdb:
-            raise RuntimeError("DuckDB not initialized")
-
-        return self.duckdb.load_parquet(pattern, table_name, columns)
+        return self._require_duckdb().load_parquet(pattern, table_name, columns)
 
     def load_exchange_data_to_duckdb(self, exchange: str, data_type: str, instrument: str) -> str:
         """
@@ -312,15 +330,12 @@ class IntegratedDataManager(_IntegratedRealtimeCacheMixin):
         Returns:
             Table/view name created
         """
-        if not self.duckdb:
-            raise RuntimeError("DuckDB not initialized")
-
-        safe_instrument = instrument.replace("/", "_").replace("-", "_")
-        cache_base = Path(self.parquet_manager.cache.raw_dir)
-        pattern = str(cache_base / exchange / data_type / safe_instrument / "**/*.parquet")
-        table_name = f"{exchange}_{data_type}_{safe_instrument}"
-
-        self.duckdb.load_parquet(pattern, table_name)
+        pattern, table_name = self._build_exchange_cache_target(
+            exchange=exchange,
+            data_type=data_type,
+            instrument=instrument,
+        )
+        self._require_duckdb().load_parquet(pattern, table_name)
         return table_name
 
     def query_duckdb(self, sql: str, params: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
@@ -334,24 +349,15 @@ class IntegratedDataManager(_IntegratedRealtimeCacheMixin):
         Returns:
             Query results as DataFrame
         """
-        if not self.duckdb:
-            raise RuntimeError("DuckDB not initialized")
-
-        return self.duckdb.query(sql, params)
+        return self._require_duckdb().query(sql, params)
 
     def create_tick_view(self, exchange: str, instrument: str) -> str:
         """Create optimized tick view for analysis."""
-        if not self.duckdb:
-            raise RuntimeError("DuckDB not initialized")
-
-        return self.duckdb.create_tick_view(exchange, instrument)
+        return self._require_duckdb().create_tick_view(exchange, instrument)
 
     def create_trade_view(self, exchange: str, instrument: str) -> str:
         """Create optimized trade view for analysis."""
-        if not self.duckdb:
-            raise RuntimeError("DuckDB not initialized")
-
-        return self.duckdb.create_trade_view(exchange, instrument)
+        return self._require_duckdb().create_trade_view(exchange, instrument)
 
     def resample_to_ohlcv(
         self,
@@ -372,10 +378,7 @@ class IntegratedDataManager(_IntegratedRealtimeCacheMixin):
         Returns:
             OHLCV DataFrame
         """
-        if not self.duckdb:
-            raise RuntimeError("DuckDB not initialized")
-
-        return self.duckdb.resample_ohlcv(table_name, timeframe, start, end)
+        return self._require_duckdb().resample_ohlcv(table_name, timeframe, start, end)
 
     # ==================== Redis Real-time Methods ====================
 

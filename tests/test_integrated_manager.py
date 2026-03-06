@@ -58,6 +58,25 @@ def test_load_exchange_data_to_duckdb_uses_sanitized_cache_path(tmp_path):
     assert str(cache.raw_dir) in called_pattern
 
 
+def test_build_exchange_cache_target_returns_pattern_and_table_name(tmp_path):
+    cache = DataCache(base_dir=tmp_path / "cache")
+    manager = IntegratedDataManager(
+        parquet_cache=cache,
+        enable_duckdb=False,
+        enable_redis=False,
+    )
+
+    pattern, table_name = manager._build_exchange_cache_target(
+        exchange="okx",
+        data_type="tick",
+        instrument="BTC/USD-PERP",
+    )
+
+    assert table_name == "okx_tick_BTC_USD_PERP"
+    assert "BTC_USD_PERP" in pattern
+    assert str(cache.raw_dir) in pattern
+
+
 @pytest.mark.asyncio
 async def test_connect_gracefully_handles_backend_init_failures(monkeypatch):
     """Manager should degrade cleanly when optional backends fail to initialize."""
@@ -127,6 +146,17 @@ def test_duckdb_wrappers_delegate_when_initialized():
     assert manager.create_tick_view("okx", "BTC-USD") == "tick_view"
     assert manager.create_trade_view("okx", "BTC-USD") == "trade_view"
     assert not manager.resample_to_ohlcv("t").empty
+
+
+def test_require_duckdb_returns_backend_or_raises():
+    manager = IntegratedDataManager(enable_duckdb=False, enable_redis=False)
+
+    with pytest.raises(RuntimeError, match="DuckDB not initialized"):
+        manager._require_duckdb()
+
+    backend = MagicMock()
+    manager.duckdb = backend
+    assert manager._require_duckdb() is backend
 
 
 def test_init_does_not_require_current_event_loop(monkeypatch):
