@@ -9,6 +9,7 @@ This module provides a unified interface for:
 
 import asyncio
 from datetime import datetime
+import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -32,6 +33,40 @@ from utils.logging_config import get_logger, log_extra
 logger = get_logger(__name__)
 
 REDIS_CONNECT_EXCEPTIONS = (RedisError, OSError, ValueError, TypeError, RuntimeError)
+
+
+def _resolve_manager_config(
+    *,
+    duckdb_path: Optional[str],
+    redis_host: Optional[str],
+    redis_port: Optional[int],
+    env: Dict[str, str],
+) -> Dict[str, Any]:
+    """Resolve integrated-manager connection settings from args, env, and defaults."""
+    return {
+        "duckdb_path": duckdb_path or env.get("DUCKDB_PATH"),
+        "redis_host": redis_host or env.get("REDIS_HOST", "localhost"),
+        "redis_port": redis_port or int(env.get("REDIS_PORT", "6379")),
+    }
+
+
+async def _resolve_greeks_request(
+    *,
+    instrument: str,
+    greeks_manager: Any,
+    redis: Any,
+    fetch_func: Optional[Callable],
+) -> Optional[Dict[str, float]]:
+    """Resolve Greeks from refresh path, cache path, or optional fallback fetch."""
+    if not greeks_manager:
+        if fetch_func:
+            return await fetch_func(instrument)
+        return None
+    if fetch_func:
+        return await greeks_manager.get_greeks_with_refresh(instrument, fetch_func)
+    if redis is None:
+        return None
+    return await redis.get_greeks(instrument)
 
 
 class _IntegratedRealtimeCacheMixin:
@@ -439,19 +474,12 @@ class IntegratedDataManager(_IntegratedRealtimeCacheMixin):
         Returns:
             Greeks data or None
         """
-        greeks_manager = self.greeks_manager
-        redis = self.redis
-
-        if not greeks_manager:
-            if fetch_func:
-                return await fetch_func(instrument)
-            return None
-
-        if fetch_func:
-            return await greeks_manager.get_greeks_with_refresh(instrument, fetch_func)
-        if redis is None:
-            return None
-        return await redis.get_greeks(instrument)
+        return await _resolve_greeks_request(
+            instrument=instrument,
+            greeks_manager=self.greeks_manager,
+            redis=self.redis,
+            fetch_func=fetch_func,
+        )
 
     # ==================== Utility Methods ====================
 
@@ -492,12 +520,17 @@ def create_integrated_manager(
     - REDIS_PORT (default: 6379)
     - DUCKDB_PATH (default: None, uses in-memory)
     """
-    import os
+    config = _resolve_manager_config(
+        duckdb_path=duckdb_path,
+        redis_host=redis_host,
+        redis_port=redis_port,
+        env=os.environ,
+    )
 
     return IntegratedDataManager(
-        duckdb_path=duckdb_path or os.getenv("DUCKDB_PATH"),
-        redis_host=redis_host or os.getenv("REDIS_HOST", "localhost"),
-        redis_port=redis_port or int(os.getenv("REDIS_PORT", "6379")),
+        duckdb_path=config["duckdb_path"],
+        redis_host=config["redis_host"],
+        redis_port=config["redis_port"],
         enable_redis=enable_redis,
         enable_duckdb=enable_duckdb,
     )

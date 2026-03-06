@@ -95,6 +95,79 @@ def test_create_integrated_manager_prefers_explicit_values_over_env(monkeypatch)
     assert manager.enable_redis is False
 
 
+def test_resolve_manager_config_uses_explicit_then_env_then_defaults():
+    import data.integrated_manager as module
+
+    config = module._resolve_manager_config(
+        duckdb_path=None,
+        redis_host=None,
+        redis_port=None,
+        env={
+            "DUCKDB_PATH": "/tmp/env.duckdb",
+            "REDIS_HOST": "redis.env",
+            "REDIS_PORT": "6380",
+        },
+    )
+    explicit = module._resolve_manager_config(
+        duckdb_path="/tmp/arg.duckdb",
+        redis_host="redis.arg",
+        redis_port=6390,
+        env={},
+    )
+
+    assert config == {
+        "duckdb_path": "/tmp/env.duckdb",
+        "redis_host": "redis.env",
+        "redis_port": 6380,
+    }
+    assert explicit == {
+        "duckdb_path": "/tmp/arg.duckdb",
+        "redis_host": "redis.arg",
+        "redis_port": 6390,
+    }
+
+
+@pytest.mark.asyncio
+async def test_resolve_greeks_request_prefers_refresh_then_redis_then_fetch():
+    import data.integrated_manager as module
+
+    greeks_manager = MagicMock()
+    greeks_manager.get_greeks_with_refresh = AsyncMock(return_value={"delta": 0.2})
+    redis = MagicMock()
+    redis.get_greeks = AsyncMock(return_value={"delta": 0.1})
+    fetch_func = AsyncMock(return_value={"delta": 0.3})
+
+    refreshed = await module._resolve_greeks_request(
+        instrument="BTC",
+        greeks_manager=greeks_manager,
+        redis=redis,
+        fetch_func=fetch_func,
+    )
+    cached = await module._resolve_greeks_request(
+        instrument="BTC",
+        greeks_manager=greeks_manager,
+        redis=redis,
+        fetch_func=None,
+    )
+    fetched = await module._resolve_greeks_request(
+        instrument="BTC",
+        greeks_manager=None,
+        redis=None,
+        fetch_func=fetch_func,
+    )
+    missing = await module._resolve_greeks_request(
+        instrument="BTC",
+        greeks_manager=None,
+        redis=None,
+        fetch_func=None,
+    )
+
+    assert refreshed == {"delta": 0.2}
+    assert cached == {"delta": 0.1}
+    assert fetched == {"delta": 0.3}
+    assert missing is None
+
+
 def test_load_exchange_data_to_duckdb_uses_sanitized_cache_path(tmp_path):
     """DuckDB loader should follow DataCache sanitization and base dir layout."""
     cache = DataCache(base_dir=tmp_path / "cache")

@@ -66,6 +66,19 @@ def build_consistency_checks(
     return checks
 
 
+def build_risk_exceptions(snapshot_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Extract risk exception rows from evaluated strategy snapshots."""
+    return [
+        {
+            "strategy": row["strategy"],
+            "source_file": row["source_file"],
+            "breached_rules": row["breached_rules"],
+        }
+        for row in snapshot_rows
+        if row["status"] == "FAIL"
+    ]
+
+
 def normalize_optional_baseline_report(result: dict[str, Any] | None) -> dict[str, Any]:
     """Return the supplied baseline report or the default missing payload."""
     if result is not None:
@@ -84,6 +97,40 @@ def resolve_optional_report_check(report: dict[str, Any], *, required: bool) -> 
     if all_passed is None:
         return False if required else None
     return bool(all_passed)
+
+
+def normalize_regression_report(result: dict[str, Any] | None) -> dict[str, Any]:
+    """Return regression section payload with default empty structure."""
+    if result is not None:
+        return result
+    return {
+        "executed": False,
+        "command": "",
+        "passed": None,
+        "return_code": None,
+        "output_tail": "",
+    }
+
+
+def normalize_change_log(change_log: dict[str, Any] | None) -> dict[str, Any]:
+    """Return change-log section payload with default empty structure."""
+    if change_log is not None:
+        return change_log
+    return {
+        "executed": False,
+        "since_days": 0,
+        "entries": [],
+        "count": 0,
+        "shallow": False,
+        "error": "",
+    }
+
+
+def normalize_rollback_marker(rollback_marker: dict[str, Any] | None) -> dict[str, Any]:
+    """Return rollback-marker section payload with default empty structure."""
+    if rollback_marker is not None:
+        return rollback_marker
+    return {"executed": False, "tag": "", "error": "", "source": ""}
 
 
 def build_operating_checklist(

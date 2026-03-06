@@ -5,9 +5,13 @@ from __future__ import annotations
 import pytest
 
 from scripts.governance.weekly_operating_report_utils import (
+    build_risk_exceptions,
     build_consistency_checks,
     build_operating_checklist,
+    normalize_change_log,
     build_report_summary,
+    normalize_regression_report,
+    normalize_rollback_marker,
     normalize_optional_baseline_report,
     resolve_optional_report_check,
 )
@@ -109,4 +113,50 @@ def test_build_operating_checklist_and_summary_use_shared_inputs():
         "consistency_pairs": 1,
         "consistency_exceptions": 0,
         "parse_errors": 0,
+    }
+
+
+def test_risk_exceptions_and_default_section_helpers_return_stable_shapes():
+    snapshot_rows = [
+        {
+            "strategy": "A",
+            "source_file": "a.json",
+            "status": "PASS",
+            "breached_rules": "",
+        },
+        {
+            "strategy": "B",
+            "source_file": "b.json",
+            "status": "FAIL",
+            "breached_rules": "sharpe<0.5",
+        },
+    ]
+
+    assert build_risk_exceptions(snapshot_rows) == [
+        {
+            "strategy": "B",
+            "source_file": "b.json",
+            "breached_rules": "sharpe<0.5",
+        }
+    ]
+    assert normalize_regression_report(None) == {
+        "executed": False,
+        "command": "",
+        "passed": None,
+        "return_code": None,
+        "output_tail": "",
+    }
+    assert normalize_change_log(None) == {
+        "executed": False,
+        "since_days": 0,
+        "entries": [],
+        "count": 0,
+        "shallow": False,
+        "error": "",
+    }
+    assert normalize_rollback_marker(None) == {
+        "executed": False,
+        "tag": "",
+        "error": "",
+        "source": "",
     }

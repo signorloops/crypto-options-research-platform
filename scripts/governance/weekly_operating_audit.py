@@ -48,7 +48,11 @@ from scripts.governance.weekly_operating_report_utils import (
     build_consistency_checks,
     build_operating_checklist,
     build_report_summary,
+    build_risk_exceptions,
+    normalize_change_log,
     normalize_optional_baseline_report,
+    normalize_regression_report,
+    normalize_rollback_marker,
     resolve_optional_report_check,
 )
 from scripts.governance.weekly_operating_runtime_utils import (
@@ -321,15 +325,7 @@ def _build_report(
     snapshot_rows = _evaluate_rows(
         sorted(latest_by_strategy.values(), key=lambda r: r["strategy"]), thresholds
     )
-    risk_exceptions = [
-        {
-            "strategy": row["strategy"],
-            "source_file": row["source_file"],
-            "breached_rules": row["breached_rules"],
-        }
-        for row in snapshot_rows
-        if row["status"] == "FAIL"
-    ]
+    risk_exceptions = build_risk_exceptions(snapshot_rows)
 
     consistency_checks = build_consistency_checks(
         latest_by_strategy=latest_by_strategy,
@@ -389,34 +385,9 @@ def _build_report(
         "manual_checklist_items": MANUAL_CHECKLIST_ITEMS,
         "incomplete_tasks": incomplete_tasks,
         "parse_errors": parse_errors,
-        "regression": (
-            regression_result
-            if regression_result is not None
-            else {
-                "executed": False,
-                "command": "",
-                "passed": None,
-                "return_code": None,
-                "output_tail": "",
-            }
-        ),
-        "change_log": (
-            change_log
-            if change_log is not None
-            else {
-                "executed": False,
-                "since_days": 0,
-                "entries": [],
-                "count": 0,
-                "shallow": False,
-                "error": "",
-            }
-        ),
-        "rollback_marker": (
-            rollback_marker
-            if rollback_marker is not None
-            else {"executed": False, "tag": "", "error": "", "source": ""}
-        ),
+        "regression": normalize_regression_report(regression_result),
+        "change_log": normalize_change_log(change_log),
+        "rollback_marker": normalize_rollback_marker(rollback_marker),
         "performance_baseline": performance_report,
         "latency_baseline": latency_report,
     }
