@@ -244,6 +244,36 @@ def test_main_executes_regression_cmd_without_shell(tmp_path, monkeypatch):
     assert regression_kwargs.get("shell") in (None, False)
 
 
+def test_detect_latest_tag_falls_back_to_commit_when_head_is_not_tagged(tmp_path):
+    module = _load_module()
+
+    def _git(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *args],
+            cwd=tmp_path,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+    _git("init")
+    _git("config", "user.name", "Test User")
+    _git("config", "user.email", "test@example.com")
+    _write(tmp_path / "README.md", "demo\n")
+    _git("add", "README.md")
+    _git("commit", "-m", "init")
+    _git("tag", "-a", "backup-release-20260306-demo", "-m", "rollback baseline")
+    _write(tmp_path / "next.txt", "next\n")
+    _git("add", "next.txt")
+    _git("commit", "-m", "next")
+
+    marker = module._detect_latest_tag(tmp_path)
+
+    assert marker["executed"] is True
+    assert marker["source"] == "commit"
+    assert marker["tag"].startswith("HEAD-")
+
+
 def test_discover_input_files_searches_nested_result_directories(tmp_path):
     module = _load_module()
     nested = tmp_path / "results" / "backtest_full_history" / "backtest_full_nested.json"

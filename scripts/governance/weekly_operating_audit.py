@@ -434,7 +434,7 @@ def _collect_recent_changes(repo_root: Path, since_days: int) -> dict[str, Any]:
 
 def _detect_latest_tag(repo_root: Path) -> dict[str, Any]:
     completed = subprocess.run(
-        ["git", "describe", "--tags", "--abbrev=0"],
+        ["git", "describe", "--tags", "--exact-match", "HEAD"],
         cwd=repo_root,
         text=True,
         capture_output=True,

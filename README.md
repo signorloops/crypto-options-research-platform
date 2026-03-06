@@ -152,6 +152,7 @@ make algorithm-freeze-check
 # Weekly governance pipeline and pre-release hard gates
 # (weekly-operating-audit runs and enforces both algorithm-performance-baseline and latency-benchmark)
 # (prepare-rollback-tag creates or reuses a local rollback tag before canary / signoff review)
+# (weekly-manual-prefill writes both artifacts/weekly-manual-status.json and artifacts/weekly-manual-status.md)
 make weekly-operating-audit
 make weekly-close-gate
 

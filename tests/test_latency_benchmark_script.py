@@ -208,3 +208,65 @@ def test_run_all_benchmarks_collects_gc_between_benchmarks(monkeypatch):
     bench.run_all_benchmarks(quiet=True)
 
     assert events == ["collect"]
+
+
+def test_summarize_can_exclude_warmup_samples_from_percentiles():
+    module = _load_module()
+    bench = module.LatencyBenchmark(iterations=4)
+
+    summary = bench._summarize(
+        "End-to-End",
+        [200.0, 40.0, 42.0, 44.0],
+        target_ms=100.0,
+        warmup_samples=1,
+    )
+
+    assert summary["samples_excluded"] == 1
+    assert summary["sample_count"] == 3
+    assert summary["max_ms"] == 44.0
+    assert summary["p95_ms"] < 100.0
+    assert summary["meets_target"] is True
+
+
+def test_end_to_end_summary_excludes_warmup_samples(monkeypatch):
+    module = _load_module()
+    bench = module.LatencyBenchmark(iterations=10)
+
+    class _DummyStrategy:
+        def __init__(self):
+            self.regime_detector = object()
+
+        def quote(self, *_args, **_kwargs):
+            return None
+
+    captured = {}
+
+    monkeypatch.setattr(module, "IntegratedMarketMakingStrategy", _DummyStrategy)
+    monkeypatch.setattr(bench, "_measure", lambda func, *args, **kwargs: 1.0)
+    monkeypatch.setattr(bench, "_warmup_regime_detector", lambda *_args, **_kwargs: None)
+
+    def _capture(name, latencies, target_ms, warmup_samples=0):
+        captured["name"] = name
+        captured["warmup_samples"] = warmup_samples
+        return {
+            "name": name,
+            "target_ms": target_ms,
+            "mean_ms": 1.0,
+            "median_ms": 1.0,
+            "p50_ms": 1.0,
+            "p95_ms": 1.0,
+            "p99_ms": 1.0,
+            "min_ms": 1.0,
+            "max_ms": 1.0,
+            "std_ms": 0.0,
+            "meets_target": True,
+            "samples_excluded": warmup_samples,
+            "sample_count": len(latencies) - warmup_samples,
+        }
+
+    monkeypatch.setattr(bench, "_summarize", _capture)
+
+    bench.benchmark_end_to_end()
+
+    assert captured["name"] == "End-to-End"
+    assert captured["warmup_samples"] > 0

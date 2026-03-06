@@ -250,7 +250,8 @@ weekly-manual-prefill:
 	$(PYTHON) scripts/governance/weekly_manual_status_prefill.py \
 		--decision-json artifacts/weekly-decision-log.json \
 		--attribution-json artifacts/weekly-pnl-attribution.json \
-		--manual-status-json artifacts/weekly-manual-status.json
+		--manual-status-json artifacts/weekly-manual-status.json \
+		--output-md artifacts/weekly-manual-status.md
 
 weekly-signoff-pack:
 	$(PYTHON) scripts/governance/weekly_signoff_pack.py \

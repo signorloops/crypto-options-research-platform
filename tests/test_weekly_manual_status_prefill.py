@@ -172,3 +172,63 @@ def test_main_creates_template_when_manual_file_missing(tmp_path, monkeypatch):
     assert generated["gray_release_completed"] is False
     assert generated["rollback_decision_recorded"] is False
     assert generated["signoffs"]["research"] == ""
+
+
+def test_main_writes_markdown_checklist_summary(tmp_path, monkeypatch):
+    module = _load_module()
+    decision_json = tmp_path / "weekly-decision-log.json"
+    attribution_json = tmp_path / "weekly-pnl-attribution.json"
+    manual_json = tmp_path / "weekly-manual-status.json"
+    output_md = tmp_path / "weekly-manual-status.md"
+
+    _write(
+        decision_json,
+        json.dumps(
+            {
+                "decision": "APPROVE_CANARY",
+                "rollback": {"reference": "backup-release-20260306-demo", "source": "tag"},
+            }
+        ),
+    )
+    _write(attribution_json, json.dumps({"summary": {"strategies": 2, "missing_entries": 0}}))
+    _write(
+        manual_json,
+        json.dumps(
+            {
+                "gray_release_completed": False,
+                "observation_24h_completed": False,
+                "rollback_decision_recorded": False,
+                "pnl_attribution_confirmed": False,
+                "change_and_rollback_recorded": False,
+                "adr_signed": False,
+                "signoffs": {"research": "", "engineering": "", "risk": ""},
+            }
+        ),
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "weekly_manual_status_prefill.py",
+            "--decision-json",
+            str(decision_json),
+            "--attribution-json",
+            str(attribution_json),
+            "--manual-status-json",
+            str(manual_json),
+            "--output-md",
+            str(output_md),
+        ],
+    )
+
+    exit_code = module.main()
+
+    assert exit_code == 0
+    text = output_md.read_text(encoding="utf-8")
+    assert "# Weekly Manual Status" in text
+    assert "- Decision: `APPROVE_CANARY`" in text
+    assert "- Rollback reference: `backup-release-20260306-demo`" in text
+    assert "- [ ] 灰度发布完成" in text
+    assert "- [x] 是否触发回滚已决策" in text
+    assert "- [ ] Research 签字: `TBD`" in text

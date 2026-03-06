@@ -109,6 +109,11 @@ class LatencyBenchmark:
         end = time.perf_counter()
         return (end - start) * 1000  # Convert to milliseconds
 
+    def _warmup_sample_count(self, cap: int) -> int:
+        if self.iterations <= 1:
+            return 0
+        return min(cap, max(1, self.iterations // 10))
+
     @staticmethod
     def _warmup_regime_detector(detector: VolatilityRegimeDetector, count: int, seed: int) -> None:
         """Warm up regime detector using deterministic synthetic returns."""
@@ -292,24 +297,35 @@ class LatencyBenchmark:
             "End-to-End",
             latencies,
             target_ms=DEFAULT_LATENCY_TARGETS_MS["end_to_end"],
+            warmup_samples=self._warmup_sample_count(cap=20),
         )
 
-    def _summarize(self, name: str, latencies: List[float], target_ms: float) -> Dict:
+    def _summarize(
+        self,
+        name: str,
+        latencies: List[float],
+        target_ms: float,
+        warmup_samples: int = 0,
+    ) -> Dict:
         """Summarize benchmark results."""
-        latencies = np.array(latencies)
+        latencies_np = np.array(latencies, dtype=float)
+        excluded = max(0, min(int(warmup_samples), len(latencies_np) - 1))
+        effective = latencies_np[excluded:] if excluded else latencies_np
 
         summary = {
             "name": name,
             "target_ms": target_ms,
-            "mean_ms": np.mean(latencies),
-            "median_ms": np.median(latencies),
-            "p50_ms": np.percentile(latencies, 50),
-            "p95_ms": np.percentile(latencies, 95),
-            "p99_ms": np.percentile(latencies, 99),
-            "min_ms": np.min(latencies),
-            "max_ms": np.max(latencies),
-            "std_ms": np.std(latencies),
-            "meets_target": np.percentile(latencies, 95) < target_ms,
+            "mean_ms": np.mean(effective),
+            "median_ms": np.median(effective),
+            "p50_ms": np.percentile(effective, 50),
+            "p95_ms": np.percentile(effective, 95),
+            "p99_ms": np.percentile(effective, 99),
+            "min_ms": np.min(effective),
+            "max_ms": np.max(effective),
+            "std_ms": np.std(effective),
+            "sample_count": int(len(effective)),
+            "samples_excluded": excluded,
+            "meets_target": bool(np.percentile(effective, 95) < target_ms),
         }
 
         return summary

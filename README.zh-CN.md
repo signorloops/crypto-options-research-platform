@@ -152,6 +152,7 @@ make algorithm-freeze-check
 # 每周治理链路与发布前硬门禁
 # （weekly-operating-audit 会先执行并强制校验 algorithm-performance-baseline 与 latency-benchmark）
 # （prepare-rollback-tag 会在 canary / signoff 之前为当前发布候选创建或复用本地回滚 tag）
+# （weekly-manual-prefill 会同时生成 artifacts/weekly-manual-status.json 和 artifacts/weekly-manual-status.md）
 make weekly-operating-audit
 make weekly-close-gate
 
