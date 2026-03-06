@@ -127,6 +127,26 @@ def test_resolve_manager_config_uses_explicit_then_env_then_defaults():
     }
 
 
+def test_resolve_manager_config_from_environ_uses_process_env(monkeypatch):
+    import data.integrated_manager as module
+
+    monkeypatch.setenv("DUCKDB_PATH", "/tmp/process.duckdb")
+    monkeypatch.setenv("REDIS_HOST", "redis.process")
+    monkeypatch.setenv("REDIS_PORT", "6388")
+
+    config = module._resolve_manager_config_from_environ(
+        duckdb_path=None,
+        redis_host=None,
+        redis_port=None,
+    )
+
+    assert config == {
+        "duckdb_path": "/tmp/process.duckdb",
+        "redis_host": "redis.process",
+        "redis_port": 6388,
+    }
+
+
 @pytest.mark.asyncio
 async def test_resolve_greeks_request_prefers_refresh_then_redis_then_fetch():
     import data.integrated_manager as module

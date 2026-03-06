@@ -306,6 +306,51 @@ def test_resolve_input_files_prefers_explicit_inputs_before_discovery(tmp_path, 
     assert calls == [((tmp_path / "results").resolve(), "backtest*.json")]
 
 
+def test_resolve_audit_paths_builds_resolved_output_locations(tmp_path):
+    module = _load_module()
+
+    paths = module._resolve_audit_paths(
+        repo_root=tmp_path,
+        output_md="artifacts/weekly-operating-audit.md",
+        output_json="artifacts/weekly-operating-audit.json",
+        signoff_json="artifacts/weekly-signoff-pack.json",
+        close_gate_output_md="artifacts/weekly-close-gate.md",
+        close_gate_output_json="artifacts/weekly-close-gate.json",
+    )
+
+    assert paths["output_md"] == (tmp_path / "artifacts/weekly-operating-audit.md").resolve()
+    assert paths["output_json"] == (tmp_path / "artifacts/weekly-operating-audit.json").resolve()
+    assert paths["signoff_json"] == (tmp_path / "artifacts/weekly-signoff-pack.json").resolve()
+    assert paths["close_gate_output_md"] == (tmp_path / "artifacts/weekly-close-gate.md").resolve()
+    assert paths["close_gate_output_json"] == (
+        tmp_path / "artifacts/weekly-close-gate.json"
+    ).resolve()
+
+
+def test_load_baseline_reports_reads_performance_and_latency_json(tmp_path, monkeypatch):
+    module = _load_module()
+    calls: list[tuple[Path, str]] = []
+
+    def fake_load(path: Path, missing_error: str):
+        calls.append((path, missing_error))
+        return {"path": str(path), "error": missing_error, "executed": True}
+
+    monkeypatch.setattr(module, "load_optional_report", fake_load)
+
+    reports = module._load_baseline_reports(
+        repo_root=tmp_path,
+        performance_json="artifacts/perf.json",
+        latency_json="artifacts/latency.json",
+    )
+
+    assert reports["performance"]["path"].endswith("artifacts/perf.json")
+    assert reports["latency"]["path"].endswith("artifacts/latency.json")
+    assert calls == [
+        ((tmp_path / "artifacts/perf.json").resolve(), "missing_performance_json"),
+        ((tmp_path / "artifacts/latency.json").resolve(), "missing_latency_json"),
+    ]
+
+
 def test_detect_latest_tag_falls_back_to_commit_when_head_is_not_tagged(tmp_path):
     module = _load_module()
 

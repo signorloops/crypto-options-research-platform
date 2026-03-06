@@ -422,6 +422,24 @@ def _resolve_input_files(
     )
 
 
+def _resolve_audit_paths(
+    *,
+    repo_root: Path,
+    output_md: str,
+    output_json: str,
+    signoff_json: str,
+    close_gate_output_md: str,
+    close_gate_output_json: str,
+) -> dict[str, Path]:
+    return {
+        "output_md": (repo_root / output_md).resolve(),
+        "output_json": (repo_root / output_json).resolve(),
+        "signoff_json": (repo_root / signoff_json).resolve(),
+        "close_gate_output_md": (repo_root / close_gate_output_md).resolve(),
+        "close_gate_output_json": (repo_root / close_gate_output_json).resolve(),
+    }
+
+
 def _run_regression_command(command: str, repo_root: Path) -> dict[str, Any] | None:
     return run_regression_command(command, repo_root=repo_root, runner=subprocess.run)
 
@@ -441,13 +459,39 @@ def _collect_issue_messages(
     )
 
 
+def _load_baseline_reports(
+    *,
+    repo_root: Path,
+    performance_json: str,
+    latency_json: str,
+) -> dict[str, dict[str, Any]]:
+    return {
+        "performance": load_optional_report(
+            (repo_root / performance_json).resolve(),
+            missing_error="missing_performance_json",
+        ),
+        "latency": load_optional_report(
+            (repo_root / latency_json).resolve(),
+            missing_error="missing_latency_json",
+        ),
+    }
+
+
 def main() -> int:
     args = _build_parser().parse_args()
 
     repo_root = Path(".").resolve()
-    signoff_json_path = (repo_root / args.signoff_json).resolve()
-    close_gate_md = (repo_root / args.close_gate_output_md).resolve()
-    close_gate_json = (repo_root / args.close_gate_output_json).resolve()
+    paths = _resolve_audit_paths(
+        repo_root=repo_root,
+        output_md=args.output_md,
+        output_json=args.output_json,
+        signoff_json=args.signoff_json,
+        close_gate_output_md=args.close_gate_output_md,
+        close_gate_output_json=args.close_gate_output_json,
+    )
+    signoff_json_path = paths["signoff_json"]
+    close_gate_md = paths["close_gate_output_md"]
+    close_gate_json = paths["close_gate_output_json"]
 
     if args.close_gate_only:
         close_ready, close_detail, signoff_payload = _evaluate_close_gate(signoff_json_path)
@@ -484,15 +528,10 @@ def main() -> int:
 
     change_log = _collect_recent_changes(repo_root, max(args.change_log_days, 1))
     rollback_marker = _detect_latest_tag(repo_root)
-    performance_json_path = (repo_root / args.performance_json).resolve()
-    performance_result = load_optional_report(
-        performance_json_path,
-        missing_error="missing_performance_json",
-    )
-    latency_json_path = (repo_root / args.latency_json).resolve()
-    latency_result = load_optional_report(
-        latency_json_path,
-        missing_error="missing_latency_json",
+    baselines = _load_baseline_reports(
+        repo_root=repo_root,
+        performance_json=args.performance_json,
+        latency_json=args.latency_json,
     )
 
     report = _build_report(
@@ -502,16 +541,14 @@ def main() -> int:
         regression_result=regression_result,
         change_log=change_log,
         rollback_marker=rollback_marker,
-        performance_result=performance_result,
+        performance_result=baselines["performance"],
         performance_required=args.require_performance,
-        latency_result=latency_result,
+        latency_result=baselines["latency"],
         latency_required=args.require_latency,
     )
 
-    md_path = (repo_root / args.output_md).resolve()
-    json_path = (repo_root / args.output_json).resolve()
-    _write_markdown(md_path, _to_markdown(report))
-    _write_json(json_path, report)
+    _write_markdown(paths["output_md"], _to_markdown(report))
+    _write_json(paths["output_json"], report)
 
     issue_messages = _collect_issue_messages(
         report,

@@ -50,6 +50,21 @@ def _resolve_manager_config(
     }
 
 
+def _resolve_manager_config_from_environ(
+    *,
+    duckdb_path: Optional[str],
+    redis_host: Optional[str],
+    redis_port: Optional[int],
+) -> Dict[str, Any]:
+    """Resolve manager config from explicit args and process environment."""
+    return _resolve_manager_config(
+        duckdb_path=duckdb_path,
+        redis_host=redis_host,
+        redis_port=redis_port,
+        env=os.environ,
+    )
+
+
 async def _resolve_greeks_request(
     *,
     instrument: str,
@@ -520,11 +535,10 @@ def create_integrated_manager(
     - REDIS_PORT (default: 6379)
     - DUCKDB_PATH (default: None, uses in-memory)
     """
-    config = _resolve_manager_config(
+    config = _resolve_manager_config_from_environ(
         duckdb_path=duckdb_path,
         redis_host=redis_host,
         redis_port=redis_port,
-        env=os.environ,
     )
 
     return IntegratedDataManager(
