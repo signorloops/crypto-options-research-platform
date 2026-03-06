@@ -144,31 +144,35 @@ def _scorecard_summary_sections(scorecard: StrategyScorecard) -> List[str]:
     ]
 
 
+def _empty_scorecard_fields(strategy_name: str) -> dict:
+    return {
+        "strategy_name": strategy_name,
+        "total_pnl": 0,
+        "total_return_pct": 0,
+        "annualized_return": 0,
+        "sharpe_ratio": 0,
+        "deflated_sharpe_ratio": 0,
+        "sortino_ratio": 0,
+        "max_drawdown": 0,
+        "calmar_ratio": 0,
+        "total_trades": 0,
+        "win_rate": 0,
+        "avg_trade_pnl": 0,
+        "avg_win": 0,
+        "avg_loss": 0,
+        "profit_factor": 0,
+        "spread_capture": 0,
+        "adverse_selection_cost": 0,
+        "inventory_cost": 0,
+        "fill_rate": 0,
+        "daily_pnl_std": 0,
+        "worst_day": 0,
+        "best_day": 0,
+    }
+
+
 def _build_empty_scorecard(result: BacktestResult) -> StrategyScorecard:
-    return StrategyScorecard(
-        strategy_name=result.strategy_name,
-        total_pnl=0,
-        total_return_pct=0,
-        annualized_return=0,
-        sharpe_ratio=0,
-        deflated_sharpe_ratio=0,
-        sortino_ratio=0,
-        max_drawdown=0,
-        calmar_ratio=0,
-        total_trades=0,
-        win_rate=0,
-        avg_trade_pnl=0,
-        avg_win=0,
-        avg_loss=0,
-        profit_factor=0,
-        spread_capture=0,
-        adverse_selection_cost=0,
-        inventory_cost=0,
-        fill_rate=0,
-        daily_pnl_std=0,
-        worst_day=0,
-        best_day=0,
-    )
+    return StrategyScorecard(**_empty_scorecard_fields(result.strategy_name))
 
 
 def _compute_sortino_ratio(daily_returns: pd.Series, periods_per_year: float) -> float:
@@ -242,30 +246,38 @@ def _build_scorecard_from_result(
     metrics: dict[str, float],
 ) -> StrategyScorecard:
     return StrategyScorecard(
-        strategy_name=result.strategy_name,
-        total_pnl=metrics["total_pnl"],
-        total_return_pct=metrics["total_return_pct"],
-        annualized_return=metrics["annualized_return"],
-        sharpe_ratio=metrics["sharpe"],
-        deflated_sharpe_ratio=metrics["deflated_sharpe"],
-        sortino_ratio=metrics["sortino"],
-        max_drawdown=result.max_drawdown,
-        calmar_ratio=metrics["calmar"],
-        total_trades=result.trade_count,
-        win_rate=metrics["win_rate"],
-        avg_trade_pnl=result.avg_trade_pnl_crypto,
-        avg_win=metrics["avg_win"],
-        avg_loss=metrics["avg_loss"],
-        profit_factor=metrics["profit_factor"],
-        spread_capture=result.total_spread_captured or 0,
-        adverse_selection_cost=result.adverse_selection_cost or 0,
-        inventory_cost=result.inventory_cost or 0,
-        fill_rate=0.3,
-        daily_pnl_std=metrics["daily_pnl_std"],
-        worst_day=metrics["worst_day"],
-        best_day=metrics["best_day"],
-        pnl_series=pnl_series, drawdown_series=drawdown_series, inventory_series=result.inventory_series,
+        **_scorecard_result_fields(result, metrics),
+        pnl_series=pnl_series,
+        drawdown_series=drawdown_series,
+        inventory_series=result.inventory_series,
     )
+
+
+def _scorecard_result_fields(result: BacktestResult, metrics: dict[str, float]) -> dict:
+    return {
+        "strategy_name": result.strategy_name,
+        "total_pnl": metrics["total_pnl"],
+        "total_return_pct": metrics["total_return_pct"],
+        "annualized_return": metrics["annualized_return"],
+        "sharpe_ratio": metrics["sharpe"],
+        "deflated_sharpe_ratio": metrics["deflated_sharpe"],
+        "sortino_ratio": metrics["sortino"],
+        "max_drawdown": result.max_drawdown,
+        "calmar_ratio": metrics["calmar"],
+        "total_trades": result.trade_count,
+        "win_rate": metrics["win_rate"],
+        "avg_trade_pnl": result.avg_trade_pnl_crypto,
+        "avg_win": metrics["avg_win"],
+        "avg_loss": metrics["avg_loss"],
+        "profit_factor": metrics["profit_factor"],
+        "spread_capture": result.total_spread_captured or 0,
+        "adverse_selection_cost": result.adverse_selection_cost or 0,
+        "inventory_cost": result.inventory_cost or 0,
+        "fill_rate": 0.3,
+        "daily_pnl_std": metrics["daily_pnl_std"],
+        "worst_day": metrics["worst_day"],
+        "best_day": metrics["best_day"],
+    }
 
 
 def _scorecard_return_metrics(

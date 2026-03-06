@@ -351,6 +351,48 @@ def test_load_baseline_reports_reads_performance_and_latency_json(tmp_path, monk
     ]
 
 
+def test_report_issue_messages_returns_exit_only_when_strict(capsys):
+    module = _load_module()
+
+    strict_exit = module._report_issue_messages(["problem-1", "problem-2"], strict=True)
+    relaxed_exit = module._report_issue_messages(["problem-1"], strict=False)
+    empty_exit = module._report_issue_messages([], strict=True)
+
+    captured = capsys.readouterr()
+    assert "problem-1" in captured.out
+    assert captured.out.count("problem-1") == 2
+    assert "problem-2" not in captured.out
+    assert strict_exit == 2
+    assert relaxed_exit is None
+    assert empty_exit is None
+
+
+def test_handle_strict_close_returns_exit_when_gate_not_ready(tmp_path, monkeypatch):
+    module = _load_module()
+    calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        module,
+        "_evaluate_close_gate",
+        lambda path: (False, "status=PENDING_MANUAL_SIGNOFF", {"status": "PENDING_MANUAL_SIGNOFF"}),
+    )
+    monkeypatch.setattr(
+        module,
+        "_write_close_gate_report",
+        lambda **kwargs: calls.append(kwargs),
+    )
+
+    exit_code = module._handle_strict_close(
+        strict_close=True,
+        signoff_json_path=tmp_path / "signoff.json",
+        close_gate_md=tmp_path / "close.md",
+        close_gate_json=tmp_path / "close.json",
+    )
+
+    assert exit_code == 2
+    assert calls and calls[0]["close_detail"] == "status=PENDING_MANUAL_SIGNOFF"
+
+
 def test_detect_latest_tag_falls_back_to_commit_when_head_is_not_tagged(tmp_path):
     module = _load_module()
 

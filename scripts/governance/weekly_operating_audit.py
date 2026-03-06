@@ -459,6 +459,38 @@ def _collect_issue_messages(
     )
 
 
+def _report_issue_messages(issue_messages: list[str], *, strict: bool) -> int | None:
+    for message in issue_messages:
+        print(message)
+        if strict:
+            return 2
+    return None
+
+
+def _handle_strict_close(
+    *,
+    strict_close: bool,
+    signoff_json_path: Path,
+    close_gate_md: Path,
+    close_gate_json: Path,
+) -> int | None:
+    if not strict_close:
+        return None
+    close_ready, close_detail, signoff_payload = _evaluate_close_gate(signoff_json_path)
+    _write_close_gate_report(
+        signoff_json_path=signoff_json_path,
+        close_gate_md=close_gate_md,
+        close_gate_json=close_gate_json,
+        close_ready=close_ready,
+        close_detail=close_detail,
+        signoff_payload=signoff_payload,
+    )
+    if not close_ready:
+        print(f"Weekly operating audit: close gate not ready ({close_detail}).")
+        return 2
+    return None
+
+
 def _load_baseline_reports(
     *,
     repo_root: Path,
@@ -556,23 +588,17 @@ def main() -> int:
         require_performance=args.require_performance,
         require_latency=args.require_latency,
     )
-    for message in issue_messages:
-        print(message)
-        if args.strict:
-            return 2
-    if args.strict_close:
-        close_ready, close_detail, signoff_payload = _evaluate_close_gate(signoff_json_path)
-        _write_close_gate_report(
+    if (exit_code := _report_issue_messages(issue_messages, strict=args.strict)) is not None:
+        return exit_code
+    if (
+        exit_code := _handle_strict_close(
+            strict_close=args.strict_close,
             signoff_json_path=signoff_json_path,
             close_gate_md=close_gate_md,
             close_gate_json=close_gate_json,
-            close_ready=close_ready,
-            close_detail=close_detail,
-            signoff_payload=signoff_payload,
         )
-        if not close_ready:
-            print(f"Weekly operating audit: close gate not ready ({close_detail}).")
-            return 2
+    ) is not None:
+        return exit_code
     if not issue_messages:
         print("Weekly operating audit: no threshold exceptions.")
 

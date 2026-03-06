@@ -137,6 +137,38 @@ def test_scorecard_summary_sections_include_named_blocks():
     assert "Market Making:" in lines
 
 
+def test_scorecard_payload_helpers_return_expected_defaults_and_fields():
+    result = _make_backtest_result("rich", [0, 100, 80, 120, 150], sharpe=1.2)
+    metrics = {
+        "total_pnl": 150.0,
+        "total_return_pct": 0.0015,
+        "annualized_return": 0.12,
+        "sharpe": 1.2,
+        "deflated_sharpe": 0.5,
+        "sortino": 1.3,
+        "calmar": 1.2,
+        "win_rate": 0.75,
+        "avg_win": 60.0,
+        "avg_loss": 20.0,
+        "profit_factor": 3.0,
+        "daily_pnl_std": 45.0,
+        "worst_day": -20.0,
+        "best_day": 100.0,
+    }
+
+    empty = arena_module._empty_scorecard_fields("empty")
+    payload = arena_module._scorecard_result_fields(result, metrics)
+
+    assert empty["strategy_name"] == "empty"
+    assert empty["total_pnl"] == 0
+    assert empty["profit_factor"] == 0
+    assert payload["strategy_name"] == "rich"
+    assert payload["total_pnl"] == 150.0
+    assert payload["avg_trade_pnl"] == result.avg_trade_pnl_crypto
+    assert payload["spread_capture"] == 10.0
+    assert payload["fill_rate"] == 0.3
+
+
 def test_scorecard_summary_metrics_helper_matches_expected_values():
     arena = StrategyArena(_market_data_frame(), initial_capital=100000.0)
     result = _make_backtest_result("rich", [0, 100, 80, 120, 150], sharpe=1.2)
