@@ -200,13 +200,8 @@ def test_main_executes_regression_cmd_without_shell(tmp_path, monkeypatch):
 
     def fake_run(cmd, **kwargs):
         calls.append((cmd, kwargs))
-        if (
-            isinstance(cmd, list)
-            and cmd[:3] == ["git", "rev-parse", "--is-shallow-repository"]
-        ):
-            return subprocess.CompletedProcess(
-                args=cmd, returncode=0, stdout="false\n", stderr=""
-            )
+        if isinstance(cmd, list) and cmd[:3] == ["git", "rev-parse", "--is-shallow-repository"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="false\n", stderr="")
         if isinstance(cmd, list) and cmd[:2] == ["git", "log"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if isinstance(cmd, list) and cmd[:3] == ["git", "describe", "--tags"]:
@@ -933,7 +928,10 @@ def test_close_gate_report_lists_actionable_auto_blocker_remediations():
 
     assert "Rerun algorithm performance baseline and fix regressions." in report["action_items"]
     assert "Rerun latency benchmark and reduce latency regressions." in report["action_items"]
-    assert "Run `make prepare-rollback-tag` to create a rollback tag for the release candidate." in report["action_items"]
+    assert (
+        "Run `make prepare-rollback-tag` to create a rollback tag for the release candidate."
+        in report["action_items"]
+    )
     assert "Next actions:" in report["pr_brief"]
 
 
@@ -956,9 +954,17 @@ def test_close_gate_report_maps_current_signoff_auto_check_labels_to_actions():
         },
     )
 
-    assert "Run `make prepare-rollback-tag` to create a rollback tag for the release candidate." in report["action_items"]
-    assert "Resolve canary blockers until recommendation becomes PROCEED_CANARY." in report["action_items"]
-    assert "Resolve decision blockers until decision becomes APPROVE_CANARY." in report["action_items"]
+    assert (
+        "Run `make prepare-rollback-tag` to create a rollback tag for the release candidate."
+        in report["action_items"]
+    )
+    assert (
+        "Resolve canary blockers until recommendation becomes PROCEED_CANARY."
+        in report["action_items"]
+    )
+    assert (
+        "Resolve decision blockers until decision becomes APPROVE_CANARY." in report["action_items"]
+    )
 
 
 def test_main_strict_close_fails_when_signoff_not_ready(tmp_path, monkeypatch):

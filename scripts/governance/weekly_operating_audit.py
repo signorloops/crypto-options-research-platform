@@ -63,6 +63,7 @@ CLOSE_GATE_BLOCKER_ACTIONS: dict[str, str] = {
     "online_offline_replay_status=FAIL": "Resolve online/offline replay mismatches before close.",
 }
 
+
 def _to_text_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -656,10 +657,14 @@ def _build_report(
             and change_log.get("count", 0) > 0
         ),
         "rollback_version_marked": bool(
-            rollback_marker and rollback_marker.get("source") == "tag" and rollback_marker.get("tag")
+            rollback_marker
+            and rollback_marker.get("source") == "tag"
+            and rollback_marker.get("tag")
         ),
         "rollback_marker_from_tag": bool(
-            rollback_marker and rollback_marker.get("source") == "tag" and rollback_marker.get("tag")
+            rollback_marker
+            and rollback_marker.get("source") == "tag"
+            and rollback_marker.get("tag")
         ),
         "minimum_regression_passed": (
             bool(regression_result["passed"])
@@ -888,14 +893,20 @@ def _to_markdown(report: dict[str, Any]) -> str:
     if performance.get("executed"):
         perf_summary = performance.get("summary", {})
         lines.append(f"- All passed: `{perf_summary.get('all_passed')}`")
-        lines.append(f"- Checks passed: `{perf_summary.get('checks_passed')}/{perf_summary.get('checks_total')}`")
+        lines.append(
+            f"- Checks passed: `{perf_summary.get('checks_passed')}/{perf_summary.get('checks_total')}`"
+        )
         metrics = performance.get("metrics", {})
         var_stats = metrics.get("var_monte_carlo")
         backtest_stats = metrics.get("backtest_engine")
         if isinstance(var_stats, dict):
-            lines.append(f"- VaR Monte Carlo P95 (ms): `{_fmt(_to_float(var_stats.get('p95_ms')), 4)}`")
+            lines.append(
+                f"- VaR Monte Carlo P95 (ms): `{_fmt(_to_float(var_stats.get('p95_ms')), 4)}`"
+            )
         if isinstance(backtest_stats, dict):
-            lines.append(f"- Backtest Engine P95 (ms): `{_fmt(_to_float(backtest_stats.get('p95_ms')), 4)}`")
+            lines.append(
+                f"- Backtest Engine P95 (ms): `{_fmt(_to_float(backtest_stats.get('p95_ms')), 4)}`"
+            )
     else:
         lines.append("_not available_")
         if performance.get("error"):
@@ -922,7 +933,9 @@ def _to_markdown(report: dict[str, Any]) -> str:
                 for row in benchmarks
             ]
             lines.append("")
-            lines.append(_format_table(benchmark_rows, ["name", "p95_ms", "target_ms", "meets_target"]))
+            lines.append(
+                _format_table(benchmark_rows, ["name", "p95_ms", "target_ms", "meets_target"])
+            )
     else:
         lines.append("_not available_")
         if latency.get("error"):

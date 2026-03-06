@@ -7,10 +7,7 @@ from pathlib import Path
 
 def test_weekly_workflow_runs_single_source_of_truth_make_target():
     workflow = (
-        Path(__file__).resolve().parents[1]
-        / ".github"
-        / "workflows"
-        / "weekly-operating-audit.yml"
+        Path(__file__).resolve().parents[1] / ".github" / "workflows" / "weekly-operating-audit.yml"
     ).read_text(encoding="utf-8")
 
     assert 'make weekly-operating-audit ADR_OWNER="weekly-ci"' in workflow
@@ -19,10 +16,7 @@ def test_weekly_workflow_runs_single_source_of_truth_make_target():
 
 def test_weekly_workflow_uploads_extended_governance_artifacts():
     workflow = (
-        Path(__file__).resolve().parents[1]
-        / ".github"
-        / "workflows"
-        / "weekly-operating-audit.yml"
+        Path(__file__).resolve().parents[1] / ".github" / "workflows" / "weekly-operating-audit.yml"
     ).read_text(encoding="utf-8")
 
     assert "artifacts/algorithm-performance-baseline.json" in workflow
