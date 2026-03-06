@@ -429,6 +429,17 @@ def _risk_return_points(
     ]
 
 
+def _comparison_plot_window(market_data_len: int) -> int:
+    return min(50, market_data_len // 10)
+
+
+def _metrics_table_spec(comparison: pd.DataFrame) -> dict[str, list[list[str]] | list[str]]:
+    return {
+        "cell_text": _comparison_table_rows(comparison),
+        "col_labels": ["Strategy", "PnL", "Return", "Sharpe", "Max DD"],
+    }
+
+
 def _scorecard_summary_metrics(
     *,
     result: BacktestResult,
@@ -776,10 +787,10 @@ class StrategyArena:
     def _plot_metrics_table(self, ax: plt.Axes) -> None:
         ax.axis("off")
 
-        comparison = self._create_comparison_df()
+        table_spec = _metrics_table_spec(self._create_comparison_df())
         table = ax.table(
-            cellText=_comparison_table_rows(comparison),
-            colLabels=["Strategy", "PnL", "Return", "Sharpe", "Max DD"],
+            cellText=table_spec["cell_text"],
+            colLabels=table_spec["col_labels"],
             cellLoc="center",
             loc="center",
             bbox=[0, 0, 1, 1],
@@ -791,7 +802,7 @@ class StrategyArena:
     def plot_comparison(self, figsize: Tuple[int, int] = (16, 12)) -> plt.Figure:
         """Generate comparison plots."""
         fig, axes = plt.subplots(3, 3, figsize=figsize)
-        window = min(50, len(self.market_data) // 10)
+        window = _comparison_plot_window(len(self.market_data))
         self._plot_cumulative_pnl(axes[0, 0])
         self._plot_drawdown(axes[0, 1])
         self._plot_inventory(axes[0, 2])

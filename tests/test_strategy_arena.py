@@ -322,6 +322,22 @@ def test_plot_color_and_point_helpers_return_expected_values():
     assert points[0][2] == rich_score.annualized_return * 100
 
 
+def test_plot_window_and_metrics_table_helpers_return_expected_specs():
+    row = {
+        "Strategy": "rich",
+        "Total PnL ($)": 150.0,
+        "Return (%)": 0.15,
+        "Sharpe": 1.2,
+        "Max DD (%)": -10.0,
+    }
+    table_spec = arena_module._metrics_table_spec(pd.DataFrame([row]))
+
+    assert arena_module._comparison_plot_window(20) == 2
+    assert arena_module._comparison_plot_window(800) == 50
+    assert table_spec["col_labels"] == ["Strategy", "PnL", "Return", "Sharpe", "Max DD"]
+    assert table_spec["cell_text"] == [["rich", "$150", "0.1%", "1.20", "-10.0%"]]
+
+
 def test_statistical_comparison_and_plotting():
     arena = StrategyArena(_market_data_frame(), initial_capital=100000.0)
     r1 = _make_backtest_result("A", list(range(20)), sharpe=1.0)
