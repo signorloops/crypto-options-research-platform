@@ -13,59 +13,20 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scripts.governance.manual_status_utils import (
+    MANUAL_ITEMS,
+    ROLE_SIGNOFF_ITEMS,
+    TASK_CANONICAL_LABEL,
+    TASK_TO_MANUAL_KEY,
+    default_manual_status_template,
+    normalize_manual_status,
+)
 from scripts.governance.report_utils import (
-    as_bool as _as_bool,
     load_json_object as _load_json,
     load_optional_json_object as _load_optional_json,
     write_json as _write_json,
     write_markdown as _write_markdown,
 )
-
-MANUAL_ITEMS: list[tuple[str, str]] = [
-    ("gray_release_completed", "灰度发布完成"),
-    ("observation_24h_completed", "24h 观察完成"),
-    ("rollback_decision_recorded", "是否触发回滚已决策"),
-    ("pnl_attribution_confirmed", "收益归因表确认"),
-    ("change_and_rollback_recorded", "变更与回滚记录"),
-    ("adr_signed", "ADR"),
-]
-
-ROLE_SIGNOFF_ITEMS: list[tuple[str, str]] = [
-    ("research", "Research 签字"),
-    ("engineering", "Engineering 签字"),
-    ("risk", "Risk 签字"),
-]
-
-TASK_TO_MANUAL_KEY: dict[str, str] = {
-    "灰度发布完成": "gray_release_completed",
-    "24h 观察完成": "observation_24h_completed",
-    "是否触发回滚已决策": "rollback_decision_recorded",
-    "收益归因表": "pnl_attribution_confirmed",
-    "收益归因表确认": "pnl_attribution_confirmed",
-    "变更与回滚记录": "change_and_rollback_recorded",
-    "ADR": "adr_signed",
-}
-
-TASK_CANONICAL_LABEL: dict[str, str] = {
-    "收益归因表": "收益归因表确认",
-}
-def _normalize_manual_status(raw: dict[str, Any]) -> dict[str, Any]:
-    status: dict[str, Any] = {}
-    for key, _label in MANUAL_ITEMS:
-        status[key] = _as_bool(raw.get(key))
-
-    signoffs_raw = raw.get("signoffs")
-    signoffs_map = signoffs_raw if isinstance(signoffs_raw, dict) else {}
-    signoffs: dict[str, str] = {}
-    for role, _label in ROLE_SIGNOFF_ITEMS:
-        value = signoffs_map.get(role)
-        signoffs[role] = str(value).strip() if value is not None else ""
-    status["signoffs"] = signoffs
-    return status
-
-
-def _default_manual_status_template() -> dict[str, Any]:
-    return _normalize_manual_status({})
 
 
 def _dedupe_keep_order(items: list[str]) -> list[str]:
@@ -89,7 +50,7 @@ def _build_report(
     manual_status: dict[str, Any],
     consistency_replay: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    status = _normalize_manual_status(manual_status)
+    status = normalize_manual_status(manual_status)
     checklist = audit.get("checklist", {})
     summary = audit.get("summary", {})
     recommendation = str(canary.get("recommendation", "")).strip()
@@ -305,7 +266,7 @@ def main() -> int:
     manual_status_path = Path(args.manual_status_json).resolve()
     consistency_replay = _load_optional_json(Path(args.consistency_replay_json).resolve())
     if not manual_status_path.exists():
-        _write_json(manual_status_path, _default_manual_status_template())
+        _write_json(manual_status_path, default_manual_status_template())
     manual_status = _load_optional_json(manual_status_path)
 
     report = _build_report(

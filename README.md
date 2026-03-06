@@ -156,6 +156,9 @@ make algorithm-freeze-check
 make weekly-operating-audit
 make weekly-close-gate
 
+# Explicitly confirm manual items / sign-offs after review
+make weekly-manual-update MANUAL_ARGS='--check gray_release_completed=true --signoff research=alice --signoff engineering=bob'
+
 # Production deviation snapshot
 # (defaults use repository fixtures; override LIVE_CEX_FILE / LIVE_DEFI_FILE for external data)
 make live-deviation-snapshot

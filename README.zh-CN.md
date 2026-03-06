@@ -156,6 +156,9 @@ make algorithm-freeze-check
 make weekly-operating-audit
 make weekly-close-gate
 
+# 审阅后显式确认手工项 / 签字
+make weekly-manual-update MANUAL_ARGS='--check gray_release_completed=true --signoff research=alice --signoff engineering=bob'
+
 # 生产偏离快照
 # （默认使用仓库内 fixture，可通过 LIVE_CEX_FILE / LIVE_DEFI_FILE 覆盖为外部数据）
 make live-deviation-snapshot
