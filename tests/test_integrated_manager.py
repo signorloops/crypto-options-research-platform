@@ -9,7 +9,7 @@ import pytest
 
 from data.cache_policy import realtime_ttls
 from data.cache import DataCache
-from data.integrated_manager import IntegratedDataManager
+from data.integrated_manager import IntegratedDataManager, create_integrated_manager
 
 
 @pytest.mark.asyncio
@@ -62,6 +62,37 @@ def test_build_historical_request_returns_parquet_manager_kwargs():
         "downloader": None,
         "use_cache": False,
     }
+
+
+def test_create_integrated_manager_uses_env_defaults(monkeypatch):
+    monkeypatch.setenv("DUCKDB_PATH", "/tmp/demo.duckdb")
+    monkeypatch.setenv("REDIS_HOST", "redis.internal")
+    monkeypatch.setenv("REDIS_PORT", "6380")
+
+    manager = create_integrated_manager(enable_duckdb=False)
+
+    assert manager.duckdb_path == "/tmp/demo.duckdb"
+    assert manager.redis_host == "redis.internal"
+    assert manager.redis_port == 6380
+    assert manager.enable_duckdb is False
+
+
+def test_create_integrated_manager_prefers_explicit_values_over_env(monkeypatch):
+    monkeypatch.setenv("DUCKDB_PATH", "/tmp/from-env.duckdb")
+    monkeypatch.setenv("REDIS_HOST", "redis.env")
+    monkeypatch.setenv("REDIS_PORT", "6380")
+
+    manager = create_integrated_manager(
+        duckdb_path="/tmp/from-arg.duckdb",
+        redis_host="redis.arg",
+        redis_port=6390,
+        enable_redis=False,
+    )
+
+    assert manager.duckdb_path == "/tmp/from-arg.duckdb"
+    assert manager.redis_host == "redis.arg"
+    assert manager.redis_port == 6390
+    assert manager.enable_redis is False
 
 
 def test_load_exchange_data_to_duckdb_uses_sanitized_cache_path(tmp_path):

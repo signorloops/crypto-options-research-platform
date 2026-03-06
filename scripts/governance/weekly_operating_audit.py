@@ -23,6 +23,10 @@ from scripts.governance.report_utils import (
     write_json as _write_json,
     write_markdown as _write_markdown,
 )
+from scripts.governance.weekly_close_gate_utils import (
+    build_close_gate_summary,
+    collect_open_labels,
+)
 from scripts.governance.weekly_operating_cli_utils import (
     collect_issue_messages,
     resolve_input_files,
@@ -104,20 +108,8 @@ def _build_close_gate_report(
     close_detail: str,
     signoff_payload: dict[str, Any],
 ) -> dict[str, Any]:
-    manual_items = signoff_payload.get("manual_items")
-    role_signoffs = signoff_payload.get("role_signoffs")
-    manual_missing = [
-        str(item.get("label", "")).strip()
-        for item in (manual_items if isinstance(manual_items, list) else [])
-        if isinstance(item, dict) and not bool(item.get("done"))
-    ]
-    role_signoffs_missing = [
-        str(item.get("label", "")).strip()
-        for item in (role_signoffs if isinstance(role_signoffs, list) else [])
-        if isinstance(item, dict) and not bool(item.get("done"))
-    ]
-    manual_missing = [x for x in manual_missing if x]
-    role_signoffs_missing = [x for x in role_signoffs_missing if x]
+    manual_missing = collect_open_labels(signoff_payload.get("manual_items"))
+    role_signoffs_missing = collect_open_labels(signoff_payload.get("role_signoffs"))
     signoff_status = str(signoff_payload.get("status", "")).strip().upper()
     auto_blockers = _to_text_list(signoff_payload.get("auto_blockers"))
     pending_items = _to_text_list(signoff_payload.get("pending_items"))
@@ -149,12 +141,12 @@ def _build_close_gate_report(
         "role_signoffs_missing": role_signoffs_missing,
         "action_items": action_items,
         "pr_brief": pr_brief,
-        "summary": {
-            "auto_blockers": len(auto_blockers),
-            "pending_items": len(pending_items),
-            "manual_missing": len(manual_missing),
-            "role_signoffs_missing": len(role_signoffs_missing),
-        },
+        "summary": build_close_gate_summary(
+            auto_blockers=auto_blockers,
+            pending_items=pending_items,
+            manual_missing=manual_missing,
+            role_signoffs_missing=role_signoffs_missing,
+        ),
     }
 
 
