@@ -199,6 +199,18 @@ class IntegratedDataManager(_IntegratedRealtimeCacheMixin):
             self._state_lock = asyncio.Lock()
         return self._state_lock
 
+    def _reset_redis_runtime(self) -> None:
+        """Clear redis-derived runtime state after disconnect or failed init."""
+        self.redis = None
+        self.greeks_manager = None
+
+    def _close_duckdb_runtime(self) -> None:
+        """Close DuckDB backend if present and clear runtime state."""
+        duckdb = self.duckdb
+        if duckdb is not None:
+            duckdb.close()
+            self.duckdb = None
+
     async def connect(self) -> None:
         """Connect to Redis if enabled."""
         async with self._get_state_lock():
@@ -210,8 +222,7 @@ class IntegratedDataManager(_IntegratedRealtimeCacheMixin):
                     logger.info("Redis connected successfully")
                 except REDIS_CONNECT_EXCEPTIONS as e:
                     logger.warning(f"Failed to connect to Redis: {e}")
-                    self.redis = None
-                    self.greeks_manager = None
+                    self._reset_redis_runtime()
 
             if self.enable_duckdb:
                 try:
@@ -226,13 +237,11 @@ class IntegratedDataManager(_IntegratedRealtimeCacheMixin):
         async with self._get_state_lock():
             if self.redis:
                 await self.redis.disconnect()
-                self.redis = None
-                self.greeks_manager = None
+                self._reset_redis_runtime()
                 logger.info("Redis disconnected")
 
             if self.duckdb:
-                self.duckdb.close()
-                self.duckdb = None
+                self._close_duckdb_runtime()
                 logger.info("DuckDB closed")
 
     async def __aenter__(self) -> "IntegratedDataManager":
@@ -438,9 +447,7 @@ class IntegratedDataManager(_IntegratedRealtimeCacheMixin):
 
     def close(self) -> None:
         """Close all connections (sync version for cleanup)."""
-        if self.duckdb:
-            self.duckdb.close()
-            self.duckdb = None
+        self._close_duckdb_runtime()
 
 
 # Convenience function for creating default manager

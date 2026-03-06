@@ -246,3 +246,26 @@ async def test_connect_and_disconnect_success(monkeypatch):
     assert manager.redis is None
     assert manager.greeks_manager is None
     assert manager.duckdb is None
+
+
+@pytest.mark.asyncio
+async def test_disconnect_cleans_up_partial_backend_state():
+    manager = IntegratedDataManager(enable_duckdb=False, enable_redis=False)
+    redis = MagicMock()
+    redis.disconnect = AsyncMock()
+    manager.redis = redis
+    manager.greeks_manager = object()
+
+    await manager.disconnect()
+
+    redis.disconnect.assert_awaited_once()
+    assert manager.redis is None
+    assert manager.greeks_manager is None
+
+    duckdb = MagicMock()
+    manager.duckdb = duckdb
+
+    await manager.disconnect()
+
+    duckdb.close.assert_called_once()
+    assert manager.duckdb is None

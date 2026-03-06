@@ -32,6 +32,10 @@ from scripts.governance.status_action_utils import (
 from scripts.governance.weekly_operating_data_utils import (
     collect_strategy_snapshots,
 )
+from scripts.governance.weekly_operating_runtime_utils import (
+    load_optional_report,
+    load_threshold_map,
+)
 from scripts.governance.weekly_operating_render_utils import (
     build_close_gate_markdown,
     build_close_gate_pr_brief,
@@ -147,21 +151,6 @@ def _close_gate_to_markdown(report: dict[str, Any]) -> str:
     return build_close_gate_markdown(report)
 
 
-def _to_float(value: Any) -> float | None:
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return None
-    try:
-        f = float(value)
-    except (TypeError, ValueError):
-        return None
-    if f != f:  # NaN check
-        return None
-    if f in (float("inf"), float("-inf")):
-        return None
-    return f
-
 def _fmt(v: float | None, digits: int = 6) -> str:
     if v is None:
         return "n/a"
@@ -169,33 +158,11 @@ def _fmt(v: float | None, digits: int = 6) -> str:
 
 
 def _load_thresholds(path: Path) -> dict[str, float]:
-    if not path.exists():
-        return dict(DEFAULT_THRESHOLDS)
-
-    raw = _load_json(path)
-    thresholds = dict(DEFAULT_THRESHOLDS)
-    for key in DEFAULT_THRESHOLDS:
-        if key in raw:
-            value = _to_float(raw[key])
-            if value is None:
-                raise ValueError(f"Invalid threshold value for '{key}'")
-            thresholds[key] = float(value)
-    return thresholds
+    return load_threshold_map(path, DEFAULT_THRESHOLDS, label="threshold")
 
 
 def _load_consistency_thresholds(path: Path) -> dict[str, float]:
-    if not path.exists():
-        return dict(DEFAULT_CONSISTENCY_THRESHOLDS)
-
-    raw = _load_json(path)
-    thresholds = dict(DEFAULT_CONSISTENCY_THRESHOLDS)
-    for key in DEFAULT_CONSISTENCY_THRESHOLDS:
-        if key in raw:
-            value = _to_float(raw[key])
-            if value is None:
-                raise ValueError(f"Invalid consistency threshold value for '{key}'")
-            thresholds[key] = float(value)
-    return thresholds
+    return load_threshold_map(path, DEFAULT_CONSISTENCY_THRESHOLDS, label="consistency threshold")
 
 
 def _is_shallow_repository(repo_root: Path) -> bool:
@@ -707,49 +674,15 @@ def main() -> int:
     change_log = _collect_recent_changes(repo_root, max(args.change_log_days, 1))
     rollback_marker = _detect_latest_tag(repo_root)
     performance_json_path = (repo_root / args.performance_json).resolve()
-    if performance_json_path.exists():
-        try:
-            performance_result = _load_json(performance_json_path)
-            if "executed" not in performance_result:
-                performance_result["executed"] = True
-            performance_result["path"] = str(performance_json_path)
-            performance_result["error"] = ""
-        except JSON_REPORT_EXCEPTIONS as exc:
-            performance_result = {
-                "executed": False,
-                "summary": {"all_passed": None},
-                "error": str(exc),
-                "path": str(performance_json_path),
-            }
-    else:
-        performance_result = {
-            "executed": False,
-            "summary": {"all_passed": None},
-            "error": "missing_performance_json",
-            "path": str(performance_json_path),
-        }
+    performance_result = load_optional_report(
+        performance_json_path,
+        missing_error="missing_performance_json",
+    )
     latency_json_path = (repo_root / args.latency_json).resolve()
-    if latency_json_path.exists():
-        try:
-            latency_result = _load_json(latency_json_path)
-            if "executed" not in latency_result:
-                latency_result["executed"] = True
-            latency_result["path"] = str(latency_json_path)
-            latency_result["error"] = ""
-        except JSON_REPORT_EXCEPTIONS as exc:
-            latency_result = {
-                "executed": False,
-                "summary": {"all_passed": None},
-                "error": str(exc),
-                "path": str(latency_json_path),
-            }
-    else:
-        latency_result = {
-            "executed": False,
-            "summary": {"all_passed": None},
-            "error": "missing_latency_json",
-            "path": str(latency_json_path),
-        }
+    latency_result = load_optional_report(
+        latency_json_path,
+        missing_error="missing_latency_json",
+    )
 
     report = _build_report(
         input_files,
