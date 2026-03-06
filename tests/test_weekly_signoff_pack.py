@@ -53,6 +53,14 @@ def test_build_report_marks_pending_manual_items():
     assert "24h 观察完成" in report["pending_items"]
     assert "收益归因表确认" in report["pending_items"]
     assert "灰度发布完成" not in report["pending_items"]
+    assert (
+        "make weekly-manual-update MANUAL_ARGS="
+        in report["manual_update"]["suggested_command"]
+    )
+    assert "observation_24h_completed=true" in report["manual_update"]["suggested_command"]
+    assert "signoff research=research_owner" not in report["manual_update"]["suggested_command"]
+    assert "signoff engineering=engineering_owner" in report["manual_update"]["suggested_command"]
+    assert "signoff risk=risk_owner" in report["manual_update"]["suggested_command"]
 
 
 def test_build_report_skips_followup_alias_when_manual_item_already_done():
@@ -219,6 +227,39 @@ def test_build_report_adds_pending_item_when_online_offline_data_is_pending():
 
     assert report["status"] == "PENDING_MANUAL_SIGNOFF"
     assert "线上/线下一致性回放数据待联调" in report["pending_items"]
+    assert (
+        "线上/线下一致性回放数据待联调"
+        in report["manual_update"]["external_pending_items"]
+    )
+
+
+def test_build_report_omits_manual_update_command_when_only_external_pending_items_remain():
+    module = _load_module()
+    report = module._build_report(
+        audit={
+            "summary": {"exceptions": 0, "consistency_exceptions": 0},
+            "checklist": {"minimum_regression_passed": True, "rollback_version_marked": True},
+            "incomplete_tasks": [],
+        },
+        canary={"recommendation": "PROCEED_CANARY", "blockers": []},
+        decision={"decision": "APPROVE_CANARY", "follow_up_tasks": []},
+        attribution={"attribution_snapshot": [{"strategy": "demo"}]},
+        manual_status={
+            "gray_release_completed": True,
+            "observation_24h_completed": True,
+            "rollback_decision_recorded": True,
+            "pnl_attribution_confirmed": True,
+            "change_and_rollback_recorded": True,
+            "adr_signed": True,
+            "signoffs": {"research": "r", "engineering": "e", "risk": "k"},
+        },
+        consistency_replay={"status": "PENDING_DATA"},
+    )
+
+    assert report["status"] == "PENDING_MANUAL_SIGNOFF"
+    assert report["manual_update"]["pending_items"] == []
+    assert report["manual_update"]["suggested_command"] == ""
+    assert report["manual_update"]["external_pending_items"] == ["线上/线下一致性回放数据待联调"]
 
 
 def test_build_report_adds_pending_item_when_online_offline_status_is_missing():

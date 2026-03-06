@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import shlex
 from typing import Any
 
 from scripts.governance.report_utils import as_bool as _as_bool
@@ -41,6 +42,11 @@ TASK_CANONICAL_LABEL: dict[str, str] = {
 
 _TRUE_VALUES = {"1", "true", "yes", "y", "on"}
 _FALSE_VALUES = {"0", "false", "no", "n", "off"}
+_ROLE_PLACEHOLDERS = {
+    "research": "research_owner",
+    "engineering": "engineering_owner",
+    "risk": "risk_owner",
+}
 
 
 def normalize_manual_status(raw: dict[str, Any] | None) -> dict[str, Any]:
@@ -135,3 +141,35 @@ def build_manual_status_markdown(
         lines.append(f"- {mark} {label}: `{signer}`")
     lines.append("")
     return "\n".join(lines)
+
+
+def build_manual_update_plan(status: dict[str, Any] | None) -> dict[str, Any]:
+    updated = normalize_manual_status(status)
+    signoffs = updated["signoffs"] if isinstance(updated.get("signoffs"), dict) else {}
+
+    updater_pending_items: list[str] = []
+    args: list[str] = []
+    for key, label in MANUAL_ITEMS:
+        if bool(updated.get(key)):
+            continue
+        updater_pending_items.append(label)
+        args.extend(["--check", f"{key}=true"])
+
+    for role, label in ROLE_SIGNOFF_ITEMS:
+        signer = str(signoffs.get(role, "")).strip()
+        if signer:
+            continue
+        updater_pending_items.append(label)
+        args.extend(["--signoff", f"{role}={_ROLE_PLACEHOLDERS[role]}"])
+
+    args_text = " ".join(shlex.quote(arg) for arg in args)
+    command = (
+        f"make weekly-manual-update MANUAL_ARGS={shlex.quote(args_text)}"
+        if args_text
+        else ""
+    )
+    return {
+        "pending_items": updater_pending_items,
+        "args": args,
+        "suggested_command": command,
+    }

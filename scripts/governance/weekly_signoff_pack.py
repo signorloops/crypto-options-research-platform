@@ -18,6 +18,7 @@ from scripts.governance.manual_status_utils import (
     ROLE_SIGNOFF_ITEMS,
     TASK_CANONICAL_LABEL,
     TASK_TO_MANUAL_KEY,
+    build_manual_update_plan,
     default_manual_status_template,
     normalize_manual_status,
 )
@@ -130,6 +131,10 @@ def _build_report(
         pending_items.append("线上/线下一致性回放数据待联调")
 
     pending_items = _dedupe_keep_order(pending_items)
+    manual_update = build_manual_update_plan(status)
+    external_pending_items = [
+        item for item in pending_items if item not in set(manual_update["pending_items"])
+    ]
     if auto_blockers:
         overall_status = "AUTO_BLOCKED"
     elif pending_items:
@@ -161,6 +166,10 @@ def _build_report(
             "manual_total": len(manual_items),
             "role_signoffs_done": sum(1 for item in role_signoffs if item["done"]),
             "role_signoffs_total": len(role_signoffs),
+        },
+        "manual_update": {
+            **manual_update,
+            "external_pending_items": external_pending_items,
         },
         "manual_status": status,
     }
@@ -198,6 +207,25 @@ def _to_markdown(report: dict[str, Any]) -> str:
         mark = "[x]" if item["done"] else "[ ]"
         value = item["value"] if item["value"] else "TBD"
         lines.append(f"- {mark} {item['label']}: `{value}`")
+    lines.append("")
+    lines.append("## Suggested Manual Update")
+    lines.append("")
+    manual_update = report["manual_update"]
+    updater_pending_items = manual_update["pending_items"]
+    if updater_pending_items:
+        lines.append(
+            "- Updater-managed items: "
+            + ", ".join(f"`{item}`" for item in updater_pending_items)
+        )
+        lines.append(f"- Command: `{manual_update['suggested_command']}`")
+    else:
+        lines.append("- [x] No `weekly-manual-update` action needed")
+    external_pending_items = manual_update["external_pending_items"]
+    if external_pending_items:
+        lines.append(
+            "- External pending items: "
+            + ", ".join(f"`{item}`" for item in external_pending_items)
+        )
     lines.append("")
     lines.append("## Pending Items")
     lines.append("")
