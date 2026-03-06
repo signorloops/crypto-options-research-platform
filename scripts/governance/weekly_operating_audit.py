@@ -26,7 +26,10 @@ from scripts.governance.weekly_close_gate_report_utils import (
     evaluate_close_gate as _evaluate_close_gate,
     write_close_gate_report as _write_close_gate_report,
 )
-from scripts.governance.weekly_git_utils import parse_recent_change_entries
+from scripts.governance.weekly_git_utils import (
+    collect_recent_changes as _collect_recent_changes_impl,
+    detect_latest_tag as _detect_latest_tag_impl,
+)
 from scripts.governance.weekly_operating_parser_utils import (
     build_weekly_operating_argument_specs,
 )
@@ -89,81 +92,19 @@ def _load_consistency_thresholds(path: Path) -> dict[str, float]:
     return load_threshold_map(path, DEFAULT_CONSISTENCY_THRESHOLDS, label="consistency threshold")
 
 
-def _is_shallow_repository(repo_root: Path) -> bool:
-    completed = subprocess.run(
-        ["git", "rev-parse", "--is-shallow-repository"],
-        cwd=repo_root,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if completed.returncode != 0:
-        return False
-    return completed.stdout.strip().lower() == "true"
-
-
 def _collect_recent_changes(repo_root: Path, since_days: int) -> dict[str, Any]:
-    shallow = _is_shallow_repository(repo_root)
-    completed = subprocess.run(
-        [
-            "git",
-            "log",
-            f"--since={since_days} days ago",
-            "--pretty=format:%H%x09%ad%x09%s",
-            "--date=short",
-        ],
-        cwd=repo_root,
-        text=True,
-        capture_output=True,
-        check=False,
+    return _collect_recent_changes_impl(
+        repo_root,
+        since_days,
+        runner=subprocess.run,
     )
-    if completed.returncode != 0:
-        return {
-            "executed": False,
-            "since_days": since_days,
-            "entries": [],
-            "count": 0,
-            "shallow": shallow,
-            "error": completed.stderr.strip(),
-        }
-
-    entries = parse_recent_change_entries(completed.stdout)
-    return {
-        "executed": True,
-        "since_days": since_days,
-        "entries": entries,
-        "count": len(entries),
-        "shallow": shallow,
-        "error": "",
-    }
 
 
 def _detect_latest_tag(repo_root: Path) -> dict[str, Any]:
-    completed = subprocess.run(
-        ["git", "describe", "--tags", "--exact-match", "HEAD"],
-        cwd=repo_root,
-        text=True,
-        capture_output=True,
-        check=False,
+    return _detect_latest_tag_impl(
+        repo_root,
+        runner=subprocess.run,
     )
-    if completed.returncode == 0:
-        return {"executed": True, "tag": completed.stdout.strip(), "error": "", "source": "tag"}
-
-    head_ref = subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"],
-        cwd=repo_root,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if head_ref.returncode != 0:
-        return {"executed": False, "tag": "", "error": completed.stderr.strip(), "source": ""}
-    return {
-        "executed": True,
-        "tag": f"HEAD-{head_ref.stdout.strip()}",
-        "error": "",
-        "source": "commit",
-    }
 
 
 def _evaluate_rows(
