@@ -115,6 +115,19 @@ def test_arena_report_body_lines_include_results_and_rankings():
     assert "STRATEGY RANKINGS" in lines
 
 
+def test_arena_report_header_and_ranking_helpers_render_expected_lines():
+    arena = StrategyArena(_market_data_frame(), initial_capital=100000.0)
+    rich_result = _make_backtest_result("rich", [0, 100, 80, 120, 150], sharpe=1.2)
+    arena.scorecards = {"rich": arena._calculate_scorecard(rich_result)}
+
+    data_period = arena_module._arena_data_period_line(arena)
+    ranking_lines = arena_module._arena_ranking_entries(arena)
+
+    assert data_period.startswith("Data Period:")
+    assert any("Best by total_pnl: rich" in line for line in ranking_lines)
+    assert any("Best by sharpe_ratio: rich" in line for line in ranking_lines)
+
+
 def test_scorecard_summary_sections_include_named_blocks():
     scorecard = arena_module.StrategyScorecard(
         strategy_name="rich",

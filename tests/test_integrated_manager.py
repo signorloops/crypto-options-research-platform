@@ -390,6 +390,23 @@ def test_get_cache_status_includes_policy_ttls():
     assert status["policy"]["ttl_seconds"] == realtime_ttls()
 
 
+def test_cache_status_snapshot_merges_sections():
+    import data.integrated_manager as module
+
+    snapshot = module._cache_status_snapshot(
+        parquet_info={"files": 3},
+        duckdb_status={"enabled": True, "initialized": False},
+        redis_status={"enabled": False, "connected": False},
+    )
+
+    assert snapshot == {
+        "parquet": {"files": 3},
+        "policy": {"ttl_seconds": realtime_ttls()},
+        "duckdb": {"enabled": True, "initialized": False},
+        "redis": {"enabled": False, "connected": False},
+    }
+
+
 def test_close_clears_duckdb_runtime():
     manager = IntegratedDataManager(enable_duckdb=False, enable_redis=False)
     duckdb = MagicMock()

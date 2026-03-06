@@ -463,36 +463,43 @@ def _apply_bonferroni_correction(
 
 
 def _arena_report_header_lines(arena: "StrategyArena") -> List[str]:
-    lines = [
+    return [
         "=" * 70,
         "STRATEGY ARENA - BACKTEST REPORT",
         "=" * 70,
         f"\nBacktest Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         f"Initial Capital: ${arena.initial_capital:,.2f}",
         f"Transaction Cost: {arena.transaction_cost_bps} bps",
+        _arena_data_period_line(arena),
+        f"Number of Strategies: {len(arena.scorecards)}",
     ]
-    if len(arena.market_data) > 0:
-        start_date = arena.market_data.index[0]
-        end_date = arena.market_data.index[-1]
-        lines.append(f"Data Period: {start_date} to {end_date}")
-    else:
-        lines.append("Data Period: No data")
-    lines.append(f"Number of Strategies: {len(arena.scorecards)}")
+
+
+def _arena_data_period_line(arena: "StrategyArena") -> str:
+    if len(arena.market_data) == 0:
+        return "Data Period: No data"
+    start_date = arena.market_data.index[0]
+    end_date = arena.market_data.index[-1]
+    return f"Data Period: {start_date} to {end_date}"
+
+
+def _arena_ranking_entries(arena: "StrategyArena") -> List[str]:
+    metrics = ["total_pnl", "sharpe_ratio", "sortino_ratio", "calmar_ratio"]
+    lines = [
+        f"\nBest by {metric}: {winner} ({getattr(arena.scorecards[winner], metric):.4f})"
+        for metric in metrics
+        for winner in [arena.get_winner(metric)]
+    ]
     return lines
 
 
 def _arena_report_rankings_lines(arena: "StrategyArena") -> List[str]:
-    lines = [
+    return [
         "\n" + "=" * 70,
         "STRATEGY RANKINGS",
         "=" * 70,
+        *_arena_ranking_entries(arena),
     ]
-    metrics = ["total_pnl", "sharpe_ratio", "sortino_ratio", "calmar_ratio"]
-    for metric in metrics:
-        winner = arena.get_winner(metric)
-        value = getattr(arena.scorecards[winner], metric)
-        lines.append(f"\nBest by {metric}: {winner} ({value:.4f})")
-    return lines
 
 
 def _arena_report_body_lines(arena: "StrategyArena") -> List[str]:

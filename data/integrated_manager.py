@@ -135,6 +135,21 @@ def _manager_factory_kwargs(
     }
 
 
+def _cache_status_snapshot(
+    *,
+    parquet_info: Dict[str, Any],
+    duckdb_status: Dict[str, Any],
+    redis_status: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Assemble a single runtime status snapshot across all cache layers."""
+    return {
+        "parquet": parquet_info,
+        "policy": {"ttl_seconds": realtime_ttls()},
+        "duckdb": duckdb_status,
+        "redis": redis_status,
+    }
+
+
 async def _resolve_greeks_request(
     *,
     instrument: str,
@@ -565,12 +580,11 @@ class IntegratedDataManager(_IntegratedRealtimeCacheMixin):
 
     def get_cache_status(self) -> Dict[str, Any]:
         """Get status of all cache layers."""
-        return {
-            "parquet": self.parquet_manager.cache.get_cache_info(),
-            "policy": {"ttl_seconds": realtime_ttls()},
-            "duckdb": self._duckdb_status(),
-            "redis": self._redis_status(),
-        }
+        return _cache_status_snapshot(
+            parquet_info=self.parquet_manager.cache.get_cache_info(),
+            duckdb_status=self._duckdb_status(),
+            redis_status=self._redis_status(),
+        )
 
     async def get_redis_stats(self) -> Optional[Dict[str, Any]]:
         """Get Redis statistics if connected."""
