@@ -687,6 +687,36 @@ def test_build_report_does_not_require_latency_by_default(tmp_path):
     assert "延迟基线达标" not in report["incomplete_tasks"]
 
 
+def test_build_operating_report_payload_normalizes_sections_and_counts():
+    from scripts.governance.weekly_operating_report_utils import build_operating_report_payload
+
+    report = build_operating_report_payload(
+        inputs=["/tmp/demo.json"],
+        thresholds={"min_sharpe": 0.5},
+        consistency_thresholds={"max_abs_pnl_diff": 1.0},
+        snapshot_rows=[{"strategy": "Stable", "experiment_id": "EXP-1", "status": "PASS"}],
+        risk_exceptions=[],
+        consistency_checks=[],
+        consistency_exceptions=[],
+        checklist={"kpi_snapshot_updated": True},
+        manual_checklist_items=["ADR"],
+        incomplete_tasks=[],
+        parse_errors=[],
+        regression_result=None,
+        change_log=None,
+        rollback_marker=None,
+        performance_report={"executed": False, "summary": {"all_passed": None}, "error": ""},
+        latency_report={"executed": False, "summary": {"all_passed": None}, "error": ""},
+    )
+
+    assert report["summary"]["strategies"] == 1
+    assert report["inputs"] == ["/tmp/demo.json"]
+    assert report["manual_checklist_items"] == ["ADR"]
+    assert report["regression"]["executed"] is False
+    assert report["change_log"]["executed"] is False
+    assert report["rollback_marker"]["executed"] is False
+
+
 def test_main_strict_exits_nonzero_when_consistency_exceptions_exist(tmp_path, monkeypatch):
     module = _load_module()
     older = tmp_path / "results" / "backtest_results_old2.json"

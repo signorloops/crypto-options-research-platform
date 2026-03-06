@@ -404,6 +404,14 @@ def _strategy_summary_lines(scorecards: Dict[str, StrategyScorecard]) -> List[st
     return [scorecard.summary() for scorecard in scorecards.values()]
 
 
+def _pnl_histogram_bins(values: list[float] | np.ndarray) -> list[float] | int:
+    if np.ptp(values) <= 1e-12:
+        center = float(values[0])
+        span = max(1e-6, abs(center) * 0.01)
+        return [center - span, center + span]
+    return 30
+
+
 def _scorecard_summary_metrics(
     *,
     result: BacktestResult,
@@ -719,13 +727,13 @@ class StrategyArena:
             values = values[np.isfinite(values)]
             if len(values) == 0:
                 continue
-            if np.ptp(values) <= 1e-12:
-                center = float(values[0])
-                span = max(1e-6, abs(center) * 0.01)
-                bins = [center - span, center + span]
-            else:
-                bins = 30
-            ax.hist(values, bins=bins, alpha=0.5, label=name, density=True)
+            ax.hist(
+                values,
+                bins=_pnl_histogram_bins(values),
+                alpha=0.5,
+                label=name,
+                density=True,
+            )
         ax.set_title("Daily PnL Distribution")
         ax.set_xlabel("Daily PnL ($)")
         ax.legend()

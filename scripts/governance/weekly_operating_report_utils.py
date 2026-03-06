@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -198,4 +199,52 @@ def build_report_summary(
         "consistency_pairs": len(consistency_checks),
         "consistency_exceptions": len(consistency_exceptions),
         "parse_errors": len(parse_errors),
+    }
+
+
+def build_operating_report_payload(
+    *,
+    inputs: list[str],
+    thresholds: dict[str, float],
+    consistency_thresholds: dict[str, float],
+    snapshot_rows: list[dict[str, Any]],
+    risk_exceptions: list[dict[str, Any]],
+    consistency_checks: list[dict[str, Any]],
+    consistency_exceptions: list[dict[str, Any]],
+    checklist: dict[str, Any],
+    manual_checklist_items: list[str],
+    incomplete_tasks: list[str],
+    parse_errors: list[dict[str, Any]],
+    regression_result: dict[str, Any] | None,
+    change_log: dict[str, Any] | None,
+    rollback_marker: dict[str, Any] | None,
+    performance_report: dict[str, Any],
+    latency_report: dict[str, Any],
+) -> dict[str, Any]:
+    """Assemble the final weekly operating report payload."""
+    return {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "inputs": inputs,
+        "thresholds": thresholds,
+        "consistency_thresholds": consistency_thresholds,
+        "summary": build_report_summary(
+            snapshot_rows=snapshot_rows,
+            risk_exceptions=risk_exceptions,
+            consistency_checks=consistency_checks,
+            consistency_exceptions=consistency_exceptions,
+            parse_errors=parse_errors,
+        ),
+        "kpi_snapshot": snapshot_rows,
+        "risk_exceptions": risk_exceptions,
+        "consistency_checks": consistency_checks,
+        "consistency_exceptions": consistency_exceptions,
+        "checklist": checklist,
+        "manual_checklist_items": manual_checklist_items,
+        "incomplete_tasks": incomplete_tasks,
+        "parse_errors": parse_errors,
+        "regression": normalize_regression_report(regression_result),
+        "change_log": normalize_change_log(change_log),
+        "rollback_marker": normalize_rollback_marker(rollback_marker),
+        "performance_baseline": performance_report,
+        "latency_baseline": latency_report,
     }

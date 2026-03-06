@@ -7,7 +7,6 @@ import argparse
 import subprocess
 import sys
 from collections.abc import Sequence
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -47,13 +46,10 @@ from scripts.governance.weekly_operating_data_utils import (
 )
 from scripts.governance.weekly_operating_report_utils import (
     build_consistency_checks,
+    build_operating_report_payload,
     build_operating_checklist,
-    build_report_summary,
     build_risk_exceptions,
-    normalize_change_log,
     normalize_optional_baseline_report,
-    normalize_regression_report,
-    normalize_rollback_marker,
     resolve_optional_report_check,
 )
 from scripts.governance.weekly_operating_runtime_utils import (
@@ -199,33 +195,24 @@ def _build_report(
         latency_required=latency_required,
         manual_items=MANUAL_CHECKLIST_ITEMS,
     )
-
-    return {
-        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "inputs": [str(p) for p in files_sorted],
-        "thresholds": thresholds,
-        "consistency_thresholds": consistency_thresholds_final,
-        "summary": build_report_summary(
-            snapshot_rows=snapshot_rows,
-            risk_exceptions=risk_exceptions,
-            consistency_checks=consistency_checks,
-            consistency_exceptions=consistency_exceptions,
-            parse_errors=parse_errors,
-        ),
-        "kpi_snapshot": snapshot_rows,
-        "risk_exceptions": risk_exceptions,
-        "consistency_checks": consistency_checks,
-        "consistency_exceptions": consistency_exceptions,
-        "checklist": checklist,
-        "manual_checklist_items": MANUAL_CHECKLIST_ITEMS,
-        "incomplete_tasks": incomplete_tasks,
-        "parse_errors": parse_errors,
-        "regression": normalize_regression_report(regression_result),
-        "change_log": normalize_change_log(change_log),
-        "rollback_marker": normalize_rollback_marker(rollback_marker),
-        "performance_baseline": performance_report,
-        "latency_baseline": latency_report,
-    }
+    return build_operating_report_payload(
+        inputs=[str(p) for p in files_sorted],
+        thresholds=thresholds,
+        consistency_thresholds=consistency_thresholds_final,
+        snapshot_rows=snapshot_rows,
+        risk_exceptions=risk_exceptions,
+        consistency_checks=consistency_checks,
+        consistency_exceptions=consistency_exceptions,
+        checklist=checklist,
+        manual_checklist_items=MANUAL_CHECKLIST_ITEMS,
+        incomplete_tasks=incomplete_tasks,
+        parse_errors=parse_errors,
+        regression_result=regression_result,
+        change_log=change_log,
+        rollback_marker=rollback_marker,
+        performance_report=performance_report,
+        latency_report=latency_report,
+    )
 
 
 def _to_markdown(report: dict[str, Any]) -> str:

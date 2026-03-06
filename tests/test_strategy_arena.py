@@ -295,6 +295,15 @@ def test_comparison_helpers_format_rows_and_metric_values():
     assert table_rows == [["rich", "$150", "0.1%", "1.20", "-10.0%"]]
 
 
+def test_pnl_histogram_bins_handle_flat_and_variable_series():
+    flat_bins = arena_module._pnl_histogram_bins([5.0, 5.0, 5.0])
+    variable_bins = arena_module._pnl_histogram_bins([1.0, 2.0, 3.0])
+
+    assert len(flat_bins) == 2
+    assert flat_bins[0] < 5.0 < flat_bins[1]
+    assert variable_bins == 30
+
+
 def test_statistical_comparison_and_plotting():
     arena = StrategyArena(_market_data_frame(), initial_capital=100000.0)
     r1 = _make_backtest_result("A", list(range(20)), sharpe=1.0)
