@@ -491,6 +491,29 @@ def _handle_strict_close(
     return None
 
 
+def _run_close_gate_only(
+    *,
+    strict_close: bool,
+    signoff_json_path: Path,
+    close_gate_md: Path,
+    close_gate_json: Path,
+) -> int:
+    close_ready, close_detail, signoff_payload = _evaluate_close_gate(signoff_json_path)
+    _write_close_gate_report(
+        signoff_json_path=signoff_json_path,
+        close_gate_md=close_gate_md,
+        close_gate_json=close_gate_json,
+        close_ready=close_ready,
+        close_detail=close_detail,
+        signoff_payload=signoff_payload,
+    )
+    if close_ready:
+        print("Weekly close gate: READY_FOR_CLOSE.")
+        return 0
+    print(f"Weekly close gate: not ready ({close_detail}).")
+    return 2 if strict_close else 0
+
+
 def _load_baseline_reports(
     *,
     repo_root: Path,
@@ -505,6 +528,32 @@ def _load_baseline_reports(
         "latency": load_optional_report(
             (repo_root / latency_json).resolve(),
             missing_error="missing_latency_json",
+        ),
+    }
+
+
+def _prepare_audit_run(*, repo_root: Path, args: argparse.Namespace) -> dict[str, Any]:
+    thresholds = _load_thresholds((repo_root / args.thresholds).resolve())
+    consistency_thresholds = _load_consistency_thresholds(
+        (repo_root / args.consistency_thresholds).resolve()
+    )
+    input_files = _resolve_input_files(
+        repo_root=repo_root,
+        explicit_inputs=args.inputs or [],
+        results_dir=args.results_dir,
+        pattern=args.pattern,
+    )
+    return {
+        "thresholds": thresholds,
+        "consistency_thresholds": consistency_thresholds,
+        "input_files": input_files,
+        "regression_result": _run_regression_command(args.regression_cmd, repo_root),
+        "change_log": _collect_recent_changes(repo_root, max(args.change_log_days, 1)),
+        "rollback_marker": _detect_latest_tag(repo_root),
+        "baselines": _load_baseline_reports(
+            repo_root=repo_root,
+            performance_json=args.performance_json,
+            latency_json=args.latency_json,
         ),
     }
 
@@ -526,56 +575,30 @@ def main() -> int:
     close_gate_json = paths["close_gate_output_json"]
 
     if args.close_gate_only:
-        close_ready, close_detail, signoff_payload = _evaluate_close_gate(signoff_json_path)
-        _write_close_gate_report(
+        return _run_close_gate_only(
+            strict_close=args.strict_close,
             signoff_json_path=signoff_json_path,
             close_gate_md=close_gate_md,
             close_gate_json=close_gate_json,
-            close_ready=close_ready,
-            close_detail=close_detail,
-            signoff_payload=signoff_payload,
         )
-        if close_ready:
-            print("Weekly close gate: READY_FOR_CLOSE.")
-            return 0
-        print(f"Weekly close gate: not ready ({close_detail}).")
-        return 2 if args.strict_close else 0
 
-    thresholds_path = (repo_root / args.thresholds).resolve()
-    thresholds = _load_thresholds(thresholds_path)
-    consistency_thresholds_path = (repo_root / args.consistency_thresholds).resolve()
-    consistency_thresholds = _load_consistency_thresholds(consistency_thresholds_path)
-    input_files = _resolve_input_files(
-        repo_root=repo_root,
-        explicit_inputs=args.inputs or [],
-        results_dir=args.results_dir,
-        pattern=args.pattern,
-    )
+    audit_run = _prepare_audit_run(repo_root=repo_root, args=args)
+    input_files = audit_run["input_files"]
 
     if not input_files:
         print("Weekly operating audit: no input files found.")
         return 2 if (args.strict or args.strict_close) else 0
 
-    regression_result = _run_regression_command(args.regression_cmd, repo_root)
-
-    change_log = _collect_recent_changes(repo_root, max(args.change_log_days, 1))
-    rollback_marker = _detect_latest_tag(repo_root)
-    baselines = _load_baseline_reports(
-        repo_root=repo_root,
-        performance_json=args.performance_json,
-        latency_json=args.latency_json,
-    )
-
     report = _build_report(
         input_files,
-        thresholds,
-        consistency_thresholds=consistency_thresholds,
-        regression_result=regression_result,
-        change_log=change_log,
-        rollback_marker=rollback_marker,
-        performance_result=baselines["performance"],
+        audit_run["thresholds"],
+        consistency_thresholds=audit_run["consistency_thresholds"],
+        regression_result=audit_run["regression_result"],
+        change_log=audit_run["change_log"],
+        rollback_marker=audit_run["rollback_marker"],
+        performance_result=audit_run["baselines"]["performance"],
         performance_required=args.require_performance,
-        latency_result=baselines["latency"],
+        latency_result=audit_run["baselines"]["latency"],
         latency_required=args.require_latency,
     )
 
@@ -584,7 +607,7 @@ def main() -> int:
 
     issue_messages = _collect_issue_messages(
         report,
-        regression_result=regression_result,
+        regression_result=audit_run["regression_result"],
         require_performance=args.require_performance,
         require_latency=args.require_latency,
     )

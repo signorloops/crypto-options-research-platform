@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+from argparse import Namespace
 from pathlib import Path
 
 SCRIPT_PATH = (
@@ -391,6 +392,77 @@ def test_handle_strict_close_returns_exit_when_gate_not_ready(tmp_path, monkeypa
 
     assert exit_code == 2
     assert calls and calls[0]["close_detail"] == "status=PENDING_MANUAL_SIGNOFF"
+
+
+def test_run_close_gate_only_returns_status_and_writes_report(tmp_path, monkeypatch):
+    module = _load_module()
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        module,
+        "_evaluate_close_gate",
+        lambda path: (True, "READY_FOR_CLOSE", {"status": "READY_FOR_CLOSE"}),
+    )
+    monkeypatch.setattr(module, "_write_close_gate_report", lambda **kwargs: calls.append(kwargs))
+
+    exit_code = module._run_close_gate_only(
+        strict_close=True,
+        signoff_json_path=tmp_path / "signoff.json",
+        close_gate_md=tmp_path / "close.md",
+        close_gate_json=tmp_path / "close.json",
+    )
+
+    assert exit_code == 0
+    assert calls and calls[0]["close_ready"] is True
+
+
+def test_prepare_audit_run_loads_thresholds_inputs_and_supporting_reports(tmp_path, monkeypatch):
+    module = _load_module()
+    result_path = tmp_path / "results" / "demo.json"
+    _write(result_path, "{}")
+
+    monkeypatch.setattr(module, "_load_thresholds", lambda path: {"min_sharpe": 0.5})
+    monkeypatch.setattr(
+        module,
+        "_load_consistency_thresholds",
+        lambda path: {"max_abs_pnl_diff": 10.0},
+    )
+    monkeypatch.setattr(module, "_resolve_input_files", lambda **kwargs: [result_path])
+    monkeypatch.setattr(
+        module,
+        "_run_regression_command",
+        lambda command, repo_root: {"executed": True, "passed": True, "command": command},
+    )
+    monkeypatch.setattr(module, "_collect_recent_changes", lambda repo_root, days: {"count": days})
+    monkeypatch.setattr(module, "_detect_latest_tag", lambda repo_root: {"tag": "backup-release-demo"})
+    monkeypatch.setattr(
+        module,
+        "_load_baseline_reports",
+        lambda **kwargs: {"performance": {"executed": True}, "latency": {"executed": True}},
+    )
+
+    payload = module._prepare_audit_run(
+        repo_root=tmp_path,
+        args=Namespace(
+            thresholds="config/t.json",
+            consistency_thresholds="config/c.json",
+            inputs=[str(result_path)],
+            results_dir="results",
+            pattern="backtest*.json",
+            regression_cmd="pytest -q",
+            change_log_days=7,
+            performance_json="artifacts/perf.json",
+            latency_json="artifacts/latency.json",
+        ),
+    )
+
+    assert payload["thresholds"] == {"min_sharpe": 0.5}
+    assert payload["consistency_thresholds"] == {"max_abs_pnl_diff": 10.0}
+    assert payload["input_files"] == [result_path]
+    assert payload["regression_result"]["command"] == "pytest -q"
+    assert payload["change_log"] == {"count": 7}
+    assert payload["rollback_marker"] == {"tag": "backup-release-demo"}
+    assert payload["baselines"]["performance"]["executed"] is True
+    assert payload["baselines"]["latency"]["executed"] is True
 
 
 def test_detect_latest_tag_falls_back_to_commit_when_head_is_not_tagged(tmp_path):

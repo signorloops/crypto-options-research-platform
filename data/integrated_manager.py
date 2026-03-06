@@ -35,6 +35,36 @@ logger = get_logger(__name__)
 REDIS_CONNECT_EXCEPTIONS = (RedisError, OSError, ValueError, TypeError, RuntimeError)
 
 
+def _manager_init_config(
+    *,
+    parquet_cache: Optional[DataCache],
+    duckdb_path: Optional[str],
+    redis_host: str,
+    redis_port: int,
+    enable_redis: bool,
+    enable_duckdb: bool,
+) -> Dict[str, Any]:
+    """Normalize constructor configuration for IntegratedDataManager."""
+    return {
+        "parquet_manager": DataManager(parquet_cache or DataCache()),
+        "enable_duckdb": enable_duckdb,
+        "duckdb_path": duckdb_path,
+        "enable_redis": enable_redis,
+        "redis_host": redis_host,
+        "redis_port": redis_port,
+    }
+
+
+def _manager_runtime_defaults() -> Dict[str, Any]:
+    """Return empty runtime state for optional backends."""
+    return {
+        "duckdb": None,
+        "redis": None,
+        "greeks_manager": None,
+        "_state_lock": None,
+    }
+
+
 def _resolve_manager_config(
     *,
     duckdb_path: Optional[str],
@@ -223,16 +253,25 @@ class IntegratedDataManager(_IntegratedRealtimeCacheMixin):
         enable_duckdb: bool = True,
     ):
         """Initialize integrated data manager."""
-        self.parquet_manager = DataManager(parquet_cache or DataCache())
-        self.enable_duckdb = enable_duckdb
-        self.duckdb_path = duckdb_path
-        self.duckdb: Optional[DuckDBCache] = None
-        self.enable_redis = enable_redis
-        self.redis_host = redis_host
-        self.redis_port = redis_port
-        self.redis: Optional[RedisCache] = None
-        self.greeks_manager: Optional[GreeksCacheManager] = None
-        self._state_lock: Optional[asyncio.Lock] = None
+        init_config = _manager_init_config(
+            parquet_cache=parquet_cache,
+            duckdb_path=duckdb_path,
+            redis_host=redis_host,
+            redis_port=redis_port,
+            enable_redis=enable_redis,
+            enable_duckdb=enable_duckdb,
+        )
+        runtime_defaults = _manager_runtime_defaults()
+        self.parquet_manager = init_config["parquet_manager"]
+        self.enable_duckdb = init_config["enable_duckdb"]
+        self.duckdb_path = init_config["duckdb_path"]
+        self.enable_redis = init_config["enable_redis"]
+        self.redis_host = init_config["redis_host"]
+        self.redis_port = init_config["redis_port"]
+        self.duckdb = runtime_defaults["duckdb"]
+        self.redis = runtime_defaults["redis"]
+        self.greeks_manager = runtime_defaults["greeks_manager"]
+        self._state_lock = runtime_defaults["_state_lock"]
         logger.info(
             "IntegratedDataManager initialized",
             extra=log_extra(

@@ -147,6 +147,34 @@ def test_resolve_manager_config_from_environ_uses_process_env(monkeypatch):
     }
 
 
+def test_manager_init_helpers_return_expected_defaults(tmp_path):
+    import data.integrated_manager as module
+
+    cache = DataCache(base_dir=tmp_path / "cache")
+    init_config = module._manager_init_config(
+        parquet_cache=cache,
+        duckdb_path="/tmp/demo.duckdb",
+        redis_host="redis.demo",
+        redis_port=6381,
+        enable_redis=False,
+        enable_duckdb=True,
+    )
+    runtime_defaults = module._manager_runtime_defaults()
+
+    assert init_config["parquet_manager"].cache.raw_dir == cache.raw_dir
+    assert init_config["duckdb_path"] == "/tmp/demo.duckdb"
+    assert init_config["redis_host"] == "redis.demo"
+    assert init_config["redis_port"] == 6381
+    assert init_config["enable_redis"] is False
+    assert init_config["enable_duckdb"] is True
+    assert runtime_defaults == {
+        "duckdb": None,
+        "redis": None,
+        "greeks_manager": None,
+        "_state_lock": None,
+    }
+
+
 @pytest.mark.asyncio
 async def test_resolve_greeks_request_prefers_refresh_then_redis_then_fetch():
     import data.integrated_manager as module
