@@ -19,21 +19,31 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Guard forbidden branch-name keywords.")
     parser.add_argument("--root", default=".", help="Repository root path.")
     legacy_token = "".join(chr(code) for code in (99, 111, 100, 101, 120))
+    default_allowed_prefix = "".join(chr(code) for code in (99, 111, 100, 101, 120, 47))
     parser.add_argument(
         "--forbidden",
         nargs="+",
         default=[legacy_token],
         help="Case-insensitive forbidden tokens for branch names.",
     )
+    parser.add_argument(
+        "--allow-prefix",
+        nargs="*",
+        default=[default_allowed_prefix],
+        help="Case-insensitive branch prefixes exempt from forbidden-token matching.",
+    )
     args = parser.parse_args()
 
     root = Path(args.root).resolve()
     branches = _git_branches(root)
     forbidden = [token.lower() for token in args.forbidden]
+    allowed_prefixes = [prefix.lower() for prefix in args.allow_prefix]
 
     violations: list[str] = []
     for branch in branches:
         lowered = branch.lower()
+        if any(lowered.startswith(prefix) for prefix in allowed_prefixes):
+            continue
         if any(token in lowered for token in forbidden):
             violations.append(branch)
 

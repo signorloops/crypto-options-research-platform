@@ -9,11 +9,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from execution.dashboard.chart_builders import comparison_bars, multi_pnl_overlay
-from execution.dashboard.data_helpers import (
-    DEFAULT_RESULTS_DIR,
-    available_json_results,
-    load_backtest_json,
-)
+from execution.dashboard.data_helpers import available_json_results, load_backtest_json, normalize_strategy_results_payload, resolve_json_result_path
 from execution.dashboard.templates import base_layout, data_table, file_selector
 
 
@@ -108,12 +104,8 @@ def register_strategy_routes(app: FastAPI, directory: Path) -> None:
             body = '<div class="card"><h2>No backtest results found</h2><p>Run a backtest first to generate result files.</p></div>'
             return HTMLResponse(content=base_layout("Strategy", "Strategy", body))
 
-        file_path = file or json_files[0]["path"]
-        full_path = directory / file_path
-        if not full_path.exists():
-            raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
-
-        strategies = load_backtest_json(full_path)
+        full_path, file_path, json_files = resolve_json_result_path(directory, file)
+        strategies = normalize_strategy_results_payload(load_backtest_json(full_path), file_name=full_path.name)
         if not strategies:
             raise HTTPException(status_code=422, detail="Empty backtest result file")
 
@@ -128,12 +120,8 @@ def register_strategy_routes(app: FastAPI, directory: Path) -> None:
         if not json_files:
             return {"strategies": {}, "files": []}
 
-        file_path = file or json_files[0]["path"]
-        full_path = directory / file_path
-        if not full_path.exists():
-            raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
-
-        strategies = load_backtest_json(full_path)
+        full_path, file_path, json_files = resolve_json_result_path(directory, file)
+        strategies = normalize_strategy_results_payload(load_backtest_json(full_path), file_name=full_path.name)
         result = {}
         for name, data in strategies.items():
             s = data.get("summary", data.get("metrics", {}))

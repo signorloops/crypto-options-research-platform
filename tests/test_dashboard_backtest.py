@@ -66,7 +66,7 @@ SAMPLE_BACKTEST = {
 def _write_backtest_json(tmp_path, data=None):
     """Write sample backtest JSON and return results dir."""
     subdir = tmp_path / "backtest_with_output"
-    subdir.mkdir()
+    subdir.mkdir(parents=True)
     path = subdir / "backtest_results_test.json"
     path.write_text(json.dumps(data or SAMPLE_BACKTEST), encoding="utf-8")
     return tmp_path
@@ -109,6 +109,19 @@ def test_backtest_page_selects_strategy(tmp_path):
     assert "Strategy B" in response.text
 
 
+def test_backtest_page_renders_strategy_tabs(tmp_path):
+    results_dir = _write_backtest_json(tmp_path)
+    app = create_dashboard_app(results_dir=results_dir)
+    with TestClient(app) as client:
+        response = client.get("/backtest")
+    assert response.status_code == 200
+    assert "Strategies" in response.text
+    assert (
+        "/backtest?file=backtest_with_output/backtest_results_test.json&strategy=Strategy B"
+        in response.text
+    )
+
+
 def test_backtest_page_no_files_shows_message(tmp_path):
     app = create_dashboard_app(results_dir=tmp_path)
     with TestClient(app) as client:
@@ -121,4 +134,15 @@ def test_backtest_page_missing_file_returns_404(tmp_path):
     app = create_dashboard_app(results_dir=tmp_path)
     with TestClient(app) as client:
         response = client.get("/backtest", params={"file": "nonexistent.json"})
+    assert response.status_code == 404
+
+
+def test_backtest_page_rejects_file_outside_results(tmp_path):
+    results_dir = tmp_path / "results"
+    _write_backtest_json(results_dir)
+    (tmp_path / "outside.json").write_text(json.dumps(SAMPLE_BACKTEST), encoding="utf-8")
+
+    app = create_dashboard_app(results_dir=results_dir)
+    with TestClient(app) as client:
+        response = client.get("/backtest", params={"file": "../outside.json"})
     assert response.status_code == 404

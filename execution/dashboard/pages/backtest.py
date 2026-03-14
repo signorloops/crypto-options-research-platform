@@ -13,11 +13,7 @@ from execution.dashboard.chart_builders import (
     pnl_sampled_chart,
     position_chart,
 )
-from execution.dashboard.data_helpers import (
-    DEFAULT_RESULTS_DIR,
-    available_json_results,
-    load_backtest_json,
-)
+from execution.dashboard.data_helpers import available_json_results, load_backtest_json, normalize_strategy_results_payload, resolve_json_result_path
 from execution.dashboard.templates import (
     base_layout,
     data_table,
@@ -42,9 +38,7 @@ def _build_metrics_html(summary: Dict[str, Any]) -> str:
         metric_card("Sharpe Ratio", _fmt(summary.get("sharpe_ratio", summary.get("sharpe", 0)))),
         metric_card("Max Drawdown", _fmt(summary.get("max_drawdown", 0))),
         metric_card("Trade Count", str(summary.get("trade_count", summary.get("total_trades", 0)))),
-        metric_card("Buy / Sell",
-                     f'{summary.get("buy_count", summary.get("buy_trades", 0))} / '
-                     f'{summary.get("sell_count", summary.get("sell_trades", 0))}'),
+        metric_card("Buy / Sell", f'{summary.get("buy_count", summary.get("buy_trades", 0))} / {summary.get("sell_count", summary.get("sell_trades", 0))}'),
         metric_card("Spread Capture", _fmt(summary.get("spread_capture", 0))),
         metric_card("Adverse Selection", _fmt(summary.get("adverse_selection_cost", 0))),
         metric_card("Inventory Cost", _fmt(summary.get("inventory_cost", 0))),
@@ -57,6 +51,7 @@ def _build_backtest_page(
     strategy_name: str,
     file_path: str,
     json_files: List[Dict[str, str]],
+    strategy_names: List[str],
 ) -> str:
     """Build full backtest page HTML for a single strategy."""
     summary = data.get("summary", data.get("metrics", {}))
@@ -76,10 +71,8 @@ def _build_backtest_page(
 
     selector = file_selector(json_files, file_path, "/backtest")
 
-    # Strategy selector tabs
-    strategy_names = list(data.keys()) if "summary" not in data and "metrics" not in data else []
     strategy_tabs = ""
-    if strategy_names:
+    if len(strategy_names) > 1:
         tabs = " | ".join(
             f'<a href="/backtest?file={file_path}&strategy={name}">'
             f'{"<b>" + name + "</b>" if name == strategy_name else name}</a>'
@@ -119,36 +112,14 @@ def register_backtest_routes(app: FastAPI, directory: Path) -> None:
             body = '<div class="card"><h2>No backtest results found</h2><p>Run a backtest first to generate result files.</p></div>'
             return HTMLResponse(content=base_layout("Backtest", "Backtest", body))
 
-        file_path = file or json_files[0]["path"]
-        full_path = directory / file_path
-        if not full_path.exists():
-            raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+        full_path, file_path, json_files = resolve_json_result_path(directory, file)
+        raw = normalize_strategy_results_payload(load_backtest_json(full_path), file_name=full_path.name)
 
-        raw = load_backtest_json(full_path)
-
-        # Multi-strategy file: pick first or requested
         strategy_names = list(raw.keys())
         if not strategy_names:
             raise HTTPException(status_code=422, detail="Empty backtest result file")
-
         selected_strategy = strategy if strategy in strategy_names else strategy_names[0]
-        strategy_data = raw[selected_strategy]
-
-        # Inject all strategy names for tab navigation
-        strategy_data_with_names = raw
-
-        html = _build_backtest_page(strategy_data, selected_strategy, file_path, json_files)
-
-        # Add strategy tabs
-        if len(strategy_names) > 1:
-            tabs = " | ".join(
-                f'<a href="/backtest?file={file_path}&strategy={name}">'
-                f'{"<b>" + name + "</b>" if name == selected_strategy else name}</a>'
-                for name in strategy_names
-            )
-            tabs_html = f'<div class="card"><h2>Strategies</h2>{tabs}</div>'
-            html = html.replace("<!-- strategy-tabs -->", tabs_html)
-
+        html = _build_backtest_page(raw[selected_strategy], selected_strategy, file_path, json_files, strategy_names)
         return HTMLResponse(content=html)
 
     @app.get("/api/backtest/results", response_class=JSONResponse)

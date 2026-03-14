@@ -19,6 +19,9 @@ MODEL_PRICE_CANDIDATES = ("model_price", "theoretical_price", "benchmark_price",
 DELTA_CANDIDATES = ("delta", "abs_delta", "delta_abs")
 EXPIRY_CANDIDATES = ("expiry_years", "maturity", "time_to_expiry", "tau")
 VENUE_CANDIDATES = ("venue", "exchange", "source", "market")
+STRATEGY_RESULT_FIELDS = (
+    "summary", "metrics", "pnl_history", "pnl_history_sampled", "position_history", "position_history_sampled",
+)
 
 
 def available_result_files(results_dir: Path) -> List[Path]:
@@ -102,9 +105,37 @@ def available_json_results(results_dir: Path) -> List[Dict[str, str]]:
         if not folder.is_dir():
             continue
         for json_file in sorted(folder.glob("*.json"), reverse=True):
-            entries.append({
-                "name": json_file.name,
-                "subdir": subdir,
-                "path": str(json_file.relative_to(results_dir)),
-            })
+            entries.append({"name": json_file.name, "subdir": subdir, "path": str(json_file.relative_to(results_dir))})
     return entries
+
+
+def resolve_json_result_path(results_dir: Path, file_name: Optional[str]) -> Tuple[Path, str, List[Dict[str, str]]]:
+    """Resolve a selected JSON result file, rejecting paths outside known result files."""
+    json_files = available_json_results(results_dir)
+    if not json_files:
+        raise HTTPException(status_code=404, detail="No backtest results found")
+    candidate = file_name or json_files[0]["path"]
+    if Path(candidate).is_absolute():
+        raise HTTPException(status_code=404, detail=f"File not found: {file_name}")
+    allowed_paths = {(results_dir / entry["path"]).resolve(): entry["path"] for entry in json_files}
+    selected = (results_dir / candidate).resolve()
+    normalized = allowed_paths.get(selected)
+    if normalized is None or not selected.is_file():
+        raise HTTPException(status_code=404, detail=f"File not found: {candidate}")
+    return selected, normalized, json_files
+
+
+def normalize_strategy_results_payload(payload: Any, *, file_name: str) -> Dict[str, Dict[str, Any]]:
+    """Validate dashboard backtest payload shape and normalize single-result files."""
+    if isinstance(payload, dict) and any(key in payload for key in STRATEGY_RESULT_FIELDS):
+        return {Path(file_name).stem: payload}
+    if not isinstance(payload, dict) or not payload:
+        raise HTTPException(status_code=422, detail=f"Invalid backtest result payload: {file_name}")
+    if any(
+        not isinstance(strategy_name, str)
+        or not isinstance(strategy_payload, dict)
+        or not any(key in strategy_payload for key in STRATEGY_RESULT_FIELDS)
+        for strategy_name, strategy_payload in payload.items()
+    ):
+        raise HTTPException(status_code=422, detail=f"Invalid backtest result payload: {file_name}")
+    return {str(strategy_name): strategy_payload for strategy_name, strategy_payload in payload.items()}
