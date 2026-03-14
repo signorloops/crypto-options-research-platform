@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
+
+# Ensure project root is importable when running as a standalone script.
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 from research.pricing.inverse_options import InverseOptionPricer
 from research.pricing.inverse_power_options import InversePowerOptionPricer

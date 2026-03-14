@@ -5,7 +5,14 @@ Compare research-audit snapshots and enforce drift guard thresholds.
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 from typing import Any
+
+# Ensure project root is importable when running as a standalone script.
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 from validation_scripts.io_utils import (
     load_json as _load_json,

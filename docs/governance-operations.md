@@ -14,6 +14,14 @@ make research-audit-compare
 make research-audit-refresh-baseline
 ```
 
+主要产物：
+
+- `artifacts/iv-surface-stability-report.*`
+- `artifacts/pricing-model-zoo-benchmark.*`
+- `artifacts/research-audit-snapshot.json`
+- `artifacts/research-audit-drift-report.*`
+- `artifacts/research-audit-weekly-summary.md`
+
 关键基线文件：
 
 - `validation_scripts/fixtures/model_zoo_quotes_seed42.json`

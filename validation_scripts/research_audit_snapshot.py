@@ -6,10 +6,18 @@ from __future__ import annotations
 
 import argparse
 import io
+import os
+import sys
 from datetime import datetime, timezone
 from typing import Any
 
 import pandas as pd
+
+# Ensure project root is importable when running as a standalone script.
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 from validation_scripts.io_utils import (
     load_json as _load_json,
     write_json as _write_json,

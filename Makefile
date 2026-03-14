@@ -1,4 +1,4 @@
-.PHONY: help install install-dev install-dev-full workspace-slim-report workspace-slim-clean workspace-slim-clean-venv test test-unit test-integration test-cov lint lint-fix format format-check type-check quality branch-name-guard check-service-entrypoint docs-link-check complexity-audit complexity-audit-regression algorithm-performance-baseline latency-benchmark prepare-rollback-tag algorithm-freeze-check daily-regression live-deviation-snapshot weekly-operating-audit weekly-close-gate weekly-pnl-attribution weekly-canary-checklist weekly-decision-log weekly-manual-prefill weekly-manual-update weekly-signoff-pack weekly-consistency-replay weekly-adr-draft clean
+.PHONY: help install install-dev install-dev-full workspace-slim-report workspace-slim-clean workspace-slim-clean-venv test test-unit test-integration test-cov lint lint-fix format format-check type-check quality branch-name-guard check-service-entrypoint docs-link-check notebook-01-validate research-audit research-audit-compare research-audit-refresh-baseline complexity-audit complexity-audit-regression algorithm-performance-baseline latency-benchmark prepare-rollback-tag algorithm-freeze-check daily-regression live-deviation-snapshot weekly-operating-audit weekly-close-gate weekly-pnl-attribution weekly-canary-checklist weekly-decision-log weekly-manual-prefill weekly-manual-update weekly-signoff-pack weekly-consistency-replay weekly-adr-draft clean
 
 # Detect Python interpreter with project minimum version (3.9+).
 PYTHON_CANDIDATES := ./venv/bin/python ./.venv/bin/python ./env/bin/python python3.13 python3.12 python3.11 python3.10 python3.9 python3 python
@@ -53,6 +53,10 @@ help:
 	@echo "  branch-name-guard Fail if local/remote branch names include forbidden keywords"
 	@echo "  check-service-entrypoint Fail if deployment docs/scripts use legacy execution modules"
 	@echo "  docs-link-check  Validate local markdown links"
+	@echo "  notebook-01-validate Generate reproducible Notebook 01 validation artifacts"
+	@echo "  research-audit Run research validation scripts and build compact audit artifacts"
+	@echo "  research-audit-compare Compare current audit snapshot against baseline"
+	@echo "  research-audit-refresh-baseline Refresh research audit snapshot baseline from artifacts"
 	@echo "  complexity-audit Run strict complexity governance checks"
 	@echo "  complexity-audit-regression Run strict complexity check against baseline (fail only on regressions)"
 	@echo "  algorithm-performance-baseline Generate VaR/backtest latency baseline report"
@@ -137,6 +141,42 @@ check-service-entrypoint:
 docs-link-check:
 	$(PYTHON) scripts/docs/check_markdown_links.py \
 		--paths README.md docs
+
+notebook-01-validate:
+	$(PYTHON) scripts/backtest/validate_market_simulation_demo.py \
+		--output-dir artifacts/notebooks/01_market_simulation_demo
+
+research-audit:
+	$(PYTHON) validation_scripts/iv_surface_stability_report.py \
+		--output-md artifacts/iv-surface-stability-report.md \
+		--output-json artifacts/iv-surface-stability-report.json
+	$(PYTHON) validation_scripts/pricing_model_zoo_benchmark.py \
+		--seed 42 \
+		--n-per-bucket 1 \
+		--save-quotes-json artifacts/pricing-model-zoo-quotes.json \
+		--output-json artifacts/pricing-model-zoo-benchmark.json \
+		--output-md artifacts/pricing-model-zoo-benchmark.md \
+		--strict
+	$(PYTHON) validation_scripts/rough_jump_experiment.py --seed 42 > artifacts/rough-jump-experiment.txt
+	$(PYTHON) validation_scripts/inverse_power_validation.py \
+		--output-md artifacts/inverse-power-validation-report.md \
+		--output-json artifacts/inverse-power-validation-report.json
+	$(PYTHON) validation_scripts/research_audit_snapshot.py \
+		--output-json artifacts/research-audit-snapshot.json
+	$(MAKE) research-audit-compare
+	$(PYTHON) validation_scripts/research_audit_weekly_summary.py \
+		--output-md artifacts/research-audit-weekly-summary.md
+
+research-audit-compare:
+	$(PYTHON) validation_scripts/research_audit_compare.py \
+		--baseline-json validation_scripts/fixtures/research_audit_snapshot_baseline.json \
+		--current-json artifacts/research-audit-snapshot.json \
+		--output-json artifacts/research-audit-drift-report.json \
+		--output-md artifacts/research-audit-drift-report.md
+
+research-audit-refresh-baseline:
+	cp artifacts/research-audit-snapshot.json \
+		validation_scripts/fixtures/research_audit_snapshot_baseline.json
 
 complexity-audit:
 	$(PYTHON) scripts/governance/complexity_guard.py \

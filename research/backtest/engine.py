@@ -467,10 +467,15 @@ class BacktestEngine:
         imbalance = market_state.order_book.imbalance() if hasattr(market_state.order_book, "imbalance") else 0
         side_bias = 0.5 + imbalance * 0.2
         mid = market_state.spot_price
+        spread = market_state.order_book.spread or mid * 0.001
+        half_spread = spread / 2
         for _ in range(num_trades):
             side = OrderSide.BUY if self.rng.random() < side_bias else OrderSide.SELL
-            price_offset = self.rng.normal(0, mid * 0.0001)
-            trade_price = mid + price_offset
+            noise = abs(self.rng.normal(0, mid * 0.0005))
+            if side == OrderSide.BUY:
+                trade_price = mid + half_spread + noise  # buyer crosses ask
+            else:
+                trade_price = mid - half_spread - noise  # seller crosses bid
             trade_size = volume * self.rng.random() * 0.3
             trade_timestamp = self._sample_trade_timestamp(start_timestamp, end_timestamp)
             trades.append(Trade(timestamp=trade_timestamp, instrument=market_state.instrument, price=abs(trade_price), size=abs(trade_size), side=side))

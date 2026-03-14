@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Strategy arena for fair backtest comparison across multiple strategies."""
 
 from dataclasses import dataclass, field

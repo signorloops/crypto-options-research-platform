@@ -1,14 +1,401 @@
 {
-  "metrics": {
-    "python_files": 85,
-    "total_loc": 25106,
-    "avg_loc_per_file": 295.36470588235295,
-    "max_file_loc": 865,
-    "files_over_soft_loc": 5,
-    "max_function_loc": 149,
-    "functions_over_soft_loc": 26,
+  "scope": {
+    "include_dirs": [
+      "core",
+      "data",
+      "research",
+      "strategies",
+      "execution",
+      "utils"
+    ],
+    "exclude_dirs": [
+      ".git",
+      ".github",
+      "venv",
+      "__pycache__",
+      "tests",
+      "notebooks",
+      "validation_scripts",
+      "docs"
+    ]
+  },
+  "thresholds": {
+    "max_python_files": 83,
+    "max_total_loc": 25000,
+    "max_avg_loc_per_file": 330,
+    "max_file_loc": 1150,
+    "soft_file_loc": 700,
+    "max_files_over_soft_loc": 7,
+    "max_function_loc": 210,
+    "soft_function_loc": 80,
+    "max_functions_over_soft_loc": 27,
     "max_function_args": 13,
-    "max_methods_per_class": 29,
-    "classes_over_method_soft_limit": 3
-  }
+    "max_methods_per_class": 32,
+    "max_classes_over_method_soft_limit": 3,
+    "soft_method_count_per_class": 20
+  },
+  "metrics": {
+    "python_files": 77,
+    "total_loc": 25471,
+    "avg_loc_per_file": 330.7922077922078,
+    "max_file_loc": 1024,
+    "files_over_soft_loc": 7,
+    "max_function_loc": 60,
+    "functions_over_soft_loc": 0,
+    "max_function_args": 12,
+    "max_methods_per_class": 30,
+    "classes_over_method_soft_limit": 5
+  },
+  "checks": [
+    {
+      "metric": "python_files",
+      "value": 77,
+      "threshold": 83,
+      "status": "PASS"
+    },
+    {
+      "metric": "total_loc",
+      "value": 25471,
+      "threshold": 25000,
+      "status": "FAIL"
+    },
+    {
+      "metric": "avg_loc_per_file",
+      "value": 330.7922077922078,
+      "threshold": 330,
+      "status": "FAIL"
+    },
+    {
+      "metric": "max_file_loc",
+      "value": 1024,
+      "threshold": 1150,
+      "status": "PASS"
+    },
+    {
+      "metric": "files_over_soft_loc",
+      "value": 7,
+      "threshold": 7,
+      "status": "PASS"
+    },
+    {
+      "metric": "max_function_loc",
+      "value": 60,
+      "threshold": 210,
+      "status": "PASS"
+    },
+    {
+      "metric": "functions_over_soft_loc",
+      "value": 0,
+      "threshold": 27,
+      "status": "PASS"
+    },
+    {
+      "metric": "max_function_args",
+      "value": 12,
+      "threshold": 13,
+      "status": "PASS"
+    },
+    {
+      "metric": "max_methods_per_class",
+      "value": 30,
+      "threshold": 32,
+      "status": "PASS"
+    },
+    {
+      "metric": "classes_over_method_soft_limit",
+      "value": 5,
+      "threshold": 3,
+      "status": "FAIL"
+    }
+  ],
+  "violations": [
+    {
+      "metric": "total_loc",
+      "value": 25471,
+      "threshold": 25000,
+      "status": "FAIL"
+    },
+    {
+      "metric": "avg_loc_per_file",
+      "value": 330.7922077922078,
+      "threshold": 330,
+      "status": "FAIL"
+    },
+    {
+      "metric": "classes_over_method_soft_limit",
+      "value": 5,
+      "threshold": 3,
+      "status": "FAIL"
+    }
+  ],
+  "top_files_by_loc": [
+    {
+      "path": "research/risk/circuit_breaker.py",
+      "physical_loc": 1024,
+      "code_loc": 827
+    },
+    {
+      "path": "research/backtest/hawkes_comparison.py",
+      "physical_loc": 1022,
+      "code_loc": 832
+    },
+    {
+      "path": "strategies/market_making/ppo_agent.py",
+      "physical_loc": 885,
+      "code_loc": 794
+    },
+    {
+      "path": "research/backtest/arena.py",
+      "physical_loc": 853,
+      "code_loc": 720
+    },
+    {
+      "path": "research/risk/var.py",
+      "physical_loc": 830,
+      "code_loc": 763
+    },
+    {
+      "path": "research/pricing/inverse_options.py",
+      "physical_loc": 777,
+      "code_loc": 690
+    },
+    {
+      "path": "research/volatility/models.py",
+      "physical_loc": 775,
+      "code_loc": 651
+    },
+    {
+      "path": "data/streaming.py",
+      "physical_loc": 700,
+      "code_loc": 590
+    },
+    {
+      "path": "data/downloaders/deribit.py",
+      "physical_loc": 699,
+      "code_loc": 587
+    },
+    {
+      "path": "research/backtest/engine.py",
+      "physical_loc": 663,
+      "code_loc": 566
+    },
+    {
+      "path": "data/integrated_manager.py",
+      "physical_loc": 628,
+      "code_loc": 529
+    },
+    {
+      "path": "strategies/market_making/hawkes_mm.py",
+      "physical_loc": 580,
+      "code_loc": 476
+    },
+    {
+      "path": "strategies/market_making/integrated_strategy.py",
+      "physical_loc": 576,
+      "code_loc": 456
+    },
+    {
+      "path": "research/volatility/iv_solvers.py",
+      "physical_loc": 571,
+      "code_loc": 507
+    },
+    {
+      "path": "execution/research_dashboard.py",
+      "physical_loc": 543,
+      "code_loc": 459
+    }
+  ],
+  "top_functions_by_loc": [
+    {
+      "path": "strategies/market_making/ppo_agent.py",
+      "name": "_market_state_to_vector",
+      "length": 60,
+      "args": 3
+    },
+    {
+      "path": "research/microstructure/vpin.py",
+      "name": "_create_volume_buckets",
+      "length": 49,
+      "args": 2
+    },
+    {
+      "path": "strategies/market_making/ppo_agent.py",
+      "name": "_get_state",
+      "length": 45,
+      "args": 1
+    },
+    {
+      "path": "research/microstructure/orderbook_features.py",
+      "name": "extract",
+      "length": 43,
+      "args": 3
+    },
+    {
+      "path": "strategies/market_making/ppo_agent.py",
+      "name": "step",
+      "length": 42,
+      "args": 2
+    },
+    {
+      "path": "strategies/market_making/avellaneda_stoikov.py",
+      "name": "quote",
+      "length": 40,
+      "args": 3
+    },
+    {
+      "path": "research/backtest/arena.py",
+      "name": "_scorecard_section_specs",
+      "length": 39,
+      "args": 1
+    },
+    {
+      "path": "research/microstructure/vpin.py",
+      "name": "_full_bucket_components",
+      "length": 39,
+      "args": 8
+    },
+    {
+      "path": "data/redis_cache.py",
+      "name": "connect",
+      "length": 34,
+      "args": 1
+    },
+    {
+      "path": "execution/research_dashboard.py",
+      "name": "_render_dashboard_html",
+      "length": 34,
+      "args": 5
+    },
+    {
+      "path": "research/pricing/inverse_power_options.py",
+      "name": "calculate_price_and_greeks",
+      "length": 34,
+      "args": 10
+    },
+    {
+      "path": "research/pricing/quanto_inverse_power.py",
+      "name": "calculate_price",
+      "length": 34,
+      "args": 12
+    },
+    {
+      "path": "research/pricing/quanto_inverse_power.py",
+      "name": "_compose_quanto_price_and_greeks",
+      "length": 34,
+      "args": 9
+    },
+    {
+      "path": "research/risk/var.py",
+      "name": "evt_var",
+      "length": 34,
+      "args": 5
+    },
+    {
+      "path": "research/risk/var.py",
+      "name": "_price_revalued_inverse_option_series",
+      "length": 34,
+      "args": 4
+    }
+  ],
+  "top_classes_by_methods": [
+    {
+      "path": "research/risk/var.py",
+      "name": "VaRCalculator",
+      "method_count": 30
+    },
+    {
+      "path": "data/redis_cache.py",
+      "name": "RedisCache",
+      "method_count": 29
+    },
+    {
+      "path": "research/risk/circuit_breaker.py",
+      "name": "CircuitBreaker",
+      "method_count": 28
+    },
+    {
+      "path": "data/integrated_manager.py",
+      "name": "IntegratedDataManager",
+      "method_count": 26
+    },
+    {
+      "path": "research/backtest/arena.py",
+      "name": "StrategyArena",
+      "method_count": 21
+    },
+    {
+      "path": "research/backtest/engine.py",
+      "name": "BacktestEngine",
+      "method_count": 20
+    },
+    {
+      "path": "research/pricing/inverse_options.py",
+      "name": "InverseOptionPricer",
+      "method_count": 20
+    },
+    {
+      "path": "research/signals/regime_detector.py",
+      "name": "VolatilityRegimeDetector",
+      "method_count": 20
+    },
+    {
+      "path": "research/volatility/implied.py",
+      "name": "VolatilitySurface",
+      "method_count": 20
+    },
+    {
+      "path": "strategies/market_making/fast_integrated_strategy.py",
+      "name": "FastIntegratedMarketMakingStrategy",
+      "method_count": 20
+    },
+    {
+      "path": "strategies/market_making/integrated_strategy.py",
+      "name": "IntegratedMarketMakingStrategy",
+      "method_count": 20
+    },
+    {
+      "path": "data/downloaders/deribit.py",
+      "name": "DeribitClient",
+      "method_count": 19
+    },
+    {
+      "path": "data/downloaders/okx.py",
+      "name": "OKXClient",
+      "method_count": 19
+    },
+    {
+      "path": "data/streaming.py",
+      "name": "WebSocketStream",
+      "method_count": 17
+    },
+    {
+      "path": "research/signals/fast_regime_detector.py",
+      "name": "FastVolatilityRegimeDetector",
+      "method_count": 17
+    }
+  ],
+  "baseline": "/Users/linus/Documents/vibe-coding/crypto-options-research-platform/corp/config/complexity_baseline.json",
+  "regressions": [
+    {
+      "metric": "total_loc",
+      "value": 25471,
+      "threshold": 25000,
+      "baseline_value": 25106,
+      "reason": "worsened_existing_violation"
+    },
+    {
+      "metric": "avg_loc_per_file",
+      "value": 330.7922077922078,
+      "threshold": 330,
+      "baseline_value": 295.36470588235295,
+      "reason": "new_violation"
+    },
+    {
+      "metric": "classes_over_method_soft_limit",
+      "value": 5,
+      "threshold": 3,
+      "baseline_value": 3,
+      "reason": "new_violation"
+    }
+  ]
 }

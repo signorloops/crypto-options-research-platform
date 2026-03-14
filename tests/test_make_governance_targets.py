@@ -45,3 +45,25 @@ def test_weekly_manual_update_target_routes_arguments_to_script():
     assert "--manual-status-json artifacts/weekly-manual-status.json" in stdout
     assert "--output-md artifacts/weekly-manual-status.md" in stdout
     assert "--check gray_release_completed=true --signoff research=alice" in stdout
+
+
+def test_research_audit_target_is_available():
+    stdout = _make_dry_run("research-audit")
+
+    assert "validation_scripts/iv_surface_stability_report.py" in stdout
+    assert "validation_scripts/research_audit_snapshot.py" in stdout
+    assert "validation_scripts/research_audit_weekly_summary.py" in stdout
+
+
+def test_research_audit_compare_target_is_available():
+    stdout = _make_dry_run("research-audit-compare")
+
+    assert "validation_scripts/research_audit_compare.py" in stdout
+    assert "--baseline-json validation_scripts/fixtures/research_audit_snapshot_baseline.json" in stdout
+
+
+def test_research_audit_refresh_baseline_target_copies_snapshot():
+    stdout = _make_dry_run("research-audit-refresh-baseline")
+
+    assert "artifacts/research-audit-snapshot.json" in stdout
+    assert "validation_scripts/fixtures/research_audit_snapshot_baseline.json" in stdout
