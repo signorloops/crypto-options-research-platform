@@ -67,3 +67,12 @@ def test_research_audit_refresh_baseline_target_copies_snapshot():
 
     assert "artifacts/research-audit-snapshot.json" in stdout
     assert "validation_scripts/fixtures/research_audit_snapshot_baseline.json" in stdout
+
+
+def test_release_candidate_check_target_is_available():
+    stdout = _make_dry_run("release-candidate-check")
+
+    assert "scripts/governance/release_candidate_guard.py" in stdout
+    assert "--pyproject pyproject.toml" in stdout
+    assert "--signoff-json artifacts/weekly-signoff-pack.json" in stdout
+    assert "--output-json artifacts/release-candidate-guard.json" in stdout

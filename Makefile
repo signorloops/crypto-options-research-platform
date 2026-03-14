@@ -1,4 +1,4 @@
-.PHONY: help install install-dev install-dev-full workspace-slim-report workspace-slim-clean workspace-slim-clean-venv test test-unit test-integration test-cov lint lint-fix format format-check type-check quality branch-name-guard check-service-entrypoint docs-link-check notebook-01-validate research-audit research-audit-compare research-audit-refresh-baseline complexity-audit complexity-audit-regression algorithm-performance-baseline latency-benchmark prepare-rollback-tag algorithm-freeze-check daily-regression live-deviation-snapshot weekly-operating-audit weekly-close-gate weekly-pnl-attribution weekly-canary-checklist weekly-decision-log weekly-manual-prefill weekly-manual-update weekly-signoff-pack weekly-consistency-replay weekly-adr-draft clean
+.PHONY: help install install-dev install-dev-full workspace-slim-report workspace-slim-clean workspace-slim-clean-venv test test-unit test-integration test-cov lint lint-fix format format-check type-check quality branch-name-guard check-service-entrypoint docs-link-check notebook-01-validate research-audit research-audit-compare research-audit-refresh-baseline complexity-audit complexity-audit-regression algorithm-performance-baseline latency-benchmark prepare-rollback-tag algorithm-freeze-check release-candidate-check daily-regression live-deviation-snapshot weekly-operating-audit weekly-close-gate weekly-pnl-attribution weekly-canary-checklist weekly-decision-log weekly-manual-prefill weekly-manual-update weekly-signoff-pack weekly-consistency-replay weekly-adr-draft clean
 
 # Detect Python interpreter with project minimum version (3.9+).
 PYTHON_CANDIDATES := ./venv/bin/python ./.venv/bin/python ./env/bin/python python3.13 python3.12 python3.11 python3.10 python3.9 python3 python
@@ -63,6 +63,7 @@ help:
 	@echo "  latency-benchmark Generate quote/risk/end-to-end latency benchmark report"
 	@echo "  prepare-rollback-tag Create or reuse a local rollback tag for the current release candidate"
 	@echo "  algorithm-freeze-check Run full algorithm consistency freeze checklist"
+	@echo "  release-candidate-check Verify metadata and sign-off evidence for release-candidate status"
 	@echo "  daily-regression Run daily regression gate report"
 	@echo "  live-deviation-snapshot Generate live CEX-vs-DeFi deviation snapshot report"
 	@echo "  weekly-operating-audit Generate weekly KPI and risk exception report"
@@ -202,6 +203,14 @@ algorithm-freeze-check:
 	$(MAKE) algorithm-performance-baseline
 	$(MAKE) latency-benchmark
 	$(MAKE) daily-regression
+
+release-candidate-check:
+	$(PYTHON) scripts/governance/release_candidate_guard.py \
+		--pyproject pyproject.toml \
+		--signoff-json artifacts/weekly-signoff-pack.json \
+		--output-json artifacts/release-candidate-guard.json \
+		--output-md artifacts/release-candidate-guard.md \
+		--strict
 
 algorithm-performance-baseline:
 	$(PYTHON) scripts/governance/algorithm_performance_baseline.py \
