@@ -35,12 +35,12 @@
     "soft_method_count_per_class": 20
   },
   "metrics": {
-    "python_files": 77,
-    "total_loc": 25471,
-    "avg_loc_per_file": 330.7922077922078,
+    "python_files": 88,
+    "total_loc": 26345,
+    "avg_loc_per_file": 299.375,
     "max_file_loc": 1024,
-    "files_over_soft_loc": 7,
-    "max_function_loc": 60,
+    "files_over_soft_loc": 8,
+    "max_function_loc": 63,
     "functions_over_soft_loc": 0,
     "max_function_args": 12,
     "max_methods_per_class": 30,
@@ -49,21 +49,21 @@
   "checks": [
     {
       "metric": "python_files",
-      "value": 77,
+      "value": 88,
       "threshold": 83,
-      "status": "PASS"
+      "status": "FAIL"
     },
     {
       "metric": "total_loc",
-      "value": 25471,
+      "value": 26345,
       "threshold": 25000,
       "status": "FAIL"
     },
     {
       "metric": "avg_loc_per_file",
-      "value": 330.7922077922078,
+      "value": 299.375,
       "threshold": 330,
-      "status": "FAIL"
+      "status": "PASS"
     },
     {
       "metric": "max_file_loc",
@@ -73,13 +73,13 @@
     },
     {
       "metric": "files_over_soft_loc",
-      "value": 7,
+      "value": 8,
       "threshold": 7,
-      "status": "PASS"
+      "status": "FAIL"
     },
     {
       "metric": "max_function_loc",
-      "value": 60,
+      "value": 63,
       "threshold": 210,
       "status": "PASS"
     },
@@ -110,15 +110,21 @@
   ],
   "violations": [
     {
+      "metric": "python_files",
+      "value": 88,
+      "threshold": 83,
+      "status": "FAIL"
+    },
+    {
       "metric": "total_loc",
-      "value": 25471,
+      "value": 26345,
       "threshold": 25000,
       "status": "FAIL"
     },
     {
-      "metric": "avg_loc_per_file",
-      "value": 330.7922077922078,
-      "threshold": 330,
+      "metric": "files_over_soft_loc",
+      "value": 8,
+      "threshold": 7,
       "status": "FAIL"
     },
     {
@@ -146,8 +152,8 @@
     },
     {
       "path": "research/backtest/arena.py",
-      "physical_loc": 853,
-      "code_loc": 720
+      "physical_loc": 860,
+      "code_loc": 725
     },
     {
       "path": "research/risk/var.py",
@@ -165,6 +171,11 @@
       "code_loc": 651
     },
     {
+      "path": "research/backtest/engine.py",
+      "physical_loc": 703,
+      "code_loc": 602
+    },
+    {
       "path": "data/streaming.py",
       "physical_loc": 700,
       "code_loc": 590
@@ -173,11 +184,6 @@
       "path": "data/downloaders/deribit.py",
       "physical_loc": 699,
       "code_loc": 587
-    },
-    {
-      "path": "research/backtest/engine.py",
-      "physical_loc": 663,
-      "code_loc": 566
     },
     {
       "path": "data/integrated_manager.py",
@@ -200,12 +206,18 @@
       "code_loc": 507
     },
     {
-      "path": "execution/research_dashboard.py",
-      "physical_loc": 543,
-      "code_loc": 459
+      "path": "data/generators/synthetic.py",
+      "physical_loc": 526,
+      "code_loc": 458
     }
   ],
   "top_functions_by_loc": [
+    {
+      "path": "execution/dashboard/pages/risk.py",
+      "name": "_build_risk_page",
+      "length": 63,
+      "args": 1
+    },
     {
       "path": "strategies/market_making/ppo_agent.py",
       "name": "_market_state_to_vector",
@@ -213,10 +225,34 @@
       "args": 3
     },
     {
+      "path": "execution/dashboard/pages/strategy.py",
+      "name": "_build_strategy_page",
+      "length": 51,
+      "args": 3
+    },
+    {
+      "path": "execution/dashboard/pages/strategy.py",
+      "name": "register_strategy_routes",
+      "length": 49,
+      "args": 2
+    },
+    {
       "path": "research/microstructure/vpin.py",
       "name": "_create_volume_buckets",
       "length": 49,
       "args": 2
+    },
+    {
+      "path": "execution/dashboard/pages/backtest.py",
+      "name": "register_backtest_routes",
+      "length": 48,
+      "args": 2
+    },
+    {
+      "path": "execution/dashboard/pages/backtest.py",
+      "name": "_build_backtest_page",
+      "length": 45,
+      "args": 4
     },
     {
       "path": "strategies/market_making/ppo_agent.py",
@@ -237,6 +273,18 @@
       "args": 2
     },
     {
+      "path": "execution/dashboard/pages/backtest.py",
+      "name": "backtest_page",
+      "length": 40,
+      "args": 2
+    },
+    {
+      "path": "research/backtest/fill_model.py",
+      "name": "_create_fill",
+      "length": 40,
+      "args": 8
+    },
+    {
       "path": "strategies/market_making/avellaneda_stoikov.py",
       "name": "quote",
       "length": 40,
@@ -253,48 +301,6 @@
       "name": "_full_bucket_components",
       "length": 39,
       "args": 8
-    },
-    {
-      "path": "data/redis_cache.py",
-      "name": "connect",
-      "length": 34,
-      "args": 1
-    },
-    {
-      "path": "execution/research_dashboard.py",
-      "name": "_render_dashboard_html",
-      "length": 34,
-      "args": 5
-    },
-    {
-      "path": "research/pricing/inverse_power_options.py",
-      "name": "calculate_price_and_greeks",
-      "length": 34,
-      "args": 10
-    },
-    {
-      "path": "research/pricing/quanto_inverse_power.py",
-      "name": "calculate_price",
-      "length": 34,
-      "args": 12
-    },
-    {
-      "path": "research/pricing/quanto_inverse_power.py",
-      "name": "_compose_quanto_price_and_greeks",
-      "length": 34,
-      "args": 9
-    },
-    {
-      "path": "research/risk/var.py",
-      "name": "evt_var",
-      "length": 34,
-      "args": 5
-    },
-    {
-      "path": "research/risk/var.py",
-      "name": "_price_revalued_inverse_option_series",
-      "length": 34,
-      "args": 4
     }
   ],
   "top_classes_by_methods": [
@@ -374,28 +380,6 @@
       "method_count": 17
     }
   ],
-  "baseline": "/Users/linus/Documents/vibe-coding/crypto-options-research-platform/corp/config/complexity_baseline.json",
-  "regressions": [
-    {
-      "metric": "total_loc",
-      "value": 25471,
-      "threshold": 25000,
-      "baseline_value": 25106,
-      "reason": "worsened_existing_violation"
-    },
-    {
-      "metric": "avg_loc_per_file",
-      "value": 330.7922077922078,
-      "threshold": 330,
-      "baseline_value": 295.36470588235295,
-      "reason": "new_violation"
-    },
-    {
-      "metric": "classes_over_method_soft_limit",
-      "value": 5,
-      "threshold": 3,
-      "baseline_value": 3,
-      "reason": "new_violation"
-    }
-  ]
+  "baseline": "",
+  "regressions": []
 }

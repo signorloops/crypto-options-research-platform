@@ -143,6 +143,7 @@ make workspace-slim-clean
 
 # 复杂度治理（严格/回归对比）
 make complexity-audit
+make complexity-audit-refresh-baseline
 make complexity-audit-regression
 make algorithm-performance-baseline
 make latency-benchmark

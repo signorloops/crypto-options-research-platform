@@ -69,6 +69,13 @@ def test_research_audit_refresh_baseline_target_copies_snapshot():
     assert "validation_scripts/fixtures/research_audit_snapshot_baseline.json" in stdout
 
 
+def test_complexity_audit_refresh_baseline_target_copies_report():
+    stdout = _make_dry_run("complexity-audit-refresh-baseline")
+
+    assert "artifacts/complexity-governance-report.json" in stdout
+    assert "config/complexity_baseline.json" in stdout
+
+
 def test_release_candidate_check_target_is_available():
     stdout = _make_dry_run("release-candidate-check")
 

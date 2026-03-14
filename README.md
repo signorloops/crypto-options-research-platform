@@ -143,6 +143,7 @@ make workspace-slim-clean
 
 # Complexity governance (strict/regression compare)
 make complexity-audit
+make complexity-audit-refresh-baseline
 make complexity-audit-regression
 make algorithm-performance-baseline
 make latency-benchmark

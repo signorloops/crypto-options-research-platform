@@ -40,8 +40,15 @@ make research-audit-refresh-baseline
 
 ```bash
 make complexity-audit
+make complexity-audit-refresh-baseline
 make complexity-audit-regression BASELINE_COMPLEXITY_JSON=artifacts/complexity-baseline.json
 ```
+
+刷新流程：
+
+1. 先运行 `make complexity-audit` 生成最新报告。
+2. 审阅 `artifacts/complexity-governance-report.json` / `.md` 中的预算变化。
+3. 仅在确认当前复杂度状态应当成为新的治理基线后，再执行 `make complexity-audit-refresh-baseline`。
 
 ## 3. Workspace Slimming
 

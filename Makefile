@@ -1,4 +1,4 @@
-.PHONY: help install install-dev install-dev-full workspace-slim-report workspace-slim-clean workspace-slim-clean-venv test test-unit test-integration test-cov lint lint-fix format format-check type-check quality branch-name-guard check-service-entrypoint docs-link-check notebook-01-validate research-audit research-audit-compare research-audit-refresh-baseline complexity-audit complexity-audit-regression algorithm-performance-baseline latency-benchmark prepare-rollback-tag algorithm-freeze-check release-candidate-check daily-regression live-deviation-snapshot weekly-operating-audit weekly-close-gate weekly-pnl-attribution weekly-canary-checklist weekly-decision-log weekly-manual-prefill weekly-manual-update weekly-signoff-pack weekly-consistency-replay weekly-adr-draft clean
+.PHONY: help install install-dev install-dev-full workspace-slim-report workspace-slim-clean workspace-slim-clean-venv test test-unit test-integration test-cov lint lint-fix format format-check type-check quality branch-name-guard check-service-entrypoint docs-link-check notebook-01-validate research-audit research-audit-compare research-audit-refresh-baseline complexity-audit complexity-audit-refresh-baseline complexity-audit-regression algorithm-performance-baseline latency-benchmark prepare-rollback-tag algorithm-freeze-check release-candidate-check daily-regression live-deviation-snapshot weekly-operating-audit weekly-close-gate weekly-pnl-attribution weekly-canary-checklist weekly-decision-log weekly-manual-prefill weekly-manual-update weekly-signoff-pack weekly-consistency-replay weekly-adr-draft clean
 
 # Detect Python interpreter with project minimum version (3.9+).
 PYTHON_CANDIDATES := ./venv/bin/python ./.venv/bin/python ./env/bin/python python3.13 python3.12 python3.11 python3.10 python3.9 python3 python
@@ -58,6 +58,7 @@ help:
 	@echo "  research-audit-compare Compare current audit snapshot against baseline"
 	@echo "  research-audit-refresh-baseline Refresh research audit snapshot baseline from artifacts"
 	@echo "  complexity-audit Run strict complexity governance checks"
+	@echo "  complexity-audit-refresh-baseline Refresh complexity baseline from latest report artifact"
 	@echo "  complexity-audit-regression Run strict complexity check against baseline (fail only on regressions)"
 	@echo "  algorithm-performance-baseline Generate VaR/backtest latency baseline report"
 	@echo "  latency-benchmark Generate quote/risk/end-to-end latency benchmark report"
@@ -185,6 +186,10 @@ complexity-audit:
 		--report-md artifacts/complexity-governance-report.md \
 		--report-json artifacts/complexity-governance-report.json \
 		--strict
+
+complexity-audit-refresh-baseline:
+	cp artifacts/complexity-governance-report.json \
+		config/complexity_baseline.json
 
 complexity-audit-regression:
 	$(PYTHON) scripts/governance/complexity_guard.py \
