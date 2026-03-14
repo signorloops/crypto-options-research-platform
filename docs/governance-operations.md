@@ -80,3 +80,19 @@ make algorithm-freeze-check
 详细冻结标准见：
 
 - `docs/plans/algorithm-freeze-checklist.md`
+
+## 6. Release Candidate Closeout
+
+目标：在算法冻结通过后，补齐人工确认项和角色签字，并生成最终的 release-candidate 证据。
+
+常用命令：
+
+```bash
+make weekly-manual-update MANUAL_ARGS="--check gray_release_completed=true --check observation_24h_completed=true --check adr_signed=true --signoff research=<name> --signoff engineering=<name> --signoff risk=<name>"
+make weekly-signoff-pack
+make release-candidate-check
+```
+
+注意：
+
+- `signoff` 的值必须是真实责任人姓名，不能使用占位符。
