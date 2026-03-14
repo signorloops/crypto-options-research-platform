@@ -7,7 +7,7 @@
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A crypto options research and backtesting platform focused on coin-margined options (COIN-margined options).
+A release-candidate-track crypto options research and backtesting platform focused on coin-margined options (COIN-margined options).
 
 Supports Deribit/OKX data ingestion, real-time streaming, pricing and volatility modeling, market-making/arbitrage strategies, risk control, and event-driven backtesting.
 
