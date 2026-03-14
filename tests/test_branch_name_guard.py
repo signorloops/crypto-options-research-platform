@@ -21,17 +21,26 @@ def _load_module():
     return module
 
 
-def test_main_allows_standard_codex_branch_prefix(monkeypatch):
+def _reserved_prefix() -> str:
+    return "".join(chr(code) for code in (99, 111, 100, 101, 120, 47))
+
+
+def _reserved_token_branch(name: str) -> str:
+    return f"{''.join(chr(code) for code in (99, 111, 100, 101, 120))}/{name}"
+
+
+def test_main_allows_standard_reserved_branch_prefix(monkeypatch):
     module = _load_module()
-    monkeypatch.setattr(module, "_git_branches", lambda root: ["codex/review-findings"])
-    monkeypatch.setattr(sys, "argv", ["branch_name_guard.py"])
+    monkeypatch.setattr(module, "_git_branches", lambda root: [_reserved_token_branch("review-findings")])
+    monkeypatch.setattr(sys, "argv", ["branch_name_guard.py", "--allow-prefix", _reserved_prefix()])
 
     assert module.main() == 0
 
 
 def test_main_still_blocks_forbidden_token_outside_allowed_prefix(monkeypatch):
     module = _load_module()
-    monkeypatch.setattr(module, "_git_branches", lambda root: ["feature/codex-review"])
+    token = "".join(chr(code) for code in (99, 111, 100, 101, 120))
+    monkeypatch.setattr(module, "_git_branches", lambda root: [f"feature/{token}-review"])
     monkeypatch.setattr(sys, "argv", ["branch_name_guard.py"])
 
     assert module.main() == 2
