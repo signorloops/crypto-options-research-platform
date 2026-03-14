@@ -49,6 +49,17 @@ _ROLE_PLACEHOLDERS = {
 }
 
 
+def is_placeholder_signer(role: str, signer: str) -> bool:
+    """Return whether signer matches the reserved placeholder for a role."""
+    return str(signer).strip() == _ROLE_PLACEHOLDERS.get(role, "")
+
+
+def has_real_signer(role: str, signer: str) -> bool:
+    """Return whether signer is present and not a reserved placeholder."""
+    cleaned = str(signer).strip()
+    return bool(cleaned) and not is_placeholder_signer(role, cleaned)
+
+
 def normalize_manual_status(raw: dict[str, Any] | None) -> dict[str, Any]:
     payload = raw if isinstance(raw, dict) else {}
     status: dict[str, Any] = {key: _as_bool(payload.get(key)) for key in MANUAL_KEYS}
@@ -136,7 +147,8 @@ def build_manual_status_markdown(
     signoff_map = status.get("signoffs", {})
     signoffs = signoff_map if isinstance(signoff_map, dict) else {}
     for role, label in ROLE_SIGNOFF_ITEMS:
-        signer = str(signoffs.get(role, "")).strip() or "TBD"
+        raw_signer = str(signoffs.get(role, "")).strip()
+        signer = raw_signer if has_real_signer(role, raw_signer) else "TBD"
         mark = "[x]" if signer != "TBD" else "[ ]"
         lines.append(f"- {mark} {label}: `{signer}`")
     lines.append("")
@@ -157,7 +169,7 @@ def build_manual_update_plan(status: dict[str, Any] | None) -> dict[str, Any]:
 
     for role, label in ROLE_SIGNOFF_ITEMS:
         signer = str(signoffs.get(role, "")).strip()
-        if signer:
+        if has_real_signer(role, signer):
             continue
         updater_pending_items.append(label)
         args.extend(["--signoff", f"{role}={_ROLE_PLACEHOLDERS[role]}"])

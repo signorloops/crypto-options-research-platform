@@ -63,6 +63,39 @@ def test_build_report_marks_pending_manual_items():
     assert "signoff risk=risk_owner" in report["manual_update"]["suggested_command"]
 
 
+def test_build_report_treats_placeholder_signers_as_pending():
+    module = _load_module()
+    report = module._build_report(
+        audit={
+            "summary": {"exceptions": 0, "consistency_exceptions": 0},
+            "checklist": {"minimum_regression_passed": True, "rollback_version_marked": True},
+            "incomplete_tasks": [],
+        },
+        canary={"recommendation": "PROCEED_CANARY", "blockers": []},
+        decision={"decision": "APPROVE_CANARY", "follow_up_tasks": []},
+        attribution={"attribution_snapshot": [{"strategy": "demo"}]},
+        manual_status={
+            "gray_release_completed": True,
+            "observation_24h_completed": True,
+            "rollback_decision_recorded": True,
+            "pnl_attribution_confirmed": True,
+            "change_and_rollback_recorded": True,
+            "adr_signed": True,
+            "signoffs": {
+                "research": "research_owner",
+                "engineering": "engineering_owner",
+                "risk": "risk_owner",
+            },
+        },
+        consistency_replay={"status": "PASS"},
+    )
+
+    assert report["status"] == "PENDING_MANUAL_SIGNOFF"
+    assert "Research 签字" in report["pending_items"]
+    assert "Engineering 签字" in report["pending_items"]
+    assert "Risk 签字" in report["pending_items"]
+
+
 def test_build_report_skips_followup_alias_when_manual_item_already_done():
     module = _load_module()
     report = module._build_report(

@@ -20,6 +20,7 @@ from scripts.governance.manual_status_utils import (
     TASK_TO_MANUAL_KEY,
     build_manual_update_plan,
     default_manual_status_template,
+    has_real_signer,
     normalize_manual_status,
 )
 from scripts.governance.report_utils import (
@@ -113,7 +114,7 @@ def _build_report(
     role_signoffs: list[dict[str, Any]] = []
     for role, label in ROLE_SIGNOFF_ITEMS:
         signer = status["signoffs"].get(role, "")
-        done = bool(signer)
+        done = has_real_signer(role, signer)
         role_signoffs.append({"role": role, "label": label, "done": done, "value": signer})
         if not done:
             pending_items.append(label)

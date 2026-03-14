@@ -283,6 +283,13 @@ def _build_scorecard_from_result(
     )
 
 
+def _result_fill_rate(result: BacktestResult) -> float:
+    quote_count = int(getattr(result, "quote_count", 0) or 0)
+    if quote_count > 0:
+        return float(np.clip(result.trade_count / quote_count, 0.0, 1.0))
+    return float(getattr(result, "fill_rate", 0.0) or 0.0)
+
+
 def _scorecard_result_fields(result: BacktestResult, metrics: dict[str, float]) -> dict:
     return {
         "strategy_name": result.strategy_name,
@@ -303,7 +310,7 @@ def _scorecard_result_fields(result: BacktestResult, metrics: dict[str, float]) 
         "spread_capture": result.total_spread_captured or 0,
         "adverse_selection_cost": result.adverse_selection_cost or 0,
         "inventory_cost": result.inventory_cost or 0,
-        "fill_rate": 0.3,
+        "fill_rate": _result_fill_rate(result),
         "daily_pnl_std": metrics["daily_pnl_std"],
         "worst_day": metrics["worst_day"],
         "best_day": metrics["best_day"],

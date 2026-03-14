@@ -72,6 +72,11 @@ def test_research_audit_refresh_baseline_target_copies_snapshot():
 def test_release_candidate_check_target_is_available():
     stdout = _make_dry_run("release-candidate-check")
 
+    freeze_index = stdout.index("make algorithm-freeze-check")
+    close_gate_index = stdout.index("make weekly-close-gate")
+    guard_index = stdout.index("scripts/governance/release_candidate_guard.py")
+
+    assert freeze_index < close_gate_index < guard_index
     assert "scripts/governance/release_candidate_guard.py" in stdout
     assert "--pyproject pyproject.toml" in stdout
     assert "--signoff-json artifacts/weekly-signoff-pack.json" in stdout

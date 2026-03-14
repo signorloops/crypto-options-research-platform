@@ -110,6 +110,29 @@ def _trade_summary(
     return buys, sells, avg_trade_size, avg_trade_pnl_crypto
 
 
+def _quote_fill_metrics(
+    *,
+    trades: List[Fill],
+    quote_count: int,
+) -> Tuple[int, float]:
+    if quote_count <= 0:
+        return 0, 0.0
+    fill_rate = len(trades) / quote_count
+    return quote_count, float(np.clip(fill_rate, 0.0, 1.0))
+
+
+def _spread_capture_metrics(engine: object) -> Tuple[float, float]:
+    if getattr(engine, "fill_simulator", None) is None:
+        return 0.0, 0.0
+    total_spread_captured = float(
+        getattr(engine.fill_simulator, "total_spread_captured", 0.0)
+    )
+    notional = float(getattr(engine.fill_simulator, "spread_capture_notional", 0.0))
+    if notional <= 1e-12:
+        return total_spread_captured, 0.0
+    return total_spread_captured, float((total_spread_captured / notional) * 10_000.0)
+
+
 def _result_core_fields(
     *,
     strategy_name: str,
@@ -147,6 +170,10 @@ def _result_trade_fields(
     sells: int,
     avg_trade_size: float,
     avg_trade_pnl_crypto: float,
+    quote_count: int,
+    fill_rate: float,
+    total_spread_captured: float,
+    avg_spread_captured_bps: float,
     execution_cost: float,
     adverse_selection_cost: float,
 ) -> dict[str, object]:
@@ -156,8 +183,10 @@ def _result_trade_fields(
         "sell_count": sells,
         "avg_trade_size": avg_trade_size,
         "avg_trade_pnl_crypto": avg_trade_pnl_crypto,
-        "total_spread_captured": 0,
-        "avg_spread_captured_bps": 0,
+        "quote_count": quote_count,
+        "fill_rate": fill_rate,
+        "total_spread_captured": total_spread_captured,
+        "avg_spread_captured_bps": avg_spread_captured_bps,
         "inventory_cost": execution_cost,
         "adverse_selection_cost": adverse_selection_cost,
     }
@@ -219,12 +248,21 @@ def _result_trade_metrics(
         total_pnl_crypto,
     )
     execution_cost, adverse_selection_cost = engine._execution_costs()
+    quote_count, fill_rate = _quote_fill_metrics(
+        trades=engine.trades,
+        quote_count=len(getattr(engine, "quotes", [])),
+    )
+    total_spread_captured, avg_spread_captured_bps = _spread_capture_metrics(engine)
     return _result_trade_fields(
         trades=engine.trades,
         buys=buys,
         sells=sells,
         avg_trade_size=avg_trade_size,
         avg_trade_pnl_crypto=avg_trade_pnl_crypto,
+        quote_count=quote_count,
+        fill_rate=fill_rate,
+        total_spread_captured=total_spread_captured,
+        avg_spread_captured_bps=avg_spread_captured_bps,
         execution_cost=execution_cost,
         adverse_selection_cost=adverse_selection_cost,
     )
@@ -285,6 +323,8 @@ class BacktestResult:
     # Time series
     pnl_series: pd.Series = field(default_factory=lambda: pd.Series())
     inventory_series: pd.Series = field(default_factory=lambda: pd.Series())
+    quote_count: int = 0
+    fill_rate: float = 0.0
 
     def summary(self) -> str:
         """Generate text summary of results."""

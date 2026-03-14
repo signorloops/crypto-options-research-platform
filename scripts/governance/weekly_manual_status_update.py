@@ -17,6 +17,7 @@ from scripts.governance.manual_status_utils import (
     apply_manual_status_updates,
     build_manual_status_markdown,
     default_manual_status_template,
+    is_placeholder_signer,
     normalize_manual_status,
     parse_bool_text,
 )
@@ -50,6 +51,8 @@ def _parse_signoff_assignment(raw: str) -> tuple[str, str]:
     cleaned_signer = signer.strip()
     if not cleaned_signer:
         raise argparse.ArgumentTypeError("signoff value cannot be empty; use --clear-signoff")
+    if is_placeholder_signer(normalized_role, cleaned_signer):
+        raise argparse.ArgumentTypeError("signoff value cannot use reserved placeholder names")
     return normalized_role, cleaned_signer
 
 

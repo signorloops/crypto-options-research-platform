@@ -139,6 +139,22 @@ def _apply_post_slippage_costs(
     return fill_price, float(transaction_cost), float(adverse_selection_cost)
 
 
+def _spread_capture_against_mid(
+    *,
+    mid_price: float,
+    quote_price: float,
+    side: OrderSide,
+    size: float,
+) -> float:
+    if mid_price <= 0 or size <= 0:
+        return 0.0
+    if side == OrderSide.BUY:
+        edge = max(mid_price - quote_price, 0.0)
+    else:
+        edge = max(quote_price - mid_price, 0.0)
+    return float(edge * size)
+
+
 def _sample_latency_ms(config: FillSimulatorConfig, rng: np.random.Generator) -> float:
     """Draw non-negative latency from configured base/std parameters."""
     if config.latency_std_ms <= 0:
@@ -196,6 +212,8 @@ class RealisticFillSimulator:
         self.transaction_cost_paid: float = 0.0
         self.slippage_cost: float = 0.0
         self.adverse_selection_cost: float = 0.0
+        self.total_spread_captured: float = 0.0
+        self.spread_capture_notional: float = 0.0
 
     def simulate_fill(
         self,
@@ -256,6 +274,14 @@ class RealisticFillSimulator:
         if self.rng.random() > fill_prob:
             return None
         fill_size = min(trade.size, our_size)
+        reference_mid = market_state.order_book.mid_price or market_state.spot_price
+        self.total_spread_captured += _spread_capture_against_mid(
+            mid_price=float(reference_mid),
+            quote_price=base_price,
+            side=our_side,
+            size=fill_size,
+        )
+        self.spread_capture_notional += max(float(reference_mid), 0.0) * fill_size
         fill_price, slippage_cost = _apply_slippage_to_fill(base_price=base_price, trade_size=fill_size, order_book=market_state.order_book, side=our_side, apply_order_book_slippage_fn=self._apply_order_book_slippage, cost_against_side_fn=self._cost_against_side)
         self.slippage_cost += slippage_cost
         fill_price, transaction_cost, adverse_selection_cost = _apply_post_slippage_costs(fill_price=fill_price, side=our_side, size=fill_size, transaction_cost_bps=transaction_cost_bps, adverse_selection_factor=self.config.adverse_selection_factor, is_adverse=self._check_adverse_selection(trade, market_state), cost_against_side_fn=self._cost_against_side)

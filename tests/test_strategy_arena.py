@@ -19,7 +19,13 @@ from strategies.base import MarketMakingStrategy
 matplotlib.use("Agg")
 
 
-def _make_backtest_result(name: str, pnl_values: list[float], sharpe: float) -> BacktestResult:
+def _make_backtest_result(
+    name: str,
+    pnl_values: list[float],
+    sharpe: float,
+    *,
+    quote_count: int | None = None,
+) -> BacktestResult:
     index = pd.date_range("2026-01-01", periods=max(len(pnl_values), 1), freq="1D")
     pnl_series = (
         pd.Series(pnl_values, index=index[: len(pnl_values)])
@@ -29,6 +35,9 @@ def _make_backtest_result(name: str, pnl_values: list[float], sharpe: float) -> 
     inventory_series = pd.Series([0.0] * len(pnl_series), index=pnl_series.index)
     crypto_balance_series = pd.Series([1.0] * len(pnl_series), index=pnl_series.index)
     total_pnl = float(pnl_values[-1]) if pnl_values else 0.0
+    trade_count = max(0, len(pnl_values) - 1)
+    quote_count = quote_count if quote_count is not None else max(trade_count * 2, 1 if trade_count else 0)
+    fill_rate = trade_count / quote_count if quote_count else 0.0
 
     return BacktestResult(
         strategy_name=name,
@@ -43,9 +52,9 @@ def _make_backtest_result(name: str, pnl_values: list[float], sharpe: float) -> 
         volatility=0.2,
         sharpe_ci_95=(0.0, 1.0),
         drawdown_ci_95=(-0.2, 0.0),
-        trade_count=max(0, len(pnl_values) - 1),
-        buy_count=max(0, len(pnl_values) - 1) // 2,
-        sell_count=max(0, len(pnl_values) - 1) // 2,
+        trade_count=trade_count,
+        buy_count=trade_count // 2,
+        sell_count=trade_count // 2,
         avg_trade_size=1.0,
         avg_trade_pnl_crypto=0.001,
         total_spread_captured=10.0,
@@ -56,6 +65,8 @@ def _make_backtest_result(name: str, pnl_values: list[float], sharpe: float) -> 
         crypto_balance_series=crypto_balance_series,
         pnl_series=pnl_series,
         inventory_series=inventory_series,
+        quote_count=quote_count,
+        fill_rate=fill_rate,
     )
 
 
@@ -197,7 +208,7 @@ def test_scorecard_section_helpers_render_titles_and_lines():
 
 
 def test_scorecard_payload_helpers_return_expected_defaults_and_fields():
-    result = _make_backtest_result("rich", [0, 100, 80, 120, 150], sharpe=1.2)
+    result = _make_backtest_result("rich", [0, 100, 80, 120, 150], sharpe=1.2, quote_count=20)
     metrics = {
         "total_pnl": 150.0,
         "total_return_pct": 0.0015,
@@ -225,7 +236,7 @@ def test_scorecard_payload_helpers_return_expected_defaults_and_fields():
     assert payload["total_pnl"] == 150.0
     assert payload["avg_trade_pnl"] == result.avg_trade_pnl_crypto
     assert payload["spread_capture"] == 10.0
-    assert payload["fill_rate"] == 0.3
+    assert payload["fill_rate"] == pytest.approx(result.trade_count / result.quote_count)
 
 
 def test_scorecard_summary_metrics_helper_matches_expected_values():

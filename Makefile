@@ -205,6 +205,8 @@ algorithm-freeze-check:
 	$(MAKE) daily-regression
 
 release-candidate-check:
+	$(MAKE) algorithm-freeze-check
+	$(MAKE) weekly-close-gate
 	$(PYTHON) scripts/governance/release_candidate_guard.py \
 		--pyproject pyproject.toml \
 		--signoff-json artifacts/weekly-signoff-pack.json \

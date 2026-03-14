@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 
 from core.types import (
+    Fill,
     MarketState,
     OrderBook,
     OrderBookLevel,
@@ -191,6 +192,52 @@ class TestRealisticFillSimulator:
 
         assert fill is not None
         assert sim.adverse_selection_cost > 0
+
+    def test_fill_simulator_tracks_spread_capture_metrics(self):
+        """Filled maker quotes should contribute positive spread-capture totals."""
+        sim = RealisticFillSimulator(
+            config=FillSimulatorConfig(
+                base_latency_ms=0.0,
+                latency_std_ms=0.0,
+                adverse_selection_factor=0.0,
+            ),
+            rng=np.random.default_rng(5),
+        )
+        sim._estimate_fill_probability = lambda *args, **kwargs: 1.0  # type: ignore[method-assign]
+
+        now = datetime.now(timezone.utc)
+        order_book = OrderBook(
+            timestamp=now,
+            instrument="SYNTHETIC",
+            bids=[OrderBookLevel(price=99.95, size=1.0)],
+            asks=[OrderBookLevel(price=100.05, size=1.0)],
+        )
+        market_state = MarketState(
+            timestamp=now,
+            instrument="SYNTHETIC",
+            spot_price=100.0,
+            order_book=order_book,
+            recent_trades=[],
+        )
+        quote = QuoteAction(bid_price=99.95, bid_size=0.5, ask_price=100.15, ask_size=0.5)
+        trade = Trade(
+            timestamp=now + timedelta(milliseconds=1),
+            instrument="SYNTHETIC",
+            price=99.94,
+            size=0.5,
+            side=OrderSide.SELL,
+        )
+
+        fill = sim.simulate_fill(
+            quote=quote,
+            market_state=market_state,
+            next_trades=[trade],
+            transaction_cost_bps=0.0,
+        )
+
+        assert fill is not None
+        assert sim.total_spread_captured > 0
+        assert sim.spread_capture_notional == pytest.approx(market_state.spot_price * fill.size)
 
     def test_fill_probability_decreases_with_queue_depth(self):
         """Deeper queue should reduce modeled fill probability."""
@@ -495,6 +542,41 @@ class TestBacktestEngine:
         assert result.unrealized_pnl == pytest.approx(expected_unrealized)
         assert result.inventory_pnl == pytest.approx(expected_unrealized)
         assert result.total_pnl_crypto == pytest.approx(expected_realized + expected_unrealized)
+
+    def test_compute_result_exposes_quote_fill_rate_and_spread_capture(self):
+        """Computed results should expose quote-derived fill rate and spread capture metrics."""
+        strategy = NaiveMarketMaker()
+        fill_simulator = RealisticFillSimulator(
+            config=FillSimulatorConfig(
+                base_latency_ms=0.0,
+                latency_std_ms=0.0,
+                adverse_selection_factor=0.0,
+            ),
+            rng=np.random.default_rng(9),
+        )
+        engine = BacktestEngine(strategy, fill_simulator=fill_simulator, initial_crypto_balance=1.0)
+        ts = datetime.now(timezone.utc)
+
+        engine.quotes = [
+            QuoteAction(bid_price=100.0, bid_size=1.0, ask_price=100.2, ask_size=1.0)
+            for _ in range(4)
+        ]
+        engine.trades = [
+            Fill(timestamp=ts, instrument="SYNTHETIC", side=OrderSide.BUY, price=100.0, size=0.2),
+            Fill(timestamp=ts, instrument="SYNTHETIC", side=OrderSide.SELL, price=100.2, size=0.2),
+        ]
+        engine._pnl_history = [(ts, 0.05)]
+        engine._inventory_history = [(ts, 0.0)]
+        engine._crypto_balance_history = [(ts, engine.crypto_balance)]
+        fill_simulator.total_spread_captured = 8.0
+        fill_simulator.spread_capture_notional = 2_000.0
+
+        result = engine._compute_result(current_price=100.0)
+
+        assert result.quote_count == 4
+        assert result.fill_rate == pytest.approx(0.5)
+        assert result.total_spread_captured == pytest.approx(8.0)
+        assert result.avg_spread_captured_bps == pytest.approx(40.0)
 
     def test_quote_uses_previous_snapshot_to_avoid_lookahead(self):
         """Strategy quote should only see t-1 snapshot information."""

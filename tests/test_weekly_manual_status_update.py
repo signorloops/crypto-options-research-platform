@@ -161,3 +161,14 @@ def test_invalid_signoff_role_is_rejected():
         assert "unsupported signoff role" in str(exc)
     else:
         raise AssertionError("expected ArgumentTypeError")
+
+
+def test_placeholder_signoff_value_is_rejected():
+    module = _load_module()
+
+    try:
+        module._parse_signoff_assignment("research=research_owner")
+    except argparse.ArgumentTypeError as exc:
+        assert "placeholder" in str(exc)
+    else:
+        raise AssertionError("expected ArgumentTypeError")
