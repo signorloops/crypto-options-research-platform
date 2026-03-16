@@ -167,7 +167,7 @@ make live-deviation-snapshot
 # Check deployment config for legacy entrypoint names
 make check-service-entrypoint
 
-# Check branch names for banned keywords
+# Validate branch names against optional configured keywords
 make branch-name-guard
 ```
 

@@ -171,8 +171,6 @@ def build_manual_update_plan(status: dict[str, Any] | None) -> dict[str, Any]:
         signer = str(signoffs.get(role, "")).strip()
         if has_real_signer(role, signer):
             continue
-        updater_pending_items.append(label)
-        args.extend(["--signoff", f"{role}={_ROLE_PLACEHOLDERS[role]}"])
 
     args_text = " ".join(shlex.quote(arg) for arg in args)
     command = (

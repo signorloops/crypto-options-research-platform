@@ -59,8 +59,10 @@ def test_build_report_marks_pending_manual_items():
     )
     assert "observation_24h_completed=true" in report["manual_update"]["suggested_command"]
     assert "signoff research=research_owner" not in report["manual_update"]["suggested_command"]
-    assert "signoff engineering=engineering_owner" in report["manual_update"]["suggested_command"]
-    assert "signoff risk=risk_owner" in report["manual_update"]["suggested_command"]
+    assert "signoff engineering=engineering_owner" not in report["manual_update"]["suggested_command"]
+    assert "signoff risk=risk_owner" not in report["manual_update"]["suggested_command"]
+    assert "Engineering 签字" in report["manual_update"]["external_pending_items"]
+    assert "Risk 签字" in report["manual_update"]["external_pending_items"]
 
 
 def test_build_report_treats_placeholder_signers_as_pending():

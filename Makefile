@@ -50,7 +50,7 @@ help:
 	@echo "  format-check     Check code formatting"
 	@echo "  type-check       Run type checking (mypy)"
 	@echo "  quality          Run format-check + lint + type-check"
-	@echo "  branch-name-guard Fail if local/remote branch names include forbidden keywords"
+	@echo "  branch-name-guard Validate branch names against optional configured keywords"
 	@echo "  check-service-entrypoint Fail if deployment docs/scripts use legacy execution modules"
 	@echo "  docs-link-check  Validate local markdown links"
 	@echo "  notebook-01-validate Generate reproducible Notebook 01 validation artifacts"

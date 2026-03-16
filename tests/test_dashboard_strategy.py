@@ -45,11 +45,11 @@ SAMPLE_STRATEGIES = {
 }
 
 
-def _write_strategy_json(tmp_path):
+def _write_strategy_json(tmp_path, data=None):
     subdir = tmp_path / "backtest_with_output"
-    subdir.mkdir()
+    subdir.mkdir(parents=True)
     path = subdir / "backtest_results_test.json"
-    path.write_text(json.dumps(SAMPLE_STRATEGIES), encoding="utf-8")
+    path.write_text(json.dumps(data or SAMPLE_STRATEGIES), encoding="utf-8")
     return tmp_path
 
 
@@ -92,3 +92,25 @@ def test_strategy_api_no_files_returns_empty(tmp_path):
         response = client.get("/api/strategy/compare")
     assert response.status_code == 200
     assert response.json()["strategies"] == {}
+
+
+def test_strategy_page_rejects_file_outside_results(tmp_path):
+    results_dir = tmp_path / "results"
+    _write_strategy_json(results_dir)
+    (tmp_path / "outside.json").write_text(json.dumps(SAMPLE_STRATEGIES), encoding="utf-8")
+
+    app = create_dashboard_app(results_dir=results_dir)
+    with TestClient(app) as client:
+        response = client.get("/strategy", params={"file": "../outside.json"})
+    assert response.status_code == 404
+
+
+def test_strategy_api_invalid_payload_returns_422(tmp_path):
+    results_dir = _write_strategy_json(tmp_path, data={"status": "READY_FOR_CLOSE"})
+    app = create_dashboard_app(results_dir=results_dir)
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/strategy/compare",
+            params={"file": "backtest_with_output/backtest_results_test.json"},
+        )
+    assert response.status_code == 422

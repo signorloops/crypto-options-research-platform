@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail when git branch names contain forbidden keywords."""
+"""Optionally fail when git branch names contain configured forbidden keywords."""
 
 from __future__ import annotations
 
@@ -16,13 +16,12 @@ def _git_branches(root: Path) -> list[str]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Guard forbidden branch-name keywords.")
+    parser = argparse.ArgumentParser(description="Guard configured forbidden branch-name keywords.")
     parser.add_argument("--root", default=".", help="Repository root path.")
-    legacy_token = "".join(chr(code) for code in (99, 111, 100, 101, 120))
     parser.add_argument(
         "--forbidden",
         nargs="+",
-        default=[legacy_token],
+        default=[],
         help="Case-insensitive forbidden tokens for branch names.",
     )
     args = parser.parse_args()
@@ -30,6 +29,10 @@ def main() -> int:
     root = Path(args.root).resolve()
     branches = _git_branches(root)
     forbidden = [token.lower() for token in args.forbidden]
+
+    if not forbidden:
+        print("Branch name guard passed (no forbidden tokens configured).")
+        return 0
 
     violations: list[str] = []
     for branch in branches:

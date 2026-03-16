@@ -168,6 +168,7 @@ make live-deviation-snapshot
 make check-service-entrypoint
 
 # 检查分支命名是否包含禁用关键字
+# 按可选配置校验分支名称
 make branch-name-guard
 ```
 
