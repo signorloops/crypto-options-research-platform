@@ -78,3 +78,6 @@ dmypy.json
 # Misc
 *.bak
 *.tmp
+
+# uv package manager lockfile
+uv.lock

@@ -315,9 +315,16 @@ class IntegratedMarketMakingStrategy(MarketMakingStrategy):
         )
 
     def _update_portfolio_state(self, state: MarketState, position: Position) -> PortfolioState:
-        """Update internal portfolio state for risk checks."""
-        # Calculate PnL
-        current_pnl = self._calculate_pnl(position, state.spot_price)
+        """Update internal portfolio state for risk checks.
+
+        The strategy trades options, so positions must be marked at the
+        option's current price (order_book.mid_price), not the underlying
+        spot. Marking an option position at the underlying spot produces
+        spurious PnL of order 1/entry - 1/spot, which pollutes every
+        downstream risk gate (daily_pnl_pct, max_drawdown).
+        """
+        option_mark = state.order_book.mid_price if state.order_book else state.spot_price
+        current_pnl = self._calculate_pnl(position, option_mark)
 
         # Update bounded history and cached series incrementally (hot path).
         self._pnl_history.append((state.timestamp, current_pnl))

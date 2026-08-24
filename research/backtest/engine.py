@@ -437,9 +437,22 @@ class BacktestEngine:
         price_column: str = "price",
         timestamp_column: str = "timestamp",
     ) -> BacktestResult:
-        """Run backtest on historical market data."""
+        """Run backtest on historical market data.
+
+        Accepts timestamps either as a column (default name "timestamp") or as
+        the DataFrame index (DatetimeIndex). The latter form is produced by
+        the ScenarioGenerator and StrategyArena pipelines.
+        """
         self._reset_run_state()
-        prices = market_data[price_column].to_numpy(dtype=np.float64); timestamps_arr = market_data[timestamp_column].to_numpy()
+        prices = market_data[price_column].to_numpy(dtype=np.float64)
+        if timestamp_column in market_data.columns:
+            timestamps_arr = market_data[timestamp_column].to_numpy()
+        elif isinstance(market_data.index, pd.DatetimeIndex):
+            timestamps_arr = market_data.index.to_numpy()
+        else:
+            raise KeyError(
+                f"market_data must have a '{timestamp_column}' column or a DatetimeIndex"
+            )
         if (n_events := len(prices)) == 0: return self._compute_result(current_price=0.0)
         event_volumes = self._prepare_event_volumes(market_data)
         current_ob = self._create_dummy_order_book(prices[0])
@@ -574,18 +587,36 @@ class BacktestEngine:
             self._crypto_balance_history = self._crypto_balance_history[remove_count:]
 
     def _calculate_crypto_pnl_components(self, current_price: Optional[float] = None) -> Tuple[float, float]:
-        """Calculate realized and unrealized coin PnL components."""
+        """Calculate realized and unrealized coin PnL components.
+
+        Realized PnL is tracked as premium cash flows in crypto:
+        `crypto_balance - initial_crypto_balance`. Each fill converts the
+        notional USD premium to crypto at the prevailing spot price.
+
+        Unrealized PnL marks the open inventory at the current spot price
+        relative to its cost basis, in the same crypto units as realized PnL:
+        `size * (current_price - avg_entry_price) / current_price`.
+
+        Rationale: a position of `size` contracts entered at `avg_entry_price`
+        has cost basis `size * avg_entry_price / entry_spot` in crypto terms;
+        marked at the current spot its value is `size * current_price / spot`.
+        The difference is the inventory PnL expressed in crypto. This keeps
+        both terms in the same units and magnitude (~1 coin per unit of size),
+        unlike the legacy inverse formula `size*(1/entry-1/exit)` which is
+        designed for coin-margined derivative notionals, not for premium-flow
+        accounting of an inventory of underlying.
+        """
         realized_pnl = self.crypto_balance - self.initial_crypto_balance
 
         unrealized_pnl = 0.0
         if current_price is not None and current_price > 0:
             for _, position in self.positions.items():
                 if position.size != 0 and position.avg_entry_price > 0:
-                    unrealized_pnl += InverseOptionPricer.calculate_pnl(
-                        entry_price=position.avg_entry_price,
-                        exit_price=current_price,
-                        size=position.size,
-                        inverse=True,
+                    # Mark-to-market inventory PnL in crypto terms.
+                    unrealized_pnl += (
+                        position.size
+                        * (current_price - position.avg_entry_price)
+                        / current_price
                     )
 
         return realized_pnl, unrealized_pnl

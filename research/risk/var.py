@@ -381,9 +381,19 @@ class VaRCalculator:
     def _evt_expected_shortfall(
         *, q_alpha: float, threshold: float, shape: float, scale: float, total_value: float
     ) -> float:
+        """Expected shortfall (CVaR) under the POT/GPD tail model.
+
+        The McNeil-Frey closed form is:
+            ES = (VaR + scale - shape * threshold) / (1 - shape)
+        The previous implementation omitted the `shape * VaR / (1 - shape)`
+        term, understating ES by roughly 26-28% on realistic tails.
+        """
         if shape >= 1:
-            return float(q_alpha * total_value)
-        es_loss = q_alpha + (scale - shape * threshold) / (1 - shape)
+            # Tail index >= 1 implies infinite mean; the closed form is
+            # unbounded. Return inf rather than a VaR-sized number so callers
+            # see the regime instead of a materially understated risk figure.
+            return float("inf")
+        es_loss = (q_alpha + scale - shape * threshold) / (1.0 - shape)
         return float(max(es_loss, q_alpha) * total_value)
 
     @staticmethod
@@ -417,7 +427,13 @@ class VaRCalculator:
         portfolio_shock = simulated_returns @ weights
         shock_std = np.std(portfolio_shock) + 1e-12
         normalized_shock = portfolio_shock / shock_std
-        vol_multiplier = np.exp(-leverage_correlation * normalized_shock)
+        # Leverage effect: negative returns increase subsequent vol. With
+        # leverage_correlation < 0 (the default -0.35), a crash (negative
+        # shock) must produce a vol_multiplier > 1, so we multiply by
+        # exp(+leverage_correlation * normalized_shock). The previous
+        # implementation used a minus sign, muting crashes and amplifying
+        # rallies — the opposite of the intended effect.
+        vol_multiplier = np.exp(leverage_correlation * normalized_shock)
         vol_multiplier = np.clip(vol_multiplier, 0.5, 3.0)
         return simulated_returns * vol_multiplier[:, None]
 
@@ -429,10 +445,17 @@ class VaRCalculator:
         n_simulations: int,
         rng: Any,
     ) -> np.ndarray:
-        """Delta-gamma-vega PnL approximation component for one position."""
+        """Delta-gamma-vega PnL approximation component for one position.
+
+        The Greeks convention in this codebase is vega per 1% vol move (see
+        `inverse_options.InverseOptionPricer.VEGA_SCALING = 0.01` and the
+        BlackScholesGreeks implementation). The random shock is expressed in
+        vol points (5% = 0.05), so the PnL contribution is
+        `vega * (shock_in_vol_points * 100) * value`.
+        """
         delta_pnl = greek_row["delta"] * shocks * position_value
         gamma_pnl = 0.5 * greek_row.get("gamma", 0) * (shocks**2) * position_value
-        vega_pnl = greek_row.get("vega", 0) * rng.normal(0, 0.05, n_simulations) * position_value
+        vega_pnl = greek_row.get("vega", 0) * rng.normal(0, 0.05, n_simulations) * 100.0 * position_value
         return delta_pnl + gamma_pnl + vega_pnl
 
     @staticmethod
@@ -514,7 +537,11 @@ class VaRCalculator:
         vol_shock_scale = max(inputs.vol_of_vol, 1e-6) * np.sqrt(holding_period / 365.25)
         vol_shock = rng.normal(0.0, vol_shock_scale, n_simulations)
         if abs(leverage_correlation) > 1e-8:
-            vol_shock += -leverage_correlation * underlying_returns
+            # Leverage effect: underlying crashes (negative returns) should
+            # increase implied vol, not decrease it. Multiplying by
+            # leverage_correlation directly (not its negation) achieves this
+            # for the conventional negative rho.
+            vol_shock += leverage_correlation * underlying_returns
         shocked_vol = np.clip(inputs.implied_vol * (1.0 + vol_shock), 0.01, 5.0)
         shocked_tte = max(1e-8, inputs.time_to_expiry - holding_period / 365.25)
         return shocked_spot, shocked_vol, shocked_tte

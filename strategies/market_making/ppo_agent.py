@@ -216,7 +216,7 @@ def _ppo_quote_size_and_metadata(
             inventory_skew_bps=inventory_skew_bps,
             size_scale=size_scale,
             value_estimate=value,
-            trained=strategy.network is not None and strategy.optimizer is not None,
+            trained=strategy._is_trained,
         ),
     )
 
@@ -568,6 +568,9 @@ class PPOMarketMaker(MarketMakingStrategy):
 
         self.network: Optional[MarketMakingActorCritic] = None
         self.optimizer: Optional[torch.optim.Adam] = None
+        # Whether the network has actually been trained (or loaded). Distinct
+        # from `network is not None` which is set by lazy init at first quote.
+        self._is_trained: bool = False
         self.states: List[np.ndarray] = []
         self.actions: List[np.ndarray] = []
         self.rewards: List[float] = []
@@ -614,7 +617,30 @@ class PPOMarketMaker(MarketMakingStrategy):
         return bid_vol / denom, ask_vol / denom
 
     def quote(self, state: MarketState, position: Position) -> QuoteAction:
-        """Generate quote using PPO policy."""
+        """Generate quote using PPO policy.
+
+        Refuses to quote with an untrained network: the first call would
+        otherwise initialize random weights and emit random-skew quotes that
+        are indistinguishable from trained ones in metadata.
+        """
+        if not self._is_trained:
+            logger.warning(
+                "PPO strategy quoting without training; returning zero-size quotes",
+                extra=log_extra(strategy=self.name),
+            )
+            mid = state.order_book.mid_price if state.order_book else 0.0
+            return QuoteAction(
+                bid_price=mid, bid_size=0.0, ask_price=mid, ask_size=0.0,
+                metadata=_ppo_quote_metadata(
+                    strategy_name=self.name,
+                    bid_offset_bps=0.0,
+                    ask_offset_bps=0.0,
+                    inventory_skew_bps=0.0,
+                    size_scale=0.0,
+                    value_estimate=0.0,
+                    trained=False,
+                ),
+            )
         mid, action, value = _ppo_infer_action_and_value(
             strategy=self,
             state=state,
@@ -720,6 +746,7 @@ class PPOMarketMaker(MarketMakingStrategy):
                     ),
                 )
         logger.info("Training complete", extra=log_extra(total_timesteps=timestep))
+        self._is_trained = True
 
     def _train_single_episode(
         self,

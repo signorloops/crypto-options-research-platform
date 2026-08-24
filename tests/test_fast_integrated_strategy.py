@@ -229,7 +229,15 @@ class TestFastIntegratedStrategy:
 
     def test_inventory_skew(self):
         """Test inventory skew effect on prices."""
+        from research.risk.circuit_breaker import CircuitBreakerConfig
         strategy = FastIntegratedMarketMakingStrategy()
+        # Disable the concentration check for this skew-focused test; the
+        # single-instrument book is always 100% concentrated by design and
+        # would otherwise halt the strategy before we can observe the skew.
+        strategy.circuit_breaker.config = CircuitBreakerConfig(
+            position_concentration_limit=2.0,
+            concentration_warning_pct=2.0,
+        )
 
         # Pre-train
         np.random.seed(42)
@@ -241,11 +249,11 @@ class TestFastIntegratedStrategy:
         # Zero inventory
         quote_zero = strategy.quote(state, Position("BTC-USD", 0.0, 50000.0))
 
-        # Long inventory - bid should be lower (more aggressive selling)
-        quote_long = strategy.quote(state, Position("BTC-USD", 5.0, 50000.0))
+        # Long inventory - bid should be lower (more aggressive selling).
+        quote_long = strategy.quote(state, Position("BTC-USD", 0.3, 50000.0))
 
         # Short inventory - ask should be higher (more aggressive buying)
-        quote_short = strategy.quote(state, Position("BTC-USD", -5.0, 50000.0))
+        quote_short = strategy.quote(state, Position("BTC-USD", -0.3, 50000.0))
 
         # Long inventory should skew reservation price down
         assert quote_long.bid_price < quote_zero.bid_price

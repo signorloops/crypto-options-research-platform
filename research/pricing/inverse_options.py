@@ -59,6 +59,10 @@ class _GreeksComputationContext:
     discount: float
     sqrt_T: float
     n_d1: float
+    K: float = 0.0
+    T: float = 0.0
+    r: float = 0.0
+    sigma: float = 0.0
 
 
 def _raise_validation_error(
@@ -184,9 +188,15 @@ def _inverse_price_from_d(
     d1: float,
     d2: float,
 ) -> float:
+    """币本位期权 BTC 价格。
+
+    Stock-numeraire 推导：
+      call = N(d1)/K  - discount * N(d2)/S
+      put  = discount * N(-d2)/S - N(-d1)/K
+    """
     if option_type == "call":
-        return float(discount * inv_K * norm.cdf(-d2) - inv_S * norm.cdf(-d1))
-    return float(inv_S * norm.cdf(d1) - discount * inv_K * norm.cdf(d2))
+        return float(inv_K * norm.cdf(d1) - discount * inv_S * norm.cdf(d2))
+    return float(discount * inv_S * norm.cdf(-d2) - inv_K * norm.cdf(-d1))
 
 
 def _zero_inverse_greeks() -> InverseGreeks:
@@ -242,27 +252,25 @@ class InverseOptionPricer:
         """
         计算 d1 和 d2（币本位期权专用）。
 
-        对于币本位期权，使用调整后的公式：
-        d1 = [ln(K/S) + (r + 0.5*sigma^2)*T] / (sigma*sqrt(T))
+        使用标准 Black-Scholes 方向（log(S/K)），与 stock-numeraire 推导一致：
+        d1 = [ln(S/K) + (r + 0.5*sigma^2)*T] / (sigma*sqrt(T))
         d2 = d1 - sigma*sqrt(T)
 
-        注意：与标准BS相比，S和K的位置互换（因为payoff在1/S空间）。
+        币本位期权的 BTC 价格公式为：
+        call = N(d1)/K - exp(-rT) * N(d2)/S
+        put  = exp(-rT) * N(-d2)/S - N(-d1)/K
+        满足平价关系 C - P = 1/K - exp(-rT)/S。
         """
         if T < InverseOptionPricer.EPSILON:
             # T接近0时的极限情况
-            # d1 = [ln(K/S) + ...] / (sigma*sqrt(T))
-            # 当T->0，分子趋近于ln(K/S)
-            # S>K时，ln(K/S)<0，所以d1->-inf
-            # S<K时，ln(K/S)>0，所以d1->+inf
             if S > K:
-                return float('-inf'), float('-inf')
-            elif S < K:
                 return float('inf'), float('inf')
+            elif S < K:
+                return float('-inf'), float('-inf')
             else:
                 return 0.0, 0.0
 
-        # 币本位期权：使用K/S而不是S/K
-        d1 = (np.log(K / S) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+        d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
         d2 = d1 - sigma * np.sqrt(T)
         return d1, d2
 
@@ -323,7 +331,7 @@ class InverseOptionPricer:
                 d2=d2,
             ),
         )
-        context = _GreeksComputationContext(inv_S=inv_S, inv_K=inv_K, discount=discount, sqrt_T=sqrt_T, n_d1=n_d1)
+        context = _GreeksComputationContext(inv_S=inv_S, inv_K=inv_K, discount=discount, sqrt_T=sqrt_T, n_d1=n_d1, K=K, T=T, r=r, sigma=sigma)
         greeks = InverseOptionPricer._calculate_greeks_from_d(d1, d2, S, K, T, r, sigma, option_type, context)
         return price, greeks
 
@@ -357,23 +365,28 @@ class InverseOptionPricer:
         option_type: Literal["call", "put"],
         context: _GreeksComputationContext,
     ) -> float:
-        """Compute inverse-option delta from precomputed d1/d2 terms."""
+        """Compute inverse-option delta from precomputed d1/d2 terms.
+
+        price = inv_K * N(d1) - discount * inv_S * N(d2)  (call)
+        d/dS of 1/S term includes both the explicit inv_S and the implicit d1/d2 shift.
+        """
         inv_S = context.inv_S
         inv_K = context.inv_K
         discount = context.discount
         n_d1 = context.n_d1
         sqrt_T = context.sqrt_T
-        d1_dS = -1.0 / (S * sigma * sqrt_T)
+        d_d1_dS = 1.0 / (S * sigma * sqrt_T)
+        d_d2_dS = d_d1_dS
         if option_type == "call":
             return float(
-                (inv_S ** 2) * norm.cdf(-d1)
-                + inv_S * n_d1 * d1_dS
-                - discount * inv_K * norm.pdf(-d2) * d1_dS
+                inv_K * n_d1 * d_d1_dS
+                - discount * inv_S * norm.pdf(d2) * d_d2_dS
+                + discount * (inv_S ** 2) * norm.cdf(d2)
             )
         return float(
-            -(inv_S ** 2) * norm.cdf(d1)
-            + inv_S * n_d1 * d1_dS
-            - discount * inv_K * norm.pdf(d2) * d1_dS
+            -discount * inv_S * norm.pdf(-d2) * d_d2_dS
+            - discount * (inv_S ** 2) * norm.cdf(-d2)
+            + inv_K * n_d1 * d_d1_dS
         )
 
     @staticmethod
@@ -385,14 +398,27 @@ class InverseOptionPricer:
         option_type: Literal["call", "put"],
         context: _GreeksComputationContext,
     ) -> float:
-        """Compute inverse-option gamma from precomputed d1 terms."""
-        inv_S = context.inv_S
-        n_d1 = context.n_d1
-        sqrt_T = context.sqrt_T
-        gamma_term2 = n_d1 / (S ** 3 * sigma * sqrt_T)
-        if option_type == "call":
-            return float(-2 * (inv_S ** 3) * norm.cdf(-d1) + gamma_term2)
-        return float(2 * (inv_S ** 3) * norm.cdf(d1) + gamma_term2)
+        """Compute inverse-option gamma via central finite difference of price.
+
+        The closed-form gamma for inverse options is algebraically dense and
+        error-prone (the r != 0 fix changed the price formula's structure).
+        A central FD on the *analytic* price keeps the Greeks internally
+        consistent with the pricing formula, which is the invariant that
+        matters for downstream consumers (var.py revaluation, hedging).
+        """
+        # Note: this function receives d1/S/sigma but the price is fully
+        # determined by (S, K, T, r, sigma, option_type). We need K, T, r
+        # from the caller; fall back to analytic when unavailable is worse
+        # than a clean FD here. The caller (`_calculate_greeks_from_d`) is
+        # updated to pass them via context.
+        K = context.K
+        T = context.T
+        r = context.r
+        h = max(S, 1.0) * 1e-4
+        p_up = InverseOptionPricer.calculate_price(S + h, K, T, r, sigma, option_type)
+        p_md = InverseOptionPricer.calculate_price(S, K, T, r, sigma, option_type)
+        p_dn = InverseOptionPricer.calculate_price(S - h, K, T, r, sigma, option_type)
+        return float((p_up - 2.0 * p_md + p_dn) / (h * h))
 
     @staticmethod
     def _calculate_theta_from_d(
@@ -407,26 +433,16 @@ class InverseOptionPricer:
         option_type: Literal["call", "put"],
         context: _GreeksComputationContext,
     ) -> float:
-        """Compute daily theta from precomputed d terms."""
-        inv_S = context.inv_S
-        inv_K = context.inv_K
-        discount = context.discount
-        n_d1 = context.n_d1
-        sqrt_T = context.sqrt_T
-        d_d1_dT = ((r + 0.5 * sigma ** 2) * T - np.log(K / S)) / (2 * sigma * T ** 1.5)
-        d_d2_dT = d_d1_dT - sigma / (2 * sqrt_T)
-        if option_type == "call":
-            dV_dT = (
-                -r * discount * inv_K * norm.cdf(-d2)
-                - discount * inv_K * norm.pdf(d2) * d_d2_dT
-                + inv_S * n_d1 * d_d1_dT
-            )
-        else:
-            dV_dT = (
-                r * discount * inv_K * norm.cdf(d2)
-                + discount * inv_K * norm.pdf(d2) * d_d2_dT
-                - inv_S * n_d1 * d_d1_dT
-            )
+        """Compute daily theta from precomputed d terms.
+
+        theta_daily = -d(price)/dT / 365, evaluated on the corrected price
+        formula via central FD. The closed form is dense; FD keeps the Greeks
+        consistent with the price function by construction.
+        """
+        h = max(T, InverseOptionPricer.EPSILON * 10) * 1e-4
+        p_up = InverseOptionPricer.calculate_price(S, K, T + h, r, sigma, option_type)
+        p_dn = InverseOptionPricer.calculate_price(S, K, max(T - h, InverseOptionPricer.EPSILON), r, sigma, option_type)
+        dV_dT = (p_up - p_dn) / (2.0 * h)
         return float(-dV_dT / InverseOptionPricer.THETA_DAYS_PER_YEAR)
 
     @staticmethod
@@ -467,14 +483,26 @@ class InverseOptionPricer:
         option_type: Literal["call", "put"],
         context: _GreeksComputationContext,
     ) -> float:
-        """Compute rho scaled to 1% rate changes."""
-        inv_K = context.inv_K
-        discount = context.discount
-        if option_type == "call":
-            rho = -T * discount * inv_K * norm.cdf(-d2)
-        else:
-            rho = T * discount * inv_K * norm.cdf(d2)
-        return float(rho / InverseOptionPricer.RHO_SCALING)
+        """Compute rho scaled to 1% rate changes via central FD.
+
+        The closed form must include d(d1)/dr = d(d2)/dr = sqrt(T)/sigma, which
+        the previous implementation omitted. FD keeps rho consistent with the
+        price function by construction.
+        """
+        S = 1.0 / context.inv_S if context.inv_S else 0.0
+        K = context.K
+        h = max(abs(context.r), 1e-4) * 1e-3
+        # We need sigma; it is not in context. Fall back to numeric inversion
+        # via a closure passed by the caller — but the caller doesn't have it
+        # either. The simplest correct fix: compute FD on r via the price
+        # function requires sigma, so we read it from the caller's scope by
+        # extending context. (See _calculate_greeks_from_d call site.)
+        sigma = context.sigma
+        r = context.r
+        p_up = InverseOptionPricer.calculate_price(S, K, T, r + h, sigma, option_type)
+        p_dn = InverseOptionPricer.calculate_price(S, K, T, r - h, sigma, option_type)
+        dV_dr = (p_up - p_dn) / (2.0 * h)
+        return float(dV_dr / InverseOptionPricer.RHO_SCALING)
 
     @staticmethod
     def _stabilize_iv_estimate(
@@ -544,10 +572,15 @@ class InverseOptionPricer:
         r: float,
         option_type: Literal["call", "put"],
     ) -> float:
-        """Theoretical upper bound for inverse-option prices."""
+        """Theoretical upper bound for inverse-option prices.
+
+        Under the corrected stock-numeraire pricing:
+          call = N(d1)/K - exp(-rT)*N(d2)/S  <= 1/K   (as sigma -> inf, d1 -> inf)
+          put  = exp(-rT)*N(-d2)/S - N(-d1)/K <= exp(-rT)/S  (as sigma -> inf, d2 -> -inf)
+        """
         if option_type == "call":
-            return float(np.exp(-r * T) / K)
-        return float(1.0 / S)
+            return float(1.0 / K)
+        return float(np.exp(-r * T) / S)
 
     @staticmethod
     def _initial_iv_guess(S: float, K: float) -> float:
@@ -611,6 +644,10 @@ class InverseOptionPricer:
             discount=discount,
             sqrt_T=sqrt_T,
             n_d1=n_d1,
+            K=K,
+            T=T,
+            r=r,
+            sigma=sigma,
         )
         return InverseOptionPricer._calculate_greeks_from_d(
             d1, d2, S, K, T, r, sigma, option_type, context
@@ -722,7 +759,10 @@ def inverse_option_parity(
     T: float,
     r: float
 ) -> float:
-    """币本位期权 Put-Call Parity 偏差，越接近 0 说明一致性越好。"""
+    """币本位期权 Put-Call Parity 偏差，越接近 0 说明一致性越好。
+
+    正确关系：C - P = 1/K - exp(-rT)/S（stock-numeraire 推导）。
+    """
     if S <= 0 or K <= 0 or T < 0:
         return float('inf')
     if T < InverseOptionPricer.EPSILON:
@@ -731,7 +771,7 @@ def inverse_option_parity(
         rhs = max(0, 1/K - 1/S) - max(0, 1/S - 1/K)
     else:
         lhs = call_price - put_price
-        rhs = (1.0 / K) * np.exp(-r * T) - 1.0 / S
+        rhs = 1.0 / K - np.exp(-r * T) / S
     return lhs - rhs
 
 

@@ -341,7 +341,11 @@ class TestOKXStream:
         assert url == "wss://ws.okx.com:8443/ws/v5/public"
 
     def test_parse_trade(self, okx_stream):
-        """Test parsing trade message from OKX."""
+        """Test parsing trade message from OKX.
+
+        OKX batches trades; the parser now returns type='trades' with a list
+        of Trade objects. _route_message fans them out to 'trade' callbacks.
+        """
         message = json.dumps({
             'arg': {'channel': 'trades', 'instId': 'BTC-USD-240628-50000-C'},
             'data': [{
@@ -357,8 +361,10 @@ class TestOKXStream:
         result = okx_stream.parse_message(message)
 
         assert result is not None
-        assert result['type'] == 'trade'
-        trade = result['data']
+        assert result['type'] == 'trades'
+        assert isinstance(result['data'], list)
+        assert len(result['data']) == 1
+        trade = result['data'][0]
         assert isinstance(trade, Trade)
         assert trade.instrument == 'BTC-USD-240628-50000-C'
         assert trade.price == 50000.0
@@ -380,7 +386,7 @@ class TestOKXStream:
         })
 
         result = okx_stream.parse_message(message)
-        trade = result['data']
+        trade = result['data'][0]
         assert trade.side == OrderSide.SELL
 
     def test_parse_tick(self, okx_stream):

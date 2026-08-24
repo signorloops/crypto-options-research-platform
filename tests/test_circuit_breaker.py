@@ -151,8 +151,8 @@ class TestPortfolioState:
         expected_total = 1000.0 + 50000.0 + 1500.0
         assert state.total_value == pytest.approx(expected_total)
 
-    def test_single_position_does_not_trigger_concentration_metric(self):
-        """Single-instrument portfolio should not be flagged by cross-position concentration."""
+    def test_single_position_reports_full_concentration(self):
+        """Single-instrument portfolio is 100% concentrated and must be flagged."""
         from core.types import Position
 
         state = PortfolioState(
@@ -163,8 +163,10 @@ class TestPortfolioState:
         )
 
         instrument, concentration = state.get_position_concentration()
-        assert instrument == ""
-        assert concentration == 0.0
+        # Single position = 100% concentration; the previous implementation
+        # returned ("", 0.0) which silently masked the most concentrated case.
+        assert instrument == "BTC"
+        assert concentration == pytest.approx(1.0)
 
 
 class TestCircuitBreakerInitialization:

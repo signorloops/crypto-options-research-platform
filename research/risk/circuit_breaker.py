@@ -459,17 +459,27 @@ class PortfolioState:
         """
         if not self.positions: return "", 0.0
         non_zero_positions = [pos for pos in self.positions.values() if abs(pos.size) > 1e-12 and pos.avg_entry_price > 0]
-        if len(non_zero_positions) <= 1: return "", 0.0
-        total_value = self.total_value
-        if abs(total_value) <= 1e-12: return "", 0.0
-        total_value = abs(total_value)
+        if not non_zero_positions: return "", 0.0
+        if len(non_zero_positions) == 1:
+            # A single-position book is 100% concentrated by definition. The
+            # previous `<= 1 -> 0.0` early return masked the most concentrated
+            # case possible and let any single-position book blow through
+            # the concentration limit.
+            pos = non_zero_positions[0]
+            return pos.instrument, 1.0
+        # For multi-position books, measure concentration relative to the
+        # total *position* notional (not total_value which includes cash).
+        # Mixing cash into the denominator makes a single small position
+        # against a large cash buffer look diversified, which is wrong.
+        total_position_value = sum(abs(p.size) * p.avg_entry_price for p in non_zero_positions)
+        if total_position_value <= 1e-12: return "", 0.0
         max_concentration, max_instrument = 0.0, ""
-        for instrument, position in self.positions.items():
+        for position in non_zero_positions:
             position_value = abs(position.size) * position.avg_entry_price
-            concentration = position_value / total_value
+            concentration = position_value / total_position_value
             if concentration > max_concentration:
                 max_concentration = concentration
-                max_instrument = instrument
+                max_instrument = position.instrument
         return max_instrument, max_concentration
 
 

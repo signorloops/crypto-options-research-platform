@@ -80,12 +80,28 @@ async def _deribit_on_connected(
 
 
 def _okx_payload_item(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Extract first payload item; preserved for backwards compatibility."""
     if data.get("event"):
         return None
     payload = data.get("data", [])
     if not payload:
         return None
     return payload[0]
+
+
+def _okx_payload_items(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Extract all payload items from an OKX message.
+
+    OKX aggregates multiple trades per push; restricting to the first item
+    silently drops legitimate prints. Returns an empty list when there is no
+    data or the message is an event frame (subscribe ack, error, etc.).
+    """
+    if data.get("event"):
+        return []
+    payload = data.get("data", [])
+    if not payload:
+        return []
+    return [item for item in payload if isinstance(item, dict)]
 
 
 def _okx_channel_parser(
@@ -252,6 +268,15 @@ class WebSocketStream(ABC):
 
     async def _route_message(self, parsed: Dict) -> None:
         """Route parsed message to appropriate callback."""
+        # Internal control frame: OKX application-level ping -> reply with pong
+        if isinstance(parsed, dict) and parsed.get('type') == '_pong':
+            if self._websocket is not None:
+                try:
+                    await self._websocket.send("pong")
+                except Exception as e:
+                    logger.warning(f"Failed to send pong: {e}")
+            return
+
         # Handle orderbook reconstruction
         if isinstance(parsed, dict) and parsed.get('type') == 'orderbook':
             if hasattr(self, '_handle_orderbook_message'):
@@ -262,6 +287,12 @@ class WebSocketStream(ABC):
 
         msg_type = parsed.get('type')
         data = parsed.get('data')
+
+        # Batched trades: emit each trade individually to the shared 'trade' callbacks
+        if msg_type == 'trades' and isinstance(data, list):
+            for trade in data:
+                await self._emit('trade', trade)
+            return
 
         if msg_type and msg_type in self._callbacks:
             await self._emit(msg_type, data)
@@ -309,9 +340,19 @@ def _reconstructed_orderbook(
         if change_id != expected:
             logger.warning(f"{instrument}: Gap detected! Expected {expected}, got {change_id}")
             reconstructor.reset()
+            # After a gap the reconstructor is no longer synchronized; do not
+            # emit a partial book built from a single delta batch. Callers
+            # must re-request a snapshot via `initialize_snapshot` before any
+            # downstream consumer can trust the book.
+            return None
     if deltas:
         reconstructor.apply_deltas(deltas)
-    return reconstructor.get_order_book()
+    book = reconstructor.get_order_book()
+    # Only emit a book once the reconstructor has seen a snapshot; otherwise
+    # downstream consumers receive a partial/garbage book.
+    if not reconstructor.state.is_synchronized:
+        return None
+    return book
 
 
 class DeribitStream(WebSocketStream):
@@ -341,6 +382,11 @@ class DeribitStream(WebSocketStream):
                 received_data = params.get('data', {})
 
                 if 'trades' in channel:
+                    # Deribit trades channel delivers a list of trade dicts
+                    # in params.data, not a single dict. Parse each one.
+                    if isinstance(received_data, list):
+                        trades = [self._parse_trade(item) for item in received_data]
+                        return {'type': 'trades', 'data': trades}
                     return {'type': 'trade', 'data': self._parse_trade(received_data)}
                 elif 'ticker' in channel:
                     return {'type': 'tick', 'data': self._parse_tick(received_data)}
@@ -509,26 +555,45 @@ class OKXStream(WebSocketStream):
     ):
         super().__init__(config)
         self.instruments = instruments or []
-        self._order_book_callback = order_book_callback
-        self._trade_callback = trade_callback
+        # Register callbacks via the standard add_callback mechanism so they
+        # are actually invoked when messages arrive. Storing them as plain
+        # attributes without registering them silently drops all events.
+        if order_book_callback is not None:
+            self.add_callback("orderbook", order_book_callback)
+        if trade_callback is not None:
+            self.add_callback("trade", trade_callback)
 
     def get_ws_url(self, instruments: List[str]) -> str:
         """OKX uses single URL with subscription messages."""
         return self.WS_URL
 
     def parse_message(self, message: str) -> Optional[Dict]:
-        """Parse OKX message format."""
+        """Parse OKX message format.
+
+        Handles application-level ping/pong and emits all payload items for
+        trades channels (OKX batches multiple trades per message).
+        """
+        # OKX v5 sends a literal "ping" and expects a "pong" reply.
+        if message == "ping":
+            return {"type": "_pong", "data": None}
+
         try:
             data = json.loads(message)
             arg = data.get("arg", {})
             channel = arg.get("channel", "")
-            item = _okx_payload_item(data)
-            if item is None:
-                return None
             event_type, parser = _okx_channel_parser(self, channel)
             if event_type is None or parser is None:
                 return None
-            return {"type": event_type, "data": parser(item)}
+
+            items = _okx_payload_items(data)
+            if not items:
+                return None
+
+            if event_type == "trade":
+                # Emit all trades in the batch; _route_message fans them out.
+                return {"type": "trades", "data": [parser(item) for item in items]}
+            # For tick/orderbook, take the first item (single-item channels).
+            return {"type": event_type, "data": parser(items[0])}
         except json.JSONDecodeError:
             return None
 

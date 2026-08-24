@@ -172,7 +172,12 @@ class InversePowerOptionPricer:
             normals = InversePowerOptionPricer._generate_normals(n_paths, seed)
         st = InversePowerOptionPricer._terminal_prices(S, T, r, sigma, normals)
         payoff = InversePowerOptionPricer._payoff(st, K, power, option_type)
-        return float(np.exp(-r * T) * np.mean(payoff))
+        # Inverse options pay in BTC, so the price must be taken under the
+        # stock-numeraire measure: V = exp(-rT) * E^Q[payoff * S_T / S_0].
+        # The previous implementation used plain E^Q[payoff], which is wrong
+        # even at r = 0 and contradicts the closed-form InverseOptionPricer.
+        likelihood_ratio = st / S
+        return float(np.exp(-r * T) * np.mean(payoff * likelihood_ratio))
 
     @staticmethod
     def calculate_price_from_quote(

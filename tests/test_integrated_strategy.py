@@ -138,17 +138,27 @@ class TestQuoteGeneration:
 
     def test_inventory_skew(self):
         """Test that inventory affects quotes."""
+        from research.risk.circuit_breaker import CircuitBreakerConfig
+        # Disable the concentration check for this skew-focused test; the
+        # single-instrument book is always 100% concentrated by design and
+        # would otherwise halt the strategy before we can observe the skew.
+        cb_config = CircuitBreakerConfig(
+            position_concentration_limit=2.0,
+            concentration_warning_pct=2.0,
+        )
         strategy = IntegratedMarketMakingStrategy()
+        strategy.circuit_breaker.config = cb_config
         state = create_test_market_state(price=50000.0)
 
-        # Long position - should skew down (lower reservation price)
-        long_position = Position("BTC-USD", 5, 50000.0)
+        # Long position - should skew down (lower reservation price).
+        long_position = Position("BTC-USD", 0.2, 50000.0)
         quote_long = strategy.quote(state, long_position)
 
         strategy.reset()
+        strategy.circuit_breaker.config = cb_config
 
         # Short position - should skew up (higher reservation price)
-        short_position = Position("BTC-USD", -5, 50000.0)
+        short_position = Position("BTC-USD", -0.2, 50000.0)
         quote_short = strategy.quote(state, short_position)
 
         # Long position should have lower reservation price
@@ -524,12 +534,21 @@ class TestMetrics:
 
     def test_metrics_df(self):
         """Test metrics DataFrame conversion."""
+        from research.risk.circuit_breaker import CircuitBreakerConfig
+        # Disable the concentration check so the strategy keeps quoting on a
+        # single-instrument book; otherwise the circuit breaker halts after
+        # the first non-zero position.
         strategy = IntegratedMarketMakingStrategy()
+        strategy.circuit_breaker.config = CircuitBreakerConfig(
+            position_concentration_limit=2.0,
+            concentration_warning_pct=2.0,
+        )
 
-        # Generate several quotes
+        # Generate several quotes. Keep positions small so any other limits
+        # (size, daily loss) stay out of the way.
         for i in range(5):
             state = create_test_market_state(price=50000.0 + i * 100)
-            position = Position("BTC-USD", i, 50000.0)
+            position = Position("BTC-USD", i * 0.05, 50000.0)
             strategy.quote(state, position)
 
         df = strategy.get_metrics_df()

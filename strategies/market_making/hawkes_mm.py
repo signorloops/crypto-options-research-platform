@@ -121,6 +121,21 @@ def _inventory_size_bias(inventory: float, inventory_limit: float) -> Tuple[floa
     return 1.0, 1.0
 
 
+def _inventory_hard_cap(
+    inventory: float,
+    inventory_limit: float,
+) -> Tuple[bool, bool]:
+    """Return (block_bid, block_ask) flags for hard inventory caps.
+
+    When inventory reaches the configured limit, the strategy must stop
+    adding to that side entirely; otherwise the multiplicative biases alone
+    cannot prevent unbounded inventory growth.
+    """
+    block_bid = inventory >= inventory_limit
+    block_ask = inventory <= -inventory_limit
+    return block_bid, block_ask
+
+
 def _adverse_selection_size_bias(adverse_selection: bool, imbalance: float) -> Tuple[float, float]:
     if not adverse_selection:
         return 1.0, 1.0
@@ -239,7 +254,18 @@ class HawkesIntensityMonitor:
         return float(buy_intensity), float(sell_intensity)
 
     def detect_adverse_selection(self, current_time: float, price_change: float) -> bool:
-        """Detect potential adverse selection."""
+        """Detect potential adverse selection.
+
+        For a market maker, adverse selection materializes when the side we
+        just quoted gets picked off *before* the price moves in that
+        direction. The corrected trigger condition is:
+          - buy_int >> sell_int AND price_change > 0: our ask was hit right
+            before the price rose (we sold cheap).
+          - sell_int >> buy_int AND price_change < 0: our bid was hit right
+            before the price fell (we bought expensive).
+        The previous implementation fired on the *opposite* sign of
+        price_change, which flagged the profitable scenarios instead.
+        """
         if len(self.trade_times) < 10:
             return False
 
@@ -251,12 +277,14 @@ class HawkesIntensityMonitor:
         if intensity < expected_intensity * 2:  # Not intense enough
             return False
 
-        # Check for directional imbalance
-        if buy_int > sell_int * 2 and price_change < 0:
-            # Many buys but price dropping = potential adverse selection for sellers
+        # Check for directional imbalance aligned with the price move.
+        # Buy-side dominated flow that successfully pushes the price up means
+        # informed buyers picked off our ask -> adverse for us.
+        if buy_int > sell_int * 2 and price_change > 0:
             return True
-        elif sell_int > buy_int * 2 and price_change > 0:
-            # Many sells but price rising = potential adverse selection for buyers
+        # Sell-side dominated flow that pushes the price down means informed
+        # sellers picked off our bid -> adverse for us.
+        elif sell_int > buy_int * 2 and price_change < 0:
             return True
 
         return False
@@ -482,6 +510,16 @@ class HawkesMarketMaker(MarketMakingStrategy):
         )
         bid_size *= adv_bid_mult
         ask_size *= adv_ask_mult
+
+        # Hard inventory cap: stop adding to the side that is already at the
+        # configured limit. Without this the multiplicative biases can never
+        # prevent unbounded inventory growth.
+        block_bid, block_ask = _inventory_hard_cap(inventory, self.config.inventory_limit)
+        if block_bid:
+            bid_size = 0.0
+        if block_ask:
+            ask_size = 0.0
+
         return bid_size, ask_size
 
     def _compute_quote_context(

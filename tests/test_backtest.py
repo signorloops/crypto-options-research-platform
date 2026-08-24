@@ -537,7 +537,9 @@ class TestBacktestEngine:
         result = engine._compute_result(current_price=90.0)
 
         expected_realized = 0.1
-        expected_unrealized = 1.0 * (1.0 / 100.0 - 1.0 / 90.0)
+        # Unrealized PnL is mark-to-market inventory value in crypto terms:
+        # size * (current - entry) / current = 1.0 * (90 - 100) / 90
+        expected_unrealized = 1.0 * (90.0 - 100.0) / 90.0
         assert result.realized_pnl == pytest.approx(expected_realized)
         assert result.unrealized_pnl == pytest.approx(expected_unrealized)
         assert result.inventory_pnl == pytest.approx(expected_unrealized)

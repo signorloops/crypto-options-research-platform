@@ -247,12 +247,17 @@ class _IntegratedRealtimeCacheMixin:
         if redis:
             await redis.publish(channel, message)
 
-    async def subscribe(self, *channels: str):
-        """Subscribe to Redis channels."""
+    def subscribe(self, *channels: str):
+        """Subscribe to Redis channels.
+
+        Returns an async context manager. Use as:
+            async with manager.subscribe("chan") as pubsub:
+                async for msg in pubsub.listen(): ...
+        """
         redis = self.redis
         if not redis:
             raise RuntimeError("Redis not initialized")
-        return await redis.subscribe(*channels)
+        return redis.subscribe(*channels)
 
     async def is_rate_limited(self, key: str, max_requests: int, window_seconds: int) -> bool:
         """Check if rate limited."""

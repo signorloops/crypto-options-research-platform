@@ -124,10 +124,19 @@ async def _subscribe_okx_stream(
         else {"trade_callback": callback}
     )
     stream = OKXStream(instruments, **stream_kwargs)
+    # Register the stream BEFORE awaiting connect(): connect() runs the
+    # message loop until disconnect, so appending after it would never
+    # execute and the stream would leak from the client's tracking list.
+    client._active_streams.append(stream)
     try:
         await stream.connect()
-        client._active_streams.append(stream)
     except OKX_STREAM_EXCEPTIONS:
+        # Remove the stream we just registered so a failed connect does not
+        # leave a dead entry in the tracking list.
+        try:
+            client._active_streams.remove(stream)
+        except ValueError:
+            pass
         logger.exception(
             "Failed to subscribe %s stream",
             stream_kind,

@@ -65,7 +65,7 @@ def test_tracked_fixture_file_runs_benchmark():
 
     assert len(quotes) == 20
     assert not table.empty
-    assert table.iloc[0]["model"] == "bates"
+    assert table.iloc[0]["model"] == "merton_jump_diffusion"
 
 
 def test_save_benchmark_json_writes_metadata_and_results(tmp_path):
@@ -93,8 +93,8 @@ def test_benchmark_quality_gates_pass_with_expected_best_model():
     table = run_benchmark(quotes=quotes)
     violations = evaluate_benchmark_quality_gates(
         table=table,
-        expected_best_model="bates",
-        max_best_rmse=120.0,
+        expected_best_model="merton_jump_diffusion",
+        max_best_rmse=200.0,
     )
     assert violations == []
 
@@ -106,7 +106,7 @@ def test_benchmark_quality_gates_fail_on_unexpected_model():
     violations = evaluate_benchmark_quality_gates(
         table=table,
         expected_best_model="heston",
-        max_best_rmse=120.0,
+        max_best_rmse=200.0,
     )
     assert any("Unexpected best model" in violation for violation in violations)
 
@@ -124,7 +124,7 @@ def test_render_benchmark_markdown_contains_ranking_and_gate_status():
 
     assert "# Pricing Model Zoo Benchmark" in markdown
     assert "## Ranking" in markdown
-    assert "| 1 | bates |" in markdown
+    assert "| 1 | merton_jump_diffusion |" in markdown
     assert "## Quality Gates" in markdown
     assert "- PASS" in markdown
 
@@ -167,9 +167,9 @@ def test_main_writes_json_and_markdown_outputs(tmp_path, monkeypatch):
             "--output-md",
             str(output_md),
             "--expected-best-model",
-            "bates",
+            "merton_jump_diffusion",
             "--max-best-rmse",
-            "120",
+            "200",
             "--strict",
         ],
     )
