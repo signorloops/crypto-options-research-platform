@@ -51,7 +51,9 @@ def invalidation_patterns(
 
     if underlying:
         patterns.append(REALTIME_CACHE_PATTERNS["iv_term"].format(underlying=underlying))
-    else:
+    elif instrument is None:
+        # Only a full wipe (no scope at all) may clear every underlying's term
+        # structure; a single-instrument invalidation must not touch iv_term:*.
         patterns.append("iv_term:*")
     return patterns
 

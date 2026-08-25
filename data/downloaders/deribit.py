@@ -394,10 +394,23 @@ class DeribitClient(ExchangeInterface):
             if not batch:
                 break
             trades.extend(self._parse_trade_batch(batch=batch, instrument=instrument))
-            current_start = self._advance_trade_cursor(batch)
+            next_start = self._advance_trade_cursor(batch)
+            if next_start <= current_start:
+                # A full page of trades sharing one millisecond: re-querying
+                # from the boundary would return the same page forever. Skip
+                # the boundary millisecond to guarantee forward progress (the
+                # API cannot paginate within a millisecond anyway).
+                logger.warning(
+                    "Trade page did not advance the cursor; skipping boundary millisecond",
+                    extra=log_extra(instrument=instrument),
+                )
+                next_start = current_start + timedelta(milliseconds=1)
+            current_start = next_start
             await asyncio.sleep(TRADES_RATE_LIMIT_SLEEP_SECONDS)
 
-        return trades
+        # Boundary-millisecond trades are intentionally re-fetched (see
+        # _advance_trade_cursor), so identical prints can span two pages.
+        return self._dedupe_trades(trades)
 
     @staticmethod
     def _build_trade_query_params(
@@ -409,6 +422,10 @@ class DeribitClient(ExchangeInterface):
             "start_timestamp": int(current_start.timestamp() * 1000),
             "end_timestamp": int(window_end.timestamp() * 1000),
             "count": min(limit, MAX_TRADES_PER_REQUEST),
+            # Without an explicit sort order the API may return newest-first,
+            # and _advance_trade_cursor's batch[-1] would regress the cursor
+            # backwards through the window.
+            "sorting": "asc",
         }
 
     @staticmethod
@@ -429,8 +446,40 @@ class DeribitClient(ExchangeInterface):
 
     @staticmethod
     def _advance_trade_cursor(batch: List[Dict[str, Any]]) -> datetime:
-        last_time = batch[-1]["timestamp"]
-        return datetime.fromtimestamp(last_time / 1000, tz=timezone.utc) + timedelta(milliseconds=1)
+        # Defend against pages arriving newest-first despite sorting="asc":
+        # taking max() instead of batch[-1] keeps the cursor monotonic so a
+        # mis-sorted page cannot rewind pagination into an infinite loop.
+        last_time = max(t["timestamp"] for t in batch)
+        return datetime.fromtimestamp(last_time / 1000, tz=timezone.utc)
+
+    @staticmethod
+    def _dedupe_trades(trades: List[Trade]) -> List[Trade]:
+        """Drop trades already seen, keyed by trade_id when available.
+
+        Cursor advancement now re-queries from the boundary millisecond (no
+        +1ms) so trades sharing the boundary timestamp are not silently
+        skipped; identical boundary trades can then appear twice across
+        pages, which this dedupes. Trades without a trade_id fall back to a
+        (timestamp, price, size, side) composite key.
+        """
+        seen: set = set()
+        deduped: List[Trade] = []
+        for trade in trades:
+            key = (
+                trade.trade_id
+                if trade.trade_id
+                else (
+                    trade.timestamp,
+                    trade.price,
+                    trade.size,
+                    trade.side,
+                )
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(trade)
+        return deduped
 
     async def get_historical_volatility(
         self, currency: str = "BTC", period_days: int = 30

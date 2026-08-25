@@ -15,13 +15,27 @@ from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+# Transient transport-level failures only. RuntimeError/ValueError/TypeError
+# are deliberately excluded: a genuine code bug inside the session must
+# propagate to the caller instead of being classified as a "connection error"
+# and masked by reconnect cycles. (asyncio.TimeoutError is kept explicitly for
+# Python < 3.11, where it is not an OSError subclass.)
 STREAM_CONNECTION_EXCEPTIONS = (
     OSError,
     ConnectionError,
-    RuntimeError,
     asyncio.TimeoutError,
     WebSocketException,
 )
+
+
+class StreamConnectionError(ConnectionError):
+    """Raised when a stream exhausts its reconnect budget without recovering.
+
+    ``connect()`` used to return ``None`` silently in that case, leaving
+    callers with a dead stream and no error signal. Subclasses
+    ``ConnectionError`` so existing OSError/ConnectionError handlers keep
+    working.
+    """
 
 
 async def _run_websocket_session(
@@ -80,13 +94,15 @@ async def _deribit_on_connected(
 
 
 def _okx_payload_item(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Extract first payload item; preserved for backwards compatibility."""
-    if data.get("event"):
+    """DEPRECATED alias for the first item; kept for backwards compatibility.
+
+    OKX aggregates multiple trades per push and dropping all but the first
+    item silently loses prints — use :func:`_okx_payload_items` instead.
+    """
+    items = _okx_payload_items(data)
+    if not items:
         return None
-    payload = data.get("data", [])
-    if not payload:
-        return None
-    return payload[0]
+    return items[0]
 
 
 def _okx_payload_items(data: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -168,6 +184,28 @@ class WebSocketStream(ABC):
             60.0,  # Max 60 second backoff
         )
 
+    async def _raise_if_reconnects_exhausted(self) -> None:
+        """Signal fatal failure when the reconnect budget is exhausted.
+
+        The ``connect()`` loops used to fall out of their while-loop and
+        return ``None`` silently here — no exception, no error callback, no
+        log — leaving callers holding a dead stream. When we exit the loop
+        while still running, emit an 'error' event, log it, and raise.
+        (Exiting because ``disconnect()`` cleared ``_running`` is a normal
+        shutdown and stays silent.)
+        """
+        if self._running and self._reconnect_count >= self.config.max_reconnects:
+            message = (
+                f"{type(self).__name__}: reconnect budget exhausted after "
+                f"{self._reconnect_count}/{self.config.max_reconnects} attempts"
+            )
+            error = StreamConnectionError(message)
+            # Emit first so registered error handlers run even if the caller
+            # swallows the exception.
+            await self._emit("error", error)
+            logger.error(message)
+            raise error
+
     @staticmethod
     def _enqueue_with_drop_oldest(message_queue: asyncio.Queue, message: Any) -> bool:
         """Push message to queue, dropping oldest on overflow. True when no drop was needed."""
@@ -216,6 +254,7 @@ class WebSocketStream(ABC):
             except STREAM_CONNECTION_EXCEPTIONS as e:
                 logger.error(f"WebSocket error: {e}")
                 await asyncio.sleep(self._next_reconnect_backoff())
+        await self._raise_if_reconnects_exhausted()
 
     async def _produce_messages(self, websocket: Any, message_queue: asyncio.Queue) -> None:
         """Read from websocket and enqueue messages with drop-oldest backpressure."""
@@ -539,6 +578,7 @@ class DeribitStream(WebSocketStream):
             except STREAM_CONNECTION_EXCEPTIONS as e:
                 logger.error(f"WebSocket error: {e}")
                 await asyncio.sleep(self._next_reconnect_backoff())
+        await self._raise_if_reconnects_exhausted()
 
 
 class OKXStream(WebSocketStream):
@@ -664,6 +704,7 @@ class OKXStream(WebSocketStream):
             except STREAM_CONNECTION_EXCEPTIONS as e:
                 logger.error(f"WebSocket error: {e}")
                 await asyncio.sleep(self._next_reconnect_backoff())
+        await self._raise_if_reconnects_exhausted()
 
 
 class MultiExchangeStream:

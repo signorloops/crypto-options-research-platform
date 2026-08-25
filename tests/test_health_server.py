@@ -140,6 +140,19 @@ def test_connection_target_prefers_url_and_fallback(monkeypatch):
     )
 
 
+def test_connection_target_keeps_explicit_zero_port(monkeypatch):
+    """An explicit port 0 in a URL must not be replaced by the default port.
+
+    `parsed.port or default_port` treated port 0 as missing and silently
+    substituted the default (e.g. 6379), checking the wrong service.
+    """
+    monkeypatch.setenv("REDIS_URL", "redis://cache.local:0/1")
+    assert health_server._connection_target("REDIS_URL", "REDIS_HOST", "REDIS_PORT", 6379) == (
+        "cache.local",
+        0,
+    )
+
+
 def test_memory_healthy_respects_threshold(monkeypatch):
     """Memory check should fail when usage exceeds configured threshold."""
     monkeypatch.setattr(health_server, "_memory_usage_mb", lambda: 960.0)

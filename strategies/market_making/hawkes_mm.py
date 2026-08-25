@@ -364,12 +364,8 @@ class HawkesMarketMaker(MarketMakingStrategy):
         self._seen_trade_order: deque = deque()
         self._seen_trade_key_limit: int = max(2000, self.config.estimation_window * 50)
 
-    def _build_trade_key(self, trade) -> Tuple:
-        """Build a stable key for deduplicating trade ingestion across quote calls."""
-        trade_id = getattr(trade, "trade_id", None)
-        if trade_id not in (None, ""):
-            return ("id", str(trade_id))
-
+    def _fallback_base_key(self, trade) -> Tuple:
+        """Build the identity tuple for trades that carry no trade_id."""
         ts = trade.timestamp.timestamp() if hasattr(trade.timestamp, "timestamp") else float(trade.timestamp)
         side_val = trade.side.value if hasattr(trade.side, "value") else trade.side
         return (
@@ -380,6 +376,21 @@ class HawkesMarketMaker(MarketMakingStrategy):
             float(getattr(trade, "size", 1.0)),
             str(side_val),
         )
+
+    def _build_trade_key(self, trade, occurrence: int = 0) -> Tuple:
+        """Build a stable key for deduplicating trade ingestion across quote calls.
+
+        For trades without a trade_id, the caller passes the print's
+        occurrence index within the presented window. Exchange feeds
+        routinely report multiple identical same-second, same-price,
+        same-size prints in illiquid option books; the occurrence index
+        keeps each of those prints a distinct (ingestible) trade instead of
+        collapsing them into one and undercounting intensity.
+        """
+        trade_id = getattr(trade, "trade_id", None)
+        if trade_id not in (None, ""):
+            return ("id", str(trade_id))
+        return (*self._fallback_base_key(trade), int(occurrence))
 
     def _remember_trade_key(self, key: Tuple) -> None:
         """Track recently ingested trades with bounded memory."""
@@ -437,8 +448,19 @@ class HawkesMarketMaker(MarketMakingStrategy):
         if not hasattr(state, "recent_trades") or not state.recent_trades:
             return
 
+        # Occurrence index per fallback base key within this presented window.
+        # Identical prints (no trade_id) each get their own index, so they are
+        # all ingested; a re-presented window yields the same indices and the
+        # membership check still skips already-seen trades.
+        window_occurrences: Dict[Tuple, int] = {}
         for trade in state.recent_trades:
-            trade_key = self._build_trade_key(trade)
+            if getattr(trade, "trade_id", None) in (None, ""):
+                base_key = self._fallback_base_key(trade)
+                occurrence = window_occurrences.get(base_key, 0)
+                window_occurrences[base_key] = occurrence + 1
+                trade_key = self._build_trade_key(trade, occurrence)
+            else:
+                trade_key = self._build_trade_key(trade)
             if trade_key in self._seen_trade_keys:
                 continue
             side_val = trade.side.value if hasattr(trade.side, "value") else trade.side

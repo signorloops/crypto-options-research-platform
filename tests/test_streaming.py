@@ -3,7 +3,7 @@ Tests for WebSocket streaming functionality.
 """
 import asyncio
 import json
-from datetime import timezone
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -14,6 +14,7 @@ from data.streaming import (
     MultiExchangeStream,
     OKXStream,
     StreamConfig,
+    StreamConnectionError,
     WebSocketStream,
 )
 
@@ -435,6 +436,81 @@ class TestOKXStream:
         assert ob.bids[0].price == 49999.0
         assert ob.asks[0].price == 50001.0
 
+    def test_parse_trade_batch_emits_every_trade(self, okx_stream):
+        """OKX aggregates multiple trades per push; none may be dropped.
+
+        A previous parser returned only payload[0], silently losing every
+        trade after the first in a batch.
+        """
+        message = json.dumps({
+            'arg': {'channel': 'trades', 'instId': 'BTC-USD-240628-50000-C'},
+            'data': [
+                {
+                    'ts': '1640995200000',
+                    'instId': 'BTC-USD-240628-50000-C',
+                    'px': '50000.00',
+                    'sz': '1.500',
+                    'side': 'buy',
+                    'tradeId': '111'
+                },
+                {
+                    'ts': '1640995200001',
+                    'instId': 'BTC-USD-240628-50000-C',
+                    'px': '50001.00',
+                    'sz': '2.500',
+                    'side': 'sell',
+                    'tradeId': '222'
+                },
+                {
+                    'ts': '1640995200002',
+                    'instId': 'BTC-USD-240628-50000-C',
+                    'px': '50002.00',
+                    'sz': '0.500',
+                    'side': 'buy',
+                    'tradeId': '333'
+                }
+            ]
+        })
+
+        result = okx_stream.parse_message(message)
+
+        assert result['type'] == 'trades'
+        trades = result['data']
+        assert len(trades) == 3
+        assert [t.trade_id for t in trades] == ['111', '222', '333']
+        assert [t.price for t in trades] == [50000.0, 50001.0, 50002.0]
+
+    @pytest.mark.asyncio
+    async def test_route_message_fans_out_batched_trades(self, okx_stream):
+        """Batched 'trades' payloads must reach 'trade' callbacks individually."""
+        trade_callback = MagicMock()
+        okx_stream.add_callback('trade', trade_callback)
+
+        trades = [
+            Trade(
+                timestamp=datetime(2024, 1, 1, tzinfo=timezone.utc),
+                instrument='BTC-USD-240628-50000-C',
+                price=50000.0,
+                size=1.0,
+                side=OrderSide.BUY,
+                trade_id='111',
+            ),
+            Trade(
+                timestamp=datetime(2024, 1, 1, tzinfo=timezone.utc),
+                instrument='BTC-USD-240628-50000-C',
+                price=50001.0,
+                size=2.0,
+                side=OrderSide.SELL,
+                trade_id='222',
+            ),
+        ]
+
+        await okx_stream._route_message({'type': 'trades', 'data': trades})
+
+        assert trade_callback.call_count == 2
+        trade_callback.assert_any_call(trades[0])
+        trade_callback.assert_any_call(trades[1])
+
     def test_parse_event_message(self, okx_stream):
         """Test parsing event message (subscribe response)."""
         message = json.dumps({
@@ -620,8 +696,11 @@ class TestIntegration:
     @pytest.mark.asyncio
     async def test_reconnection_logic(self):
         """Test reconnection on connection failure."""
+        # max_reconnects must exceed what the 0.05s stopper allows, otherwise
+        # the budget is exhausted first and connect() now (correctly) raises
+        # StreamConnectionError instead of returning silently.
         stream = MockWebSocketStream(
-            config=StreamConfig(max_reconnects=2, reconnect_interval=0.01)
+            config=StreamConfig(max_reconnects=100, reconnect_interval=0.01)
         )
 
         with patch('websockets.connect', side_effect=ConnectionError("Test error")):
@@ -637,3 +716,68 @@ class TestIntegration:
 
             # Should have attempted reconnection
             assert stream._reconnect_count > 0
+
+    @pytest.mark.asyncio
+    async def test_exhausted_reconnects_raise_and_emit_error(self):
+        """Exhausted reconnect budget must not return silently.
+
+        Previously connect() fell out of its loop and returned None when
+        _reconnect_count reached max_reconnects: no exception, no error
+        callback, no log. The fix raises StreamConnectionError after
+        emitting the 'error' event.
+        """
+        stream = MockWebSocketStream(
+            config=StreamConfig(max_reconnects=2, reconnect_interval=0.01)
+        )
+        error_events = []
+        stream.add_callback('error', error_events.append)
+
+        with patch('websockets.connect', side_effect=ConnectionError("Test error")):
+            stream._running = True
+            with pytest.raises(StreamConnectionError, match="reconnect budget exhausted"):
+                await stream.connect(['TEST'])
+
+        assert stream._reconnect_count >= stream.config.max_reconnects
+        assert len(error_events) == 1
+        assert isinstance(error_events[0], StreamConnectionError)
+
+    @pytest.mark.asyncio
+    async def test_code_bug_not_treated_as_connection_error(self):
+        """RuntimeError from the session must propagate, not trigger reconnects.
+
+        STREAM_CONNECTION_EXCEPTIONS used to include RuntimeError (and
+        ValueError/TypeError), so any code bug inside the session loop was
+        misclassified as a connection error and masked by reconnect cycles.
+        The tuple now contains network/websocket errors only.
+        """
+        stream = MockWebSocketStream(
+            config=StreamConfig(max_reconnects=3, reconnect_interval=0.01)
+        )
+        stream._running = True
+
+        with patch('websockets.connect', side_effect=RuntimeError("genuine code bug")):
+            with pytest.raises(RuntimeError, match="genuine code bug"):
+                await stream.connect(['TEST'])
+
+        # No reconnect attempt was burned on a programming error.
+        assert stream._reconnect_count == 0
+
+    @pytest.mark.asyncio
+    async def test_connection_lifecycle_returns_silently_on_disconnect(self):
+        """A normal disconnect() during reconnect attempts stays silent."""
+        stream = MockWebSocketStream(
+            config=StreamConfig(max_reconnects=50, reconnect_interval=0.01)
+        )
+
+        with patch('websockets.connect', side_effect=ConnectionError("Test error")):
+            stream._running = True
+
+            async def stop_stream():
+                await asyncio.sleep(0.03)
+                stream._running = False
+
+            asyncio.create_task(stop_stream())
+            # Must return without raising: _running cleared by disconnect().
+            await stream.connect(['TEST'])
+
+        assert stream._reconnect_count > 0

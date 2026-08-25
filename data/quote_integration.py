@@ -97,12 +97,13 @@ def _normalized_quotes_frame(
 
 def _finalize_normalized_quotes(out: pd.DataFrame) -> pd.DataFrame:
     out = out.dropna(subset=["price"])
-    if out.empty:
-        raise ValueError("Quote data has no valid rows after normalization")
-    out["timestamp"] = out["timestamp"].ffill().bfill()
+    # Rows with an unparseable timestamp are dropped, not patched. The frames
+    # mix many instruments, so an ffill().bfill() here would stamp the row
+    # with a *different* instrument's time and fabricate a false alignment key
+    # downstream.
     out = out.dropna(subset=["timestamp"])
     if out.empty:
-        raise ValueError("Quote data requires at least one valid timestamp")
+        raise ValueError("Quote data has no valid rows after normalization")
     out["expiry_bucket"] = out["expiry_years"].astype(float).round(4)
     out["delta_bucket"] = out["delta"].astype(float).abs().round(2)
     out["ts_bucket"] = pd.to_datetime(out["timestamp"]).dt.floor("min")
@@ -232,8 +233,13 @@ def _merge_quotes_by_nearest_timestamp(
 ) -> pd.DataFrame:
     key_cols = ["symbol", "option_type", "expiry_bucket", "delta_bucket"]
     tolerance = pd.Timedelta(seconds=max(float(align_tolerance_seconds), 0.0))
-    cex_asof = cex.sort_values([*key_cols, "timestamp"])
-    defi_asof = defi.sort_values([*key_cols, "timestamp"])
+    # merge_asof requires the `on` column to be globally monotonic across ALL
+    # groups, not just within each `by` group. Sorting by [*key_cols,
+    # "timestamp"] leaves the timestamp reset per group and raises
+    # "left keys must be sorted" as soon as there is more than one
+    # symbol/type bucket.
+    cex_asof = cex.sort_values("timestamp")
+    defi_asof = defi.sort_values("timestamp")
     merged = pd.merge_asof(
         cex_asof,
         defi_asof,

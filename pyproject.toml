@@ -35,7 +35,9 @@ dependencies = [
     "pyarrow>=12.0.0",
     "pydantic>=2.0.0",
     "hmmlearn>=0.3.0",
-    "duckdb>=0.9.0",
+    # duckdb>=1.1 required: time_bucket(INTERVAL '1 month', ...) used by the
+    # '1M' resampling path is unavailable in older releases.
+    "duckdb>=1.1",
     "redis>=5.0.0",
     "fastapi>=0.115.0",
     "httpx>=0.27.0",

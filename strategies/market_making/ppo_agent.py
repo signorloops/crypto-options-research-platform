@@ -48,6 +48,12 @@ class PPOConfig:
     max_spread_bps: float = 100.0
     max_skew_bps: float = 50.0  # Inventory skew
 
+    # Quote-size scale bounds. The training environment and the serving-time
+    # clipper must share these: training on an action range the live strategy
+    # can never express (or vice versa) silently skews the learned policy.
+    min_size_scale: float = 0.1
+    max_size_scale: float = 2.0
+
     quote_size: float = 1.0
     inventory_limit: float = 10.0
 
@@ -55,9 +61,11 @@ class PPOConfig:
 def _ppo_spread_offsets_and_size_scale(
     *, action: np.ndarray, config: PPOConfig
 ) -> tuple[float, float, float]:
+    # Bounds are derived from PPOConfig so the serving-time clip matches the
+    # environment's action sanitization exactly (see MarketMakingEnv).
     bid_offset_bps = float(np.clip(action[0], config.min_spread_bps / 2, config.max_spread_bps / 2))
     ask_offset_bps = float(np.clip(action[1], config.min_spread_bps / 2, config.max_spread_bps / 2))
-    size_scale = float(np.clip(action[2], 0.1, 2.0))
+    size_scale = float(np.clip(action[2], config.min_size_scale, config.max_size_scale))
     return bid_offset_bps, ask_offset_bps, size_scale
 
 
@@ -289,22 +297,36 @@ class MarketMakingEnv:
         market_data: pd.DataFrame,
         episode_length: int = 1000,
         random_seed: Optional[int] = None,
+        config: Optional[PPOConfig] = None,
     ):
         self.market_data = market_data.reset_index(drop=True)
-        self.episode_length = episode_length
+        # Clamp so an episode can never index past the end of the frame
+        # (episode_length + warmup > len(data) previously crashed on reset).
+        self.episode_length = int(max(1, min(episode_length, len(self.market_data) - 1)))
         self.current_step = 0
         self.episode_start = 0
         self.rng = np.random.default_rng(random_seed)
 
         self.price_mean = market_data["price"].mean()
-        self.price_std = market_data["price"].std()
+        # Guard against constant-price synthetic data: a zero (or NaN, from a
+        # single-row frame) std would turn the normalized price into
+        # inf/NaN and poison training.
+        price_std = float(market_data["price"].std())
+        if not np.isfinite(price_std) or price_std <= 0.0:
+            price_std = 1e-8
+        self.price_std = price_std
         self.position = 0.0
         self.cash = 0.0
         self.trades: List[Dict] = []
-        self.min_offset_bps = 1.0
-        self.max_offset_bps = 200.0
-        self.min_size_scale = 0.1
-        self.max_size_scale = 5.0
+        # Action bounds must mirror the serving-time clip in
+        # _ppo_spread_offsets_and_size_scale so the policy trains on the same
+        # range it can express at quote time. Derived from PPOConfig so the
+        # two can never drift apart.
+        self.config = config or PPOConfig()
+        self.min_offset_bps = self.config.min_spread_bps / 2
+        self.max_offset_bps = self.config.max_spread_bps / 2
+        self.min_size_scale = self.config.min_size_scale
+        self.max_size_scale = self.config.max_size_scale
         self.max_fill_probability = 0.99
 
     def reset(self) -> np.ndarray:
@@ -724,6 +746,7 @@ class PPOMarketMaker(MarketMakingStrategy):
             historical_data,
             episode_length=1000,
             random_seed=self.config.random_seed,
+            config=self.config,
         )
         sample_state = self.env.reset()
         self._init_network(len(sample_state))

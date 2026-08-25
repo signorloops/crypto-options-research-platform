@@ -260,6 +260,42 @@ class TestMultiInstrumentReconstructor:
 
         assert not btc_recon.state.is_synchronized
 
+    def test_reconstructor_count_is_bounded(self):
+        """重建器数量必须有限，防止期权市场数千合约导致内存无限增长。"""
+        multi = MultiInstrumentReconstructor(max_reconstructors=3)
+
+        for i in range(10):
+            multi.get_or_create(f"OPTION-{i}")
+
+        assert len(multi.reconstructors) == 3
+
+    def test_lru_evicts_least_recently_used(self):
+        """应淘汰最久未使用的重建器，且再次访问会刷新其热度。"""
+        multi = MultiInstrumentReconstructor(max_reconstructors=2)
+
+        first = multi.get_or_create("BTC-PERPETUAL")
+        multi.get_or_create("ETH-PERPETUAL")
+        # Touch BTC again so ETH becomes the least-recently-used entry.
+        assert multi.get_or_create("BTC-PERPETUAL") is first
+        multi.get_or_create("SOL-PERPETUAL")
+
+        assert set(multi.reconstructors) == {"BTC-PERPETUAL", "SOL-PERPETUAL"}
+        assert "ETH-PERPETUAL" not in multi.reconstructors
+
+        # Evicted instruments are transparently recreated on next access
+        # (here BTC becomes the new LRU entry and is evicted instead).
+        recreated = multi.get_or_create("ETH-PERPETUAL")
+        assert recreated.instrument == "ETH-PERPETUAL"
+        assert set(multi.reconstructors) == {"SOL-PERPETUAL", "ETH-PERPETUAL"}
+
+    def test_default_cap_is_applied(self):
+        """默认上限应为 1000。"""
+        multi = MultiInstrumentReconstructor()
+        assert multi.max_reconstructors == 1000
+
+        multi_tiny = MultiInstrumentReconstructor(max_reconstructors=0)
+        assert multi_tiny.max_reconstructors >= 1
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

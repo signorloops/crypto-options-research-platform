@@ -374,18 +374,57 @@ class TestImpliedVolatility:
         assert abs(iv - true_sigma) < 0.05, f"IV mismatch: {iv} vs {true_sigma}"
 
     def test_iv_invalid_price(self):
-        """Test IV with invalid price."""
+        """Test IV with invalid price.
+
+        Updated: a non-positive price has no implied vol. Returning NaN (not
+        0.0) lets surface fitters drop the quote via isnan instead of silently
+        injecting a bogus low-vol point.
+        """
         iv = InverseOptionPricer.calculate_implied_volatility(
             -1, 50000, 50000, 0.25, 0.05, "call"
         )
-        assert iv == 0.0
+        assert np.isnan(iv)
 
     def test_iv_zero_price(self):
-        """Test IV with zero price."""
+        """Test IV with zero price.
+
+        Updated: zero premium is not invertible; NaN signals "exclude quote"
+        rather than masquerading as a valid 0.0 vol.
+        """
         iv = InverseOptionPricer.calculate_implied_volatility(
             0, 50000, 50000, 0.25, 0.05, "call"
         )
-        assert iv == 0.0
+        assert np.isnan(iv)
+
+    def test_iv_newton_falls_back_to_bisection_on_validation_error(self, monkeypatch):
+        """ValidationError raised inside the Newton loop must trigger bisection.
+
+        The pricer raises core.exceptions.ValidationError (a CORPError, not a
+        ValueError) for out-of-range inputs — e.g. the rho finite difference
+        bumping r past MAX_REASONABLE_RATE. Previously that exception escaped
+        the Newton update's except clause and propagated to the caller instead
+        of falling back to bisection.
+        """
+        S, K, T, r, sigma_true = 50000, 50000, 0.25, 0.05, 0.60
+        price = InverseOptionPricer.calculate_price(S, K, T, r, sigma_true, "call")
+
+        real_greeks = InverseOptionPricer.calculate_greeks
+
+        def failing_greeks(*args, **kwargs):
+            raise ValidationError("simulated out-of-range bump", field="r", value=1.1)
+
+        monkeypatch.setattr(InverseOptionPricer, "calculate_greeks", staticmethod(failing_greeks))
+        try:
+            iv = InverseOptionPricer.calculate_implied_volatility(
+                price, S, K, T, r, "call", tol=1e-9
+            )
+        finally:
+            monkeypatch.setattr(InverseOptionPricer, "calculate_greeks", staticmethod(real_greeks))
+
+        # Bisection fallback still recovers the vol (its price_fn only needs
+        # calculate_price, which was never patched to fail).
+        assert np.isfinite(iv)
+        assert abs(iv - sigma_true) < 0.01
 
     def test_iv_short_maturity_anchor_stabilization_is_opt_in(self):
         """Short-dated IV stabilization should keep result closer to anchor only when enabled."""

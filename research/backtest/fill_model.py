@@ -22,7 +22,9 @@ class FillSimulatorConfig:
         default_factory=lambda: float(os.getenv("BT_LATENCY_STD_MS", "20.0"))
     )
 
-    # Queue position model
+    # Queue position model - 从环境变量读取.
+    # True: our order sits at a uniformly random depth within the same-price
+    # queue; False: deterministic back-of-queue (all same-price depth ahead).
     queue_position_random: bool = field(
         default_factory=lambda: os.getenv("BT_QUEUE_POSITION_RANDOM", "true").lower() == "true"
     )
@@ -32,7 +34,9 @@ class FillSimulatorConfig:
         default_factory=lambda: float(os.getenv("BT_ADVERSE_SELECTION_FACTOR", "0.3"))
     )
 
-    # Minimum profitability (avoid fills that would be instant losses) - 从环境变量读取
+    # Minimum profitability (avoid fills that would be instant losses) - 从环境变量读取.
+    # Fills whose after-cost edge versus the mid price is below this many bps
+    # are rejected instead of executed.
     min_profit_bps: float = field(
         default_factory=lambda: float(os.getenv("BT_MIN_PROFIT_BPS", "0.5"))
     )
@@ -155,6 +159,28 @@ def _spread_capture_against_mid(
     return float(edge * size)
 
 
+def _after_cost_edge_clears_min_profit(
+    *,
+    mid_price: float,
+    fill_price: float,
+    side: OrderSide,
+    min_profit_bps: float,
+) -> bool:
+    """Check that the after-cost edge of a fill versus mid clears min_profit_bps.
+
+    For a resting BUY the edge is `mid - fill_price`; for a resting SELL it is
+    `fill_price - mid`. Measured after all execution costs (fees, adverse
+    selection slippage) have already been folded into `fill_price`. A
+    non-positive threshold disables the gate, matching a "trade whatever
+    crosses the quote" taker-free setting.
+    """
+    if min_profit_bps <= 0 or mid_price <= 0:
+        return True
+    edge = mid_price - fill_price if side == OrderSide.BUY else fill_price - mid_price
+    edge_bps = edge / mid_price * 10_000.0
+    return bool(edge_bps >= min_profit_bps)
+
+
 def _sample_latency_ms(config: FillSimulatorConfig, rng: np.random.Generator) -> float:
     """Draw non-negative latency from configured base/std parameters."""
     if config.latency_std_ms <= 0:
@@ -275,6 +301,18 @@ class RealisticFillSimulator:
             return None
         fill_size = min(trade.size, our_size)
         reference_mid = market_state.order_book.mid_price or market_state.spot_price
+        fill_price, slippage_cost = _apply_slippage_to_fill(base_price=base_price, trade_size=fill_size, order_book=market_state.order_book, side=our_side, apply_order_book_slippage_fn=self._apply_order_book_slippage, cost_against_side_fn=self._cost_against_side)
+        fill_price, transaction_cost, adverse_selection_cost = _apply_post_slippage_costs(fill_price=fill_price, side=our_side, size=fill_size, transaction_cost_bps=transaction_cost_bps, adverse_selection_factor=self.config.adverse_selection_factor, is_adverse=self._check_adverse_selection(trade, market_state), cost_against_side_fn=self._cost_against_side)
+        # Profitability gate: a resting quote only trades when its after-cost
+        # edge versus the reference mid clears min_profit_bps; otherwise the
+        # fill is an instant mark-to-mid loss and is skipped.
+        if not _after_cost_edge_clears_min_profit(
+            mid_price=float(reference_mid),
+            fill_price=fill_price,
+            side=our_side,
+            min_profit_bps=self.config.min_profit_bps,
+        ):
+            return None
         self.total_spread_captured += _spread_capture_against_mid(
             mid_price=float(reference_mid),
             quote_price=base_price,
@@ -282,9 +320,7 @@ class RealisticFillSimulator:
             size=fill_size,
         )
         self.spread_capture_notional += max(float(reference_mid), 0.0) * fill_size
-        fill_price, slippage_cost = _apply_slippage_to_fill(base_price=base_price, trade_size=fill_size, order_book=market_state.order_book, side=our_side, apply_order_book_slippage_fn=self._apply_order_book_slippage, cost_against_side_fn=self._cost_against_side)
         self.slippage_cost += slippage_cost
-        fill_price, transaction_cost, adverse_selection_cost = _apply_post_slippage_costs(fill_price=fill_price, side=our_side, size=fill_size, transaction_cost_bps=transaction_cost_bps, adverse_selection_factor=self.config.adverse_selection_factor, is_adverse=self._check_adverse_selection(trade, market_state), cost_against_side_fn=self._cost_against_side)
         self.transaction_cost_paid += transaction_cost; self.adverse_selection_cost += adverse_selection_cost
         return Fill(
             timestamp=trade.timestamp,
@@ -307,7 +343,14 @@ class RealisticFillSimulator:
     def _queue_depth_ahead(
         self, quote: QuoteAction, side: OrderSide, order_book: OrderBook
     ) -> float:
-        """Approximate queue depth ahead of our quote."""
+        """Approximate queue depth ahead of our quote.
+
+        When `queue_position_random` is enabled our order is placed at a
+        uniformly random position within the same-price queue, so the depth
+        ahead is a random fraction of that level's size; otherwise the
+        deterministic back-of-queue assumption (all same-price depth ahead)
+        applies.
+        """
         if side == OrderSide.BUY:
             our_price = quote.bid_price
             levels = order_book.bids
@@ -322,8 +365,14 @@ class RealisticFillSimulator:
             elif side == OrderSide.SELL and level.price < our_price:
                 volume_ahead += level.size
             elif level.price == our_price:
-                # Random queue placement approximation: half of same-price depth ahead.
-                volume_ahead += 0.5 * level.size
+                # Random queue placement draws a uniform fraction of the
+                # same-price depth ahead; deterministic mode is back-of-queue.
+                fraction = (
+                    float(self.rng.random())
+                    if self.config.queue_position_random
+                    else 1.0
+                )
+                volume_ahead += fraction * level.size
                 break
             else:
                 break

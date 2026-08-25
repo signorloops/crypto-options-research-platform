@@ -81,22 +81,29 @@ def _log_return(new_mid: float, previous_mid: float) -> float | None:
     return ret
 
 
-def _apply_online_sigma(config: ASConfig, sigma_raw: float | None) -> None:
+def _apply_online_sigma(config: ASConfig, sigma_raw: float | None) -> float | None:
+    """Clip a raw sigma estimate to configured bounds.
+
+    Pure function: returns the clipped value instead of mutating the config,
+    because an ASConfig may be shared across strategy replicas (experiment
+    grids) and calibration of one replica must not contaminate the others.
+    """
     if sigma_raw is None:
-        return
-    config.sigma = float(np.clip(sigma_raw, config.min_sigma, config.max_sigma))
+        return None
+    return float(np.clip(sigma_raw, config.min_sigma, config.max_sigma))
 
 
-def _apply_online_k(config: ASConfig, k_raw: float | None) -> None:
+def _apply_online_k(config: ASConfig, k_raw: float | None) -> float | None:
+    """Clip a raw k estimate to configured bounds (pure; never mutates config)."""
     if k_raw is None:
-        return
-    config.k = float(np.clip(k_raw, config.min_k, config.max_k))
+        return None
+    return float(np.clip(k_raw, config.min_k, config.max_k))
 
 
-def _online_calibration_metadata(config: ASConfig) -> Dict[str, float]:
+def _online_calibration_metadata(sigma: float, k: float) -> Dict[str, float]:
     return {
-        "calibrated_sigma": float(config.sigma),
-        "calibrated_k": float(config.k),
+        "calibrated_sigma": float(sigma),
+        "calibrated_k": float(k),
     }
 
 
@@ -125,8 +132,12 @@ class AvellanedaStoikov(MarketMakingStrategy):
         self.config = config or ASConfig()
         self.name = "AvellanedaStoikov"
         self._start_timestamp = None  # Track start timestamp for (T-t) calculation
-        self._initial_sigma = float(self.config.sigma)
-        self._initial_k = float(self.config.k)
+        self._last_timestamp = None  # Last observed timestamp for elapsed reporting
+        # Calibrated values live on the instance so that sharing one ASConfig
+        # across strategy replicas (experiment grids) cannot cross-contaminate
+        # their calibrations; self.config stays immutable.
+        self._effective_sigma = float(self.config.sigma)
+        self._effective_k = float(self.config.k)
         self._last_mid_price: float = 0.0
         window = max(5, int(self.config.calibration_window))
         self._returns_window = deque(maxlen=window)
@@ -149,28 +160,37 @@ class AvellanedaStoikov(MarketMakingStrategy):
         sigma_raw = _estimate_sigma_from_returns(
             self._returns_window, self.config.annualization_periods
         )
-        _apply_online_sigma(self.config, sigma_raw)
+        clipped_sigma = _apply_online_sigma(self.config, sigma_raw)
+        if clipped_sigma is not None:
+            self._effective_sigma = clipped_sigma
         k_raw = _estimate_inventory_adjusted_k(
             self._trade_intensity_window,
             inventory,
             self.config.inventory_limit,
         )
-        _apply_online_k(self.config, k_raw)
-        return _online_calibration_metadata(self.config)
+        clipped_k = _apply_online_k(self.config, k_raw)
+        if clipped_k is not None:
+            self._effective_k = clipped_k
+        return _online_calibration_metadata(self._effective_sigma, self._effective_k)
 
     def _compute_time_remaining(self, state: MarketState) -> float:
         """Compute remaining horizon in years from market-state timestamps."""
+        elapsed_seconds = self._elapsed_seconds_since_start(state.timestamp)
+        seconds_per_year = 365.25 * 24 * 3600
+        trading_horizon_seconds = self.config.T * seconds_per_year
+        return max(0.0, trading_horizon_seconds - elapsed_seconds) / seconds_per_year
+
+    def _elapsed_seconds_since_start(self, timestamp) -> float:
+        """Elapsed seconds since the first quote, in a timestamp-format-agnostic way."""
         if self._start_timestamp is None:
-            self._start_timestamp = state.timestamp
-        delta = state.timestamp - self._start_timestamp
+            self._start_timestamp = timestamp
+        delta = timestamp - self._start_timestamp
         if hasattr(delta, "total_seconds"):
             elapsed_seconds = delta.total_seconds()
         else:
             # Support numpy datetime64/timedelta64 used by some backtest loaders.
             elapsed_seconds = float(delta / np.timedelta64(1, "s"))
-        seconds_per_year = 365.25 * 24 * 3600
-        trading_horizon_seconds = self.config.T * seconds_per_year
-        return max(0.0, trading_horizon_seconds - elapsed_seconds) / seconds_per_year
+        return max(0.0, float(elapsed_seconds))
 
     def _compute_effective_inventory(self, inventory: float) -> Tuple[float, float]:
         """Transform inventory for bounded-inventory pricing."""
@@ -227,7 +247,9 @@ class AvellanedaStoikov(MarketMakingStrategy):
             raise ValueError("Cannot quote without valid order book")
         q = position.size
         calibration_meta = self._update_online_calibration(state, q)  # Current inventory
-        gamma, sigma, k = self.config.gamma, self.config.sigma, self.config.k
+        self._last_timestamp = state.timestamp
+        gamma = self.config.gamma
+        sigma, k = self._effective_sigma, self._effective_k
         time_remaining = self._compute_time_remaining(state)
         inventory_ratio, effective_q = self._compute_effective_inventory(q)
         reservation_price = mid - effective_q * gamma * sigma**2 * time_remaining
@@ -263,23 +285,33 @@ class AvellanedaStoikov(MarketMakingStrategy):
 
     def get_internal_state(self) -> Dict:
         """Return AS-specific parameters."""
-        elapsed = 0.0 if self._start_timestamp is None else 0.0
+        elapsed = (
+            0.0
+            if self._start_timestamp is None or self._last_timestamp is None
+            else self._elapsed_seconds_since_start(self._last_timestamp)
+        )
         return {
             "gamma": self.config.gamma,
-            "sigma": self.config.sigma,
-            "k": self.config.k,
+            "sigma": self._effective_sigma,
+            "k": self._effective_k,
             "elapsed_time": elapsed,
-            "time_remaining": max(0, self.config.T - elapsed / (365.25 * 24 * 3600)),
+            "time_remaining": max(0.0, self.config.T - elapsed / (365.25 * 24 * 3600)),
         }
 
     def reset(self) -> None:
-        """Reset start timestamp."""
+        """Reset start timestamp and instance-level calibration state.
+
+        The shared ASConfig is deliberately left untouched: reset must restore
+        *instance* state only, so replicas sharing a config do not reset each
+        other's calibration inputs.
+        """
         self._start_timestamp = None
+        self._last_timestamp = None
         self._last_mid_price = 0.0
         self._returns_window.clear()
         self._trade_intensity_window.clear()
-        self.config.sigma = self._initial_sigma
-        self.config.k = self._initial_k
+        self._effective_sigma = float(self.config.sigma)
+        self._effective_k = float(self.config.k)
 
 
 class ASWithVolatilityAdaptation(AvellanedaStoikov):
@@ -308,7 +340,9 @@ class ASWithVolatilityAdaptation(AvellanedaStoikov):
             realized_vol = np.std(self._returns_history) * np.sqrt(
                 max(self.config.annualization_periods, 1.0)
             )
-            self.config.sigma = max(0.1, min(2.0, realized_vol))  # Clamp between 10% and 200%
+            # Instance-level adaptation: a shared ASConfig must stay immutable
+            # so replicas with different histories do not contaminate each other.
+            self._effective_sigma = max(0.1, min(2.0, realized_vol))  # Clamp between 10% and 200%
 
         return super().quote(state, position)
 

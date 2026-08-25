@@ -69,6 +69,72 @@ def test_build_dataset_respects_tolerance_limit(tmp_path):
         )
 
 
+def test_build_dataset_aligns_multiple_symbols(tmp_path):
+    """merge_asof needs globally timestamp-sorted frames, not per-group sorted.
+
+    The old code sorted by [*key_cols, "timestamp"], which resets the
+    timestamp per symbol group; pandas then raises
+    "left keys must be sorted" as soon as more than one group exists.
+    """
+    cex_path = tmp_path / "cex.csv"
+    defi_path = tmp_path / "defi.csv"
+
+    def rows(symbol: str, price: float) -> str:
+        return (
+            "timestamp,symbol,option_type,maturity,delta,price,exchange\n"
+            f"2024-01-01T00:00:59Z,{symbol},call,0.05,0.25,{price},okx\n"
+            f"2024-01-01T00:20:00Z,{symbol},call,0.05,0.25,{price + 10},okx\n"
+        )
+
+    # Interleave symbols so a per-group sort cannot produce a globally
+    # timestamp-monotonic frame.
+    cex_path.write_text(rows("A", 1200) + rows("B", 1300), encoding="utf-8")
+    defi_path.write_text(rows("B", 1140) + rows("A", 1240), encoding="utf-8")
+
+    out = qi.build_cex_defi_deviation_dataset(
+        cex_path,
+        defi_path,
+        align_tolerance_seconds=3,
+    )
+    assert len(out) == 4
+    assert set(out["symbol"]) == {"A", "B"}
+
+
+def test_normalize_quotes_drops_unparseable_timestamps():
+    """Rows with invalid timestamps are dropped, not patched from neighbors.
+
+    The old ffill().bfill() stamped the bad row with a neighboring row's
+    timestamp — typically a different instrument's — fabricating a false
+    alignment key downstream.
+    """
+    df = pd.DataFrame(
+        {
+            "timestamp": ["2024-01-01T00:00:00Z", "not-a-timestamp", "2024-01-01T00:05:00Z"],
+            "price": [1200.0, 1140.0, 1210.0],
+            "symbol": ["BTC-OPT", "ETH-OPT", "BTC-OPT"],
+        }
+    )
+
+    normalized = qi._normalize_quotes(df, fallback_venue="cex")
+
+    # The ETH-OPT row must be gone entirely, not realigned onto BTC-OPT's time.
+    assert list(normalized["symbol"]) == ["BTC-OPT", "BTC-OPT"]
+    assert normalized["timestamp"].isna().sum() == 0
+
+
+def test_normalize_quotes_raises_when_all_timestamps_invalid():
+    df = pd.DataFrame(
+        {
+            "timestamp": ["garbage", "also-garbage"],
+            "price": [1200.0, 1140.0],
+            "symbol": ["BTC-OPT", "ETH-OPT"],
+        }
+    )
+
+    with pytest.raises(ValueError):
+        qi._normalize_quotes(df, fallback_venue="cex")
+
+
 def test_normalize_okx_option_summary_infers_option_type_and_defaults():
     now_ms = int(pd.Timestamp("2026-02-25T00:00:00Z").timestamp() * 1000)
     rows = [

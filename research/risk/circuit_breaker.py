@@ -7,7 +7,7 @@ from enum import Enum
 import json
 import logging
 import os
-from threading import Lock, Thread
+from threading import RLock, Thread
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from utils.logging_config import log_extra
@@ -535,8 +535,10 @@ class CircuitBreaker:
         # VaR calculator
         self._var_calculator = VaRCalculator()
 
-        # Thread safety lock
-        self._lock = Lock()
+        # Thread safety lock. Reentrant (RLock) because guarded code paths
+        # read lock-taking helpers while already inside a locked section,
+        # e.g. `_determine_state` -> `_can_recover` -> `is_in_cooldown`.
+        self._lock = RLock()
 
         # Track in-flight alert tasks so they are not garbage-collected
         # before delivery (Python only keeps weak refs to tasks).
@@ -637,15 +639,23 @@ class CircuitBreaker:
     @property
     def is_in_cooldown(self) -> bool:
         """Check if we're in cooldown period."""
-        if self._cooldown_until is None:
-            return False
-        return datetime.now(timezone.utc) < self._cooldown_until
+        # Guard with the same lock as state transitions: reading
+        # `_cooldown_until` unguarded lets a concurrent manual_reset /
+        # state change tear the read (e.g. observe a stale cleared value).
+        with self._lock:
+            if self._cooldown_until is None:
+                return False
+            return datetime.now(timezone.utc) < self._cooldown_until
 
     def check_risk_limits(self, portfolio: PortfolioState) -> CircuitState:
         """
         Check all risk limits and update state accordingly.
 
         Thread-safe: uses internal lock to prevent concurrent state modifications.
+        The lock is held for bookkeeping and state transitions only; the VaR
+        computation itself is read-only on the portfolio snapshot and runs
+        outside the lock so a slow fit (hybrid runs 4 methods incl. a GPD
+        fit) doesn't block every other thread's risk check.
 
         Args:
             portfolio: Current portfolio state
@@ -653,9 +663,14 @@ class CircuitBreaker:
         Returns:
             Updated circuit state
         """
-        with self._lock:
-            violations = self._check_all_limits(portfolio)
+        # Step 1 (unlocked): the expensive, read-only limit evaluation.
+        # `_check_all_limits` only reads `portfolio` and writes the
+        # `_instrument_states` cache; it never transitions breaker state.
+        violations = self._check_all_limits(portfolio)
 
+        # Step 2 (locked): record and transition atomically w.r.t. other
+        # check_risk_limits / manual_reset callers.
+        with self._lock:
             # Record violations
             for violation in violations:
                 self._record_violation(violation)
@@ -734,7 +749,13 @@ class CircuitBreaker:
                 config=self.config,
                 now=now,
             )
-            self._instrument_states[instrument] = state
+            # `_instrument_states` is read by get_status() while it holds
+            # `self._lock`; since this method now runs outside the
+            # check_risk_limits critical section, take the lock for the
+            # cache write so a concurrent status snapshot can't iterate a
+            # dict that is being resized.
+            with self._lock:
+                self._instrument_states[instrument] = state
             if violation is not None:
                 violations.append(violation)
         return violations
@@ -1012,34 +1033,41 @@ class CircuitBreaker:
         Args:
             reason: Reason for manual reset
         """
-        now = datetime.now(timezone.utc)
-        self.state_history.append((now, CircuitState.NORMAL, f"Manual reset: {reason}"))
-        self.state = CircuitState.NORMAL
-        self._cooldown_until = None
-        self._consecutive_warnings = 0
-        self._warning_count = {}
+        # Take the same lock as check_risk_limits so a manual reset cannot
+        # interleave with a guarded state transition (e.g. read the old
+        # state, then clobber a state written by the concurrent check).
+        with self._lock:
+            now = datetime.now(timezone.utc)
+            self.state_history.append((now, CircuitState.NORMAL, f"Manual reset: {reason}"))
+            self.state = CircuitState.NORMAL
+            self._cooldown_until = None
+            self._consecutive_warnings = 0
+            self._warning_count = {}
 
     def get_status(self) -> Dict[str, Any]:
         """Get current circuit breaker status."""
-        return {
-            "state": self.state.value,
-            "is_in_cooldown": self.is_in_cooldown,
-            "cooldown_until": self._cooldown_until.isoformat() if self._cooldown_until else None,
-            "last_state_change": self._last_state_change.isoformat() if self._last_state_change else None,
-            "violation_count": len(self.violation_history),
-            "recent_violations": [
-                {
-                    "timestamp": v.timestamp.isoformat(),
-                    "type": v.violation_type,
-                    "severity": v.severity,
-                    "message": v.message
-                }
-                for v in list(self.violation_history)[-5:]  # Last 5
-            ],
-            "position_limit_multiplier": self.get_position_limit_multiplier(),
-            "spread_multiplier": self.get_spread_multiplier(),
-            "instrument_states": {k: v.value for k, v in self._instrument_states.items()}
-        }
+        # Snapshot under the lock so the returned fields are mutually
+        # consistent rather than torn across a concurrent transition.
+        with self._lock:
+            return {
+                "state": self.state.value,
+                "is_in_cooldown": self.is_in_cooldown,
+                "cooldown_until": self._cooldown_until.isoformat() if self._cooldown_until else None,
+                "last_state_change": self._last_state_change.isoformat() if self._last_state_change else None,
+                "violation_count": len(self.violation_history),
+                "recent_violations": [
+                    {
+                        "timestamp": v.timestamp.isoformat(),
+                        "type": v.violation_type,
+                        "severity": v.severity,
+                        "message": v.message
+                    }
+                    for v in list(self.violation_history)[-5:]  # Last 5
+                ],
+                "position_limit_multiplier": self.get_position_limit_multiplier(),
+                "spread_multiplier": self.get_spread_multiplier(),
+                "instrument_states": {k: v.value for k, v in self._instrument_states.items()}
+            }
 
     def check_var_limit(self, positions: pd.DataFrame, returns: pd.DataFrame, portfolio_value: float) -> Optional[Violation]:
         """Check configured VaR thresholds and return a violation when breached."""

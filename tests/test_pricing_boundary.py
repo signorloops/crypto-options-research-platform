@@ -230,7 +230,12 @@ class TestGreeksBoundary:
     """Test Greeks calculation at boundaries."""
 
     def test_greeks_at_expiry(self):
-        """Test that Greeks are zero at expiry."""
+        """Test Greeks at expiry.
+
+        Updated: at the strike (ATM) the intrinsic payoff is flat at 0 from the
+        OTM side, so all Greeks are zero; theta/vega/rho are always zero for an
+        expired option since the payoff no longer depends on T/sigma/r.
+        """
         greeks = InverseOptionPricer.calculate_greeks(
             S=50000, K=50000, T=0.0, r=0.05, sigma=0.60, option_type="call"
         )
@@ -239,6 +244,63 @@ class TestGreeksBoundary:
         assert greeks.theta == 0.0
         assert greeks.vega == 0.0
         assert greeks.rho == 0.0
+
+    def test_greeks_at_expiry_itm_show_pin_risk(self):
+        """ITM expiry Greeks must reflect the intrinsic slope (pin risk).
+
+        Previously the expiry branch returned all-zero Greeks, which hid the
+        delta/gamma of expiring ITM coin-margined positions exactly at the
+        expiry boundary. An ITM inverse call settles to max(0, 1/K - 1/S), so
+        delta -> 1/S^2 and gamma -> -2/S^3; the ITM put is the mirror image.
+        """
+        call = InverseOptionPricer.calculate_greeks(
+            S=55000, K=50000, T=0.0, r=0.05, sigma=0.60, option_type="call"
+        )
+        assert call.delta == pytest.approx(1.0 / 55000**2)
+        assert call.gamma == pytest.approx(-2.0 / 55000**3)
+        assert call.theta == 0.0
+        assert call.vega == 0.0
+        assert call.rho == 0.0
+
+        put = InverseOptionPricer.calculate_greeks(
+            S=45000, K=50000, T=0.0, r=0.05, sigma=0.60, option_type="put"
+        )
+        assert put.delta == pytest.approx(-1.0 / 45000**2)
+        assert put.gamma == pytest.approx(2.0 / 45000**3)
+
+    def test_greeks_at_expiry_otm_are_zero(self):
+        """OTM expiry options are worthless and stay delta-flat."""
+        call = InverseOptionPricer.calculate_greeks(
+            S=45000, K=50000, T=0.0, r=0.05, sigma=0.60, option_type="call"
+        )
+        assert call.delta == 0.0
+        assert call.gamma == 0.0
+
+        put = InverseOptionPricer.calculate_greeks(
+            S=55000, K=50000, T=0.0, r=0.05, sigma=0.60, option_type="put"
+        )
+        assert put.delta == 0.0
+        assert put.gamma == 0.0
+
+    def test_expiry_greeks_match_near_expiry_limit(self):
+        """The expiry-branch Greeks must agree with the T -> 0 limit of the formulas."""
+        for option_type, S in (("call", 55000), ("put", 45000)):
+            near = InverseOptionPricer.calculate_greeks(
+                S=S, K=50000, T=1e-9, r=0.05, sigma=0.60, option_type=option_type
+            )
+            at = InverseOptionPricer.calculate_greeks(
+                S=S, K=50000, T=0.0, r=0.05, sigma=0.60, option_type=option_type
+            )
+            assert near.delta == pytest.approx(at.delta, rel=1e-6)
+            assert near.gamma == pytest.approx(at.gamma, rel=1e-6)
+
+    def test_price_and_greeks_expiry_branch_matches_greeks(self):
+        """calculate_price_and_greeks must use the same expiry branch as calculate_greeks."""
+        price, greeks = InverseOptionPricer.calculate_price_and_greeks(
+            S=55000, K=50000, T=0.0, r=0.05, sigma=0.60, option_type="call"
+        )
+        assert price == pytest.approx(1.0 / 50000 - 1.0 / 55000)
+        assert greeks.delta == pytest.approx(1.0 / 55000**2)
 
     def test_gamma_extreme_prices(self):
         """Test gamma behavior at extreme prices."""
@@ -301,19 +363,26 @@ class TestImpliedVolatilityBoundary:
         assert 0.1 < iv < 2.0  # Should be reasonable range
 
     def test_iv_zero_price(self):
-        """Test IV with zero price."""
+        """Test IV with zero price.
+
+        Updated: zero premium carries no vol information, so the solver returns
+        NaN for callers to filter (0.0 would poison surface fits as fake data).
+        """
         iv = InverseOptionPricer.calculate_implied_volatility(
             0, 50000, 50000, 0.25, 0.05, "call"
         )
-        assert iv == 0.0
+        assert np.isnan(iv)
 
     def test_iv_arbitrage_price(self):
-        """Test IV with arbitrage price (too high)."""
-        # Price higher than theoretical max should return 0
+        """Test IV with arbitrage price (too high).
+
+        Updated: a price at/above the theoretical upper bound is arbitrageable
+        and has no implied vol; NaN is the sentinel for "drop this quote".
+        """
         iv = InverseOptionPricer.calculate_implied_volatility(
             1.0, 50000, 50000, 0.25, 0.05, "call"
         )
-        assert iv == 0.0
+        assert np.isnan(iv)
 
 
 class TestPnLBoundary:
@@ -415,15 +484,53 @@ class TestPositionValueBoundary:
         assert mtm < 0
 
     def test_position_zero_entry_price(self):
-        """Test position value with zero entry price."""
+        """Test position value with zero entry price.
+
+        Updated: for inverse contracts the per-contract value is in BTC while
+        market_value/PnL are in USD, so with zero entry cost the PnL equals the
+        spot-converted market value (value * S), not the raw BTC value.
+        """
         value, pnl, mtm = calculate_position_value(
             S=50000, K=50000, T=0.25, r=0.05, sigma=0.60,
             size=1.0, option_type="call",
             avg_entry_price_usd=0.0, inverse=True
         )
         assert value > 0
-        # PnL with zero entry is just current value
-        assert pnl == value
+        # PnL with zero entry is the USD market value of the BTC premium.
+        assert pnl == pytest.approx(value * 50000)
+        assert mtm == pytest.approx(pnl)
+
+    def test_position_value_inverse_converts_btc_to_usd(self):
+        """Inverse market value must be converted from BTC to USD before PnL.
+
+        Previously `market_value` stayed in BTC while `avg_entry_price_usd`
+        was in USD, so the subtraction mixed units and understated PnL by a
+        factor of ~S. Both terms are now USD, with the BTC premium converted
+        at the current spot.
+        """
+        S, K, T, r, sigma = 50000, 50000, 0.25, 0.05, 0.60
+        value_btc = InverseOptionPricer.calculate_price(S, K, T, r, sigma, "call")
+        entry_usd = value_btc * S  # entered at fair value, in USD
+
+        value, pnl, mtm = calculate_position_value(
+            S=S, K=K, T=T, r=r, sigma=sigma,
+            size=2.0, option_type="call",
+            avg_entry_price_usd=entry_usd, inverse=True
+        )
+        assert value == pytest.approx(value_btc)
+        assert mtm == pytest.approx(2.0 * value_btc * S)
+        # Marked at the same premium and the same spot as entry: zero PnL.
+        assert pnl == pytest.approx(0.0, abs=1e-9)
+
+    def test_position_value_linear_branch_unchanged_usd(self):
+        """The vanilla (inverse=False) branch is already in USD and must not be re-converted."""
+        value, pnl, mtm = calculate_position_value(
+            S=50000, K=50000, T=0.25, r=0.05, sigma=0.60,
+            size=2.0, option_type="call",
+            avg_entry_price_usd=1000.0, inverse=False
+        )
+        assert mtm == pytest.approx(2.0 * value)
+        assert pnl == pytest.approx(2.0 * value - 2000.0)
 
     def test_linear_position_value_at_expiry_uses_intrinsic(self):
         """Linear branch should avoid division-by-zero at expiry."""

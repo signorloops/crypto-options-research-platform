@@ -189,17 +189,37 @@ class OrderBookReconstructor:
 class MultiInstrumentReconstructor:
     """管理多个合约的订单簿重建"""
 
-    def __init__(self, max_price_levels: int = 100):
+    # Options venues stream thousands of instruments; an unbounded dict would
+    # hold every reconstructor (and its price levels) for the process lifetime.
+    DEFAULT_MAX_RECONSTRUCTORS = 1000
+
+    def __init__(
+        self,
+        max_price_levels: int = 100,
+        max_reconstructors: int = DEFAULT_MAX_RECONSTRUCTORS,
+    ):
         self.reconstructors: Dict[str, OrderBookReconstructor] = {}
         self.max_price_levels = max_price_levels
+        self.max_reconstructors = max(1, int(max_reconstructors))
 
     def get_or_create(self, instrument: str) -> OrderBookReconstructor:
         """获取或创建重建器"""
-        if instrument not in self.reconstructors:
-            self.reconstructors[instrument] = OrderBookReconstructor(
-                instrument, self.max_price_levels
+        reconstructor = self.reconstructors.pop(instrument, None)
+        if reconstructor is None:
+            reconstructor = OrderBookReconstructor(instrument, self.max_price_levels)
+        # Re-insert (or insert) at the end so dict order tracks recency.
+        self.reconstructors[instrument] = reconstructor
+        self._evict_if_needed()
+        return reconstructor
+
+    def _evict_if_needed(self) -> None:
+        """按 LRU 淘汰最久未使用的重建器，防止内存无限增长。"""
+        while len(self.reconstructors) > self.max_reconstructors:
+            oldest = next(iter(self.reconstructors))
+            del self.reconstructors[oldest]
+            logger.debug(
+                f"{oldest}: 重建器已按 LRU 淘汰 (cap={self.max_reconstructors})"
             )
-        return self.reconstructors[instrument]
 
     def remove(self, instrument: str) -> None:
         """移除重建器"""

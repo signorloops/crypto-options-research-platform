@@ -25,7 +25,7 @@ from typing import Callable, Literal, Tuple, Optional
 import numpy as np
 from scipy.stats import norm
 
-from core.exceptions import ValidationError
+from core.exceptions import CORPError, ValidationError
 
 import logging
 logger = logging.getLogger(__name__)
@@ -203,6 +203,31 @@ def _zero_inverse_greeks() -> InverseGreeks:
     return InverseGreeks(delta=0.0, gamma=0.0, theta=0.0, vega=0.0, rho=0.0)
 
 
+def _inverse_expiry_greeks(
+    S: float, K: float, option_type: Literal["call", "put"]
+) -> InverseGreeks:
+    """Greeks of the intrinsic payoff at expiry (T < EPSILON).
+
+    An ITM inverse option settles to max(0, ±(1/K - 1/S)) BTC, whose slope in
+    S is ±1/S^2 and whose curvature is ∓2/S^3. Returning zeros here used to
+    hide exactly the pin-risk exposure that the expiry boundary is supposed to
+    reveal: a book of expiring ITM coin-margined options looked delta-flat.
+    Theta, vega and rho stay zero because the payoff no longer depends on
+    T, sigma or r once expired.
+    """
+    if option_type == "call" and S > K:
+        return InverseGreeks(
+            delta=1.0 / (S * S), gamma=-2.0 / (S ** 3), theta=0.0, vega=0.0, rho=0.0
+        )
+    if option_type == "put" and S < K:
+        return InverseGreeks(
+            delta=-1.0 / (S * S), gamma=2.0 / (S ** 3), theta=0.0, vega=0.0, rho=0.0
+        )
+    # OTM, or exactly at the strike where the intrinsic is flat at 0 from the
+    # OTM side (the ATM gamma limit is a Dirac delta and is not representable).
+    return _zero_inverse_greeks()
+
+
 class InverseOptionPricer:
     """
     币本位期权定价模型。
@@ -314,7 +339,7 @@ class InverseOptionPricer:
         InverseOptionPricer._validate_option_type(option_type)
         InverseOptionPricer._validate_inputs(S, K, T, r, sigma)
         if T < InverseOptionPricer.EPSILON:
-            return _inverse_intrinsic_price(S, K, option_type), _zero_inverse_greeks()
+            return _inverse_intrinsic_price(S, K, option_type), _inverse_expiry_greeks(S, K, option_type)
         d1, d2 = InverseOptionPricer._calculate_d1_d2(S, K, T, r, sigma)
         inv_S, inv_K = 1.0 / S, 1.0 / K
         discount = np.exp(-r * T)
@@ -560,7 +585,10 @@ class InverseOptionPricer:
             if abs(sigma_new - sigma) < 1e-6:
                 return sigma_new, True, False
             return sigma_new, False, False
-        except (ValueError, FloatingPointError, RuntimeError):
+        except (ValueError, FloatingPointError, RuntimeError, CORPError):
+            # CORPError covers ValidationError, which the pricer raises for
+            # out-of-range inputs (sigma bounds, non-finite values); those must
+            # also fall back to bisection instead of escaping the Newton loop.
             return None, False, True
 
     @staticmethod
@@ -631,7 +659,7 @@ class InverseOptionPricer:
         InverseOptionPricer._validate_option_type(option_type)
         InverseOptionPricer._validate_inputs(S, K, T, r, sigma)
         if T < InverseOptionPricer.EPSILON:
-            return InverseGreeks(delta=0.0, gamma=0.0, theta=0.0, vega=0.0, rho=0.0)
+            return _inverse_expiry_greeks(S, K, option_type)
         d1, d2 = InverseOptionPricer._calculate_d1_d2(S, K, T, r, sigma)
         inv_S = 1.0 / S
         inv_K = 1.0 / K
@@ -668,10 +696,29 @@ class InverseOptionPricer:
         anchor_sigma: Optional[float] = None,
         max_anchor_deviation: float = 0.50,
     ) -> float:
-        """通过牛顿迭代（失败回退二分法）计算隐含波动率。"""
+        """通过牛顿迭代（失败回退二分法）计算隐含波动率。
+
+        Returns:
+            隐含波动率。当报价不可逆（price <= 0，或 price 超出理论价格上界，
+            即存在套利/坏数据）时返回 NaN，调用方（如 IV 曲面拟合）应通过
+            isnan 检查剔除该报价。此前返回 0.0 会伪装成合法的低波动率报价，
+            静默污染曲面拟合。
+        """
         InverseOptionPricer._validate_option_type(option_type)
-        if price <= 0: return 0.0
-        if price >= InverseOptionPricer._iv_price_upper_bound(S=S, K=K, T=T, r=r, option_type=option_type): return 0.0
+        if price <= 0:
+            logger.warning(
+                f"IV calculation: non-positive price {price} for {option_type} "
+                f"S={S}, K={K}, T={T}; no implied vol exists"
+            )
+            return float("nan")
+        upper_bound = InverseOptionPricer._iv_price_upper_bound(S=S, K=K, T=T, r=r, option_type=option_type)
+        if price >= upper_bound:
+            logger.warning(
+                f"IV calculation: price {price} at/above theoretical upper bound "
+                f"{upper_bound:.2e} for {option_type} S={S}, K={K}, T={T}; "
+                "quote is arbitrageable, no implied vol exists"
+            )
+            return float("nan")
         if (raw_sigma := InverseOptionPricer._solve_iv_newton(
             price=price,
             S=S,
@@ -804,7 +851,18 @@ def calculate_position_value(
     avg_entry_price_usd: float,
     inverse: bool = True
 ) -> Tuple[float, float, float]:
-    """Compute current option value, unrealized PnL, and market value for a position."""
+    """Compute current option value, unrealized PnL, and market value for a position.
+
+    Units:
+    - ``current_option_value`` is the per-contract premium in the contract's
+      native unit: BTC for inverse (``inverse=True``), USD for vanilla.
+    - ``market_value`` and ``unrealized_pnl`` are always USD.
+
+    For inverse contracts the model price is denominated in BTC, so the BTC
+    market value is converted to USD at the current spot ``S`` before being
+    compared against ``avg_entry_price_usd``. The previous implementation
+    subtracted a USD entry premium from a BTC market value, mixing units.
+    """
     InverseOptionPricer._validate_option_type(option_type)
     InverseOptionPricer._validate_inputs(S, K, T, r, sigma)
     current_option_value = (
@@ -812,6 +870,11 @@ def calculate_position_value(
         if inverse
         else _vanilla_option_price(S, K, T, r, sigma, option_type)
     )
-    market_value = size * current_option_value
+    if inverse:
+        # Coin-margined premiums are in BTC; convert to USD at current spot so
+        # that both PnL terms share a unit before the subtraction.
+        market_value = size * current_option_value * S
+    else:
+        market_value = size * current_option_value
     unrealized_pnl = market_value - size * avg_entry_price_usd
     return current_option_value, unrealized_pnl, market_value

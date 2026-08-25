@@ -80,3 +80,67 @@ def test_ppo_train_uses_configured_seed_for_environment_reset():
     expected_start = int(np.random.default_rng(123).integers(0, len(data) - 1000 - 100))
     assert agent.env is not None
     assert agent.env.episode_start == expected_start
+
+
+def test_market_making_env_reset_survives_short_market_data():
+    """episode_length larger than the data frame must be clamped, not crash.
+
+    Previously reset() indexed past the end of the frame (IndexError) when
+    len(market_data) < episode_length + 100.
+    """
+    short_data = _sample_market_data(n=50)
+    env = MarketMakingEnv(short_data, episode_length=1000, random_seed=1)
+
+    assert env.episode_length == len(short_data) - 1
+
+    state = env.reset()
+    assert np.all(np.isfinite(state))
+
+    # A full episode runs to completion without leaving the frame.
+    done, steps = False, 0
+    while not done:
+        _, _, done, _ = env.step(np.array([5.0, 5.0, 1.0]))
+        steps += 1
+    assert steps == env.episode_length
+
+
+def test_market_making_env_handles_constant_price_data():
+    """Zero std (constant prices) must not produce inf/NaN states."""
+    constant_data = pd.DataFrame(
+        {"price": np.full(80, 50000.0), "volume": np.full(80, 20.0)}
+    )
+    env = MarketMakingEnv(constant_data, episode_length=40, random_seed=1)
+
+    assert env.price_std > 0.0
+
+    state = env.reset()
+    assert np.all(np.isfinite(state))
+
+    next_state, reward, done, _ = env.step(np.array([5.0, 5.0, 1.0]))
+    assert np.all(np.isfinite(next_state))
+    assert np.isfinite(reward)
+
+
+def test_env_action_bounds_match_serving_time_clip_bounds():
+    """Env sanitization and live-strategy clipping must share PPOConfig bounds.
+
+    The policy previously trained on [1, 200] bps while serving clipped to
+    [2.5, 50] bps, so it learned actions it could never express at quote time.
+    """
+    config = PPOConfig()
+    env = MarketMakingEnv(_sample_market_data(), episode_length=40)
+
+    assert env.min_offset_bps == config.min_spread_bps / 2
+    assert env.max_offset_bps == config.max_spread_bps / 2
+    assert env.min_size_scale == config.min_size_scale
+    assert env.max_size_scale == config.max_size_scale
+
+    from strategies.market_making.ppo_agent import _ppo_spread_offsets_and_size_scale
+
+    extreme = np.array([-1e6, 1e6, 1e6])
+    serving_bid, serving_ask, serving_size = _ppo_spread_offsets_and_size_scale(
+        action=extreme, config=config
+    )
+    env_bid, env_ask, env_size = env._sanitize_action(extreme)
+
+    assert (serving_bid, serving_ask, serving_size) == (env_bid, env_ask, env_size)

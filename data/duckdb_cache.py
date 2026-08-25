@@ -418,13 +418,14 @@ class AnalyticsQueries:
     @staticmethod
     def spread_analysis(table_name: str) -> str:
         """Query for bid-ask spread analysis."""
+        safe_table = _sanitize_identifier(table_name)
         return f"""
             SELECT
                 date,
                 AVG(spread_pct) as avg_spread,
                 MAX(spread_pct) as max_spread,
                 PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY spread_pct) as p95_spread
-            FROM {table_name}
+            FROM {safe_table}
             GROUP BY date
             ORDER BY date
         """
@@ -432,12 +433,13 @@ class AnalyticsQueries:
     @staticmethod
     def liquidity_profile(table_name: str) -> str:
         """Query for liquidity analysis by hour."""
+        safe_table = _sanitize_identifier(table_name)
         return f"""
             SELECT
                 hour,
                 AVG(bid_size + ask_size) as avg_liquidity,
                 COUNT(*) as tick_count
-            FROM {table_name}
+            FROM {safe_table}
             GROUP BY hour
             ORDER BY hour
         """
@@ -445,13 +447,15 @@ class AnalyticsQueries:
     @staticmethod
     def trade_intensity(table_name: str, window_minutes: int = 5) -> str:
         """Query for trade intensity analysis."""
+        safe_table = _sanitize_identifier(table_name)
+        safe_window = int(window_minutes)
         return f"""
             SELECT
-                TIME_BUCKET(INTERVAL '{window_minutes} minutes', timestamp) as window,
+                TIME_BUCKET(INTERVAL '{safe_window} minutes', timestamp) as window,
                 COUNT(*) as trade_count,
                 SUM(size) as total_volume,
                 AVG(price) as vwap
-            FROM {table_name}
+            FROM {safe_table}
             GROUP BY window
             ORDER BY window
         """
@@ -459,14 +463,16 @@ class AnalyticsQueries:
     @staticmethod
     def volatility_estimate(table_name: str, lookback_hours: int = 24) -> str:
         """Estimate realized volatility from tick data."""
+        safe_table = _sanitize_identifier(table_name)
+        safe_lookback = int(lookback_hours)
         return f"""
             WITH returns AS (
                 SELECT
                     timestamp,
                     mid,
                     LN(mid / LAG(mid) OVER (ORDER BY timestamp)) as log_return
-                FROM {table_name}
-                WHERE timestamp > NOW() - INTERVAL '{lookback_hours} hours'
+                FROM {safe_table}
+                WHERE timestamp > NOW() - INTERVAL '{safe_lookback} hours'
             )
             SELECT
                 STDDEV(log_return) * SQRT(365 * 24 * 60) as annualized_vol

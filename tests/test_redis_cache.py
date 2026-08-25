@@ -466,3 +466,37 @@ class TestCreateRedisCache:
         assert cache.host == 'redis.example.com'
         assert cache.port == 6380
         assert cache.db == 1
+
+    def test_explicit_zero_port_and_db_not_overridden_by_env(self, monkeypatch):
+        """Explicit db=0/port=0 must not silently fall back to env/default.
+
+        `db or int(env)` treated db=0 as "unset", redirecting an explicit
+        database 0 selection to whatever REDIS_DB happened to define.
+        """
+        monkeypatch.setenv('REDIS_HOST', 'redis.example.com')
+        monkeypatch.setenv('REDIS_PORT', '6380')
+        monkeypatch.setenv('REDIS_DB', '5')
+
+        cache = RedisCache(db=0)
+        assert cache.db == 0
+        assert cache.port == 6380  # untouched explicit None -> env
+
+        cache_zero_port = RedisCache(port=0)
+        assert cache_zero_port.port == 0
+
+        from data.redis_cache import create_redis_cache
+        factory_cache = create_redis_cache(db=0, port=0)
+        assert factory_cache.db == 0
+        assert factory_cache.port == 0
+
+    def test_explicit_values_beat_env(self, monkeypatch):
+        """Explicit constructor args take precedence over environment."""
+        monkeypatch.setenv('REDIS_HOST', 'env-host')
+        monkeypatch.setenv('REDIS_PORT', '6380')
+        monkeypatch.setenv('REDIS_DB', '5')
+
+        cache = RedisCache(host='arg-host', port=7000, db=2)
+
+        assert cache.host == 'arg-host'
+        assert cache.port == 7000
+        assert cache.db == 2

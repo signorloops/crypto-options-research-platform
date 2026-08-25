@@ -90,6 +90,11 @@ class TestRealisticFillSimulator:
                 base_latency_ms=0.0,
                 latency_std_ms=0.0,
                 adverse_selection_factor=0.0,
+                # This test quotes the bid exactly at mid with 10 bps fees, so
+                # the after-cost edge vs mid is negative; the min-profit gate
+                # (BT_MIN_PROFIT_BPS) would rightly reject such a fill. Disable
+                # it here to keep testing the fee/slippage cost accumulation.
+                min_profit_bps=0.0,
             ),
             rng=np.random.default_rng(1),
         )
@@ -269,6 +274,11 @@ class TestRealisticFillSimulator:
                 base_latency_ms=0.0,
                 latency_std_ms=0.0,
                 adverse_selection_factor=1.0,
+                # With adverse_selection_factor=1.0 every fill is slapped with
+                # 10 bps of slippage, pushing the after-cost edge vs mid below
+                # the min-profit gate. Disable the gate so this test can keep
+                # verifying adverse-selection cost accumulation.
+                min_profit_bps=0.0,
             ),
             rng=np.random.default_rng(7),
         )
@@ -803,3 +813,269 @@ def test_engine_periods_per_year_infers_frequency_from_datetime_index():
     assert daily == pytest.approx(365.25, rel=0.05)
     assert hourly == pytest.approx(365.25 * 24.0, rel=0.05)
     assert hourly > daily
+
+
+class TestBacktestEngineInputSanitization:
+    """Regression tests for price-column sanitization (NaN guard)."""
+
+    def test_nan_prices_are_forward_filled_with_warning(self, caplog):
+        """A NaN price must not poison the book, trades, or PnL series."""
+        strategy = NaiveMarketMaker()
+        engine = BacktestEngine(strategy, random_seed=1)
+        df = pd.DataFrame(
+            {
+                "timestamp": pd.date_range("2024-01-01", periods=5, freq="1min"),
+                "price": [100.0, np.nan, 102.0, np.inf, 104.0],
+            }
+        )
+
+        with caplog.at_level("WARNING", logger="research.backtest.engine"):
+            result = engine.run(df)
+
+        # The two invalid values were patched to the last valid price.
+        assert np.isfinite(result.total_pnl_crypto)
+        assert np.isfinite(result.sharpe_ratio)
+        assert any("non-finite price" in message for message in caplog.messages)
+
+    def test_all_nan_prices_raise_instead_of_silent_poisoning(self):
+        """A price column with no finite values must fail loudly."""
+        engine = BacktestEngine(NaiveMarketMaker())
+        df = pd.DataFrame(
+            {
+                "timestamp": pd.date_range("2024-01-01", periods=3, freq="1min"),
+                "price": [np.nan, np.nan, np.nan],
+            }
+        )
+        with pytest.raises(ValueError, match="no finite values"):
+            engine.run(df)
+
+
+class TestBacktestEngineOrderBook:
+    """Regression tests for synthetic order book maintenance."""
+
+    def test_update_order_book_uses_event_timestamp_and_relative_spread(self):
+        """Book timestamp must advance and spread must scale with price."""
+        engine = BacktestEngine(NaiveMarketMaker())
+        initial = engine._create_dummy_order_book(100.0)
+        event_ts = datetime(2024, 1, 1, 12, 0, 0)
+
+        doubled = engine._update_order_book(initial, 200.0, timestamp=event_ts)
+
+        assert doubled.timestamp == event_ts
+        # Relative spread (10 bps) is preserved instead of pinning the
+        # initial absolute spread as price moves.
+        assert doubled.spread == pytest.approx(200.0 * 0.001)
+        initial_relative = initial.spread / 100.0
+        assert doubled.spread / 200.0 == pytest.approx(initial_relative)
+
+
+class TestBacktestEngineHistoryTruncation:
+    """Regression test for the history-cap truncation warning."""
+
+    def test_history_truncation_emits_warning(self, caplog):
+        """Dropping the oldest history points must be surfaced to callers."""
+        engine = BacktestEngine(NaiveMarketMaker(), random_seed=3)
+        engine._history_sampling_interval = 1  # record on every tick
+        engine._max_history_points = 5
+        base_ts = datetime(2024, 1, 1)
+
+        with caplog.at_level("WARNING", logger="research.backtest.engine"):
+            for i in range(12):
+                engine._record_state(base_ts.replace(minute=i), 100.0)
+
+        assert len(engine._pnl_history) <= 5 + 1  # cap plus in-flight sample
+        assert any("exceeded" in message and "truncated" in message for message in caplog.messages)
+
+
+class TestBacktestEngineFlowDrivenTrades:
+    """Regression test for order-flow-driven synthetic trade direction."""
+
+    def test_synthetic_trade_direction_follows_order_flow(self):
+        """Buy-side flow must bias subsequent synthetic trades toward buys."""
+        engine = BacktestEngine(NaiveMarketMaker(), random_seed=5)
+        now = datetime.now(timezone.utc)
+        order_book = OrderBook(
+            timestamp=now,
+            instrument="SYNTHETIC",
+            # Symmetric 1x1-lot book: book imbalance is structurally zero.
+            bids=[OrderBookLevel(price=99.95, size=1.0)],
+            asks=[OrderBookLevel(price=100.05, size=1.0)],
+        )
+        buy_flow = MarketState(
+            timestamp=now,
+            instrument="SYNTHETIC",
+            spot_price=100.0,
+            order_book=order_book,
+            recent_trades=[
+                Trade(timestamp=now, instrument="SYNTHETIC", price=100.0, size=10.0, side=OrderSide.BUY),
+                Trade(timestamp=now, instrument="SYNTHETIC", price=100.0, size=10.0, side=OrderSide.BUY),
+                Trade(timestamp=now, instrument="SYNTHETIC", price=100.0, size=1.0, side=OrderSide.SELL),
+            ],
+        )
+        sell_flow = MarketState(
+            timestamp=now,
+            instrument="SYNTHETIC",
+            spot_price=100.0,
+            order_book=order_book,
+            recent_trades=[
+                Trade(timestamp=now, instrument="SYNTHETIC", price=100.0, size=1.0, side=OrderSide.BUY),
+                Trade(timestamp=now, instrument="SYNTHETIC", price=100.0, size=10.0, side=OrderSide.SELL),
+                Trade(timestamp=now, instrument="SYNTHETIC", price=100.0, size=10.0, side=OrderSide.SELL),
+            ],
+        )
+
+        assert engine._current_flow_imbalance(buy_flow) > 0.5
+        assert engine._current_flow_imbalance(sell_flow) < -0.5
+
+        def _buy_fraction(state):
+            engine._flow_imbalance = 0.0
+            counts = {OrderSide.BUY: 0, OrderSide.SELL: 0}
+            for _ in range(60):
+                for trade in engine._generate_synthetic_trades(state, volume=5.0):
+                    counts[trade.side] += 1
+            total = counts[OrderSide.BUY] + counts[OrderSide.SELL]
+            return counts[OrderSide.BUY] / total if total else 0.5
+
+        buy_frac = _buy_fraction(buy_flow)
+        sell_frac = _buy_fraction(sell_flow)
+        # Direction must be order-flow-driven, not pure noise around 0.5.
+        assert buy_frac > 0.5
+        assert sell_frac < 0.5
+        assert buy_frac > sell_frac
+
+
+class TestFillSimulatorMinProfitGate:
+    """Regression tests for the min_profit_bps fill gate (BT_MIN_PROFIT_BPS)."""
+
+    @staticmethod
+    def _make_sim(min_profit_bps: float) -> RealisticFillSimulator:
+        sim = RealisticFillSimulator(
+            config=FillSimulatorConfig(
+                base_latency_ms=0.0,
+                latency_std_ms=0.0,
+                adverse_selection_factor=0.0,
+                min_profit_bps=min_profit_bps,
+            ),
+            rng=np.random.default_rng(1),
+        )
+        sim._estimate_fill_probability = lambda *args, **kwargs: 1.0  # type: ignore[method-assign]
+        return sim
+
+    @staticmethod
+    def _market_state():
+        now = datetime.now(timezone.utc)
+        return MarketState(
+            timestamp=now,
+            instrument="SYNTHETIC",
+            spot_price=100.0,
+            order_book=OrderBook(
+                timestamp=now,
+                instrument="SYNTHETIC",
+                bids=[OrderBookLevel(price=99.95, size=1.0)],
+                asks=[OrderBookLevel(price=100.05, size=1.0)],
+            ),
+            recent_trades=[],
+        )
+
+    def test_zero_edge_fill_is_rejected_when_gate_enabled(self):
+        """A quote resting at mid has no after-cost edge and must not fill."""
+        sim = self._make_sim(min_profit_bps=5.0)
+        state = self._market_state()
+        trade = Trade(
+            timestamp=state.timestamp + timedelta(milliseconds=1),
+            instrument="SYNTHETIC",
+            price=99.99,
+            size=0.5,
+            side=OrderSide.SELL,
+        )
+        quote_at_mid = QuoteAction(bid_price=100.0, bid_size=1.0, ask_price=100.0, ask_size=1.0)
+
+        fill = sim.simulate_fill(
+            quote=quote_at_mid, market_state=state, next_trades=[trade], transaction_cost_bps=0.0
+        )
+
+        assert fill is None
+        assert sim.total_spread_captured == 0.0
+        assert sim.spread_capture_notional == 0.0
+
+    def test_positive_edge_fill_passes_gate(self):
+        """A quote with after-cost edge above the threshold still fills."""
+        sim = self._make_sim(min_profit_bps=5.0)
+        state = self._market_state()
+        trade = Trade(
+            timestamp=state.timestamp + timedelta(milliseconds=1),
+            instrument="SYNTHETIC",
+            price=99.85,
+            size=0.5,
+            side=OrderSide.SELL,
+        )
+        # Bid at 99.90 (10 bps below mid) with no fees: after-cost edge vs mid
+        # clears the 5 bps threshold, and the trade crosses the bid.
+        quote_with_edge = QuoteAction(bid_price=99.90, bid_size=1.0, ask_price=100.2, ask_size=1.0)
+
+        fill = sim.simulate_fill(
+            quote=quote_with_edge, market_state=state, next_trades=[trade], transaction_cost_bps=0.0
+        )
+
+        assert fill is not None
+        assert sim.total_spread_captured > 0.0
+
+    def test_disabled_gate_lets_zero_edge_fill_through(self):
+        """min_profit_bps <= 0 disables the gate entirely."""
+        sim = self._make_sim(min_profit_bps=0.0)
+        state = self._market_state()
+        trade = Trade(
+            timestamp=state.timestamp + timedelta(milliseconds=1),
+            instrument="SYNTHETIC",
+            price=99.99,
+            size=0.5,
+            side=OrderSide.SELL,
+        )
+        quote_at_mid = QuoteAction(bid_price=100.0, bid_size=1.0, ask_price=100.0, ask_size=1.0)
+
+        fill = sim.simulate_fill(
+            quote=quote_at_mid, market_state=state, next_trades=[trade], transaction_cost_bps=0.0
+        )
+
+        assert fill is not None
+
+
+class TestFillSimulatorQueuePositionConfig:
+    """Regression tests for the queue_position_random config (BT_QUEUE_POSITION_RANDOM)."""
+
+    @staticmethod
+    def _book_and_quote():
+        now = datetime.now(timezone.utc)
+        book = OrderBook(
+            timestamp=now,
+            instrument="SYNTHETIC",
+            bids=[OrderBookLevel(price=100.0, size=2.0)],
+            asks=[OrderBookLevel(price=100.2, size=2.0)],
+        )
+        quote = QuoteAction(bid_price=100.0, bid_size=0.5, ask_price=100.2, ask_size=0.5)
+        return book, quote
+
+    def test_deterministic_queue_uses_full_same_price_depth(self):
+        sim = RealisticFillSimulator(
+            config=FillSimulatorConfig(
+                base_latency_ms=0.0, latency_std_ms=0.0, queue_position_random=False
+            ),
+            rng=np.random.default_rng(2),
+        )
+        book, quote = self._book_and_quote()
+        depth = sim._queue_depth_ahead(quote, OrderSide.BUY, book)
+        assert depth == pytest.approx(2.0)
+
+    def test_random_queue_uses_random_fraction_of_same_price_depth(self):
+        sim = RealisticFillSimulator(
+            config=FillSimulatorConfig(
+                base_latency_ms=0.0, latency_std_ms=0.0, queue_position_random=True
+            ),
+            rng=np.random.default_rng(2),
+        )
+        book, quote = self._book_and_quote()
+        depths = [sim._queue_depth_ahead(quote, OrderSide.BUY, book) for _ in range(50)]
+        assert all(0.0 <= d <= 2.0 for d in depths)
+        # A deterministic fraction (e.g. exactly 1.0 every time) would mean
+        # the random placement never took effect.
+        assert len(set(np.round(depths, 6))) > 1

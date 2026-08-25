@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,6 +18,8 @@ OPTION_PRICING_EXCEPTIONS = (
     OverflowError,
     ZeroDivisionError,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -246,13 +249,16 @@ class VaRCalculator:
         if holding_period > 1:
             # Use overlapping rolling windows so we don't discard the
             # `len % holding_period` tail and so the quantile estimator sees
-            # ~n-h+1 observations instead of n/h.
-            portfolio_returns = portfolio_returns.rolling(holding_period).sum().dropna()
-            if portfolio_returns.empty:
+            # ~n-h+1 observations instead of n/h. `_portfolio_return_series`
+            # returns a bare ndarray, so wrap it in a Series for `.rolling()`.
+            windowed = pd.Series(portfolio_returns).rolling(holding_period).sum().dropna()
+            if windowed.empty:
                 # Fall back to scaling i.i.d. daily returns; this is a
                 # degenerate case (holding_period > len(data)) and the best
                 # we can do without more history.
-                portfolio_returns = self._portfolio_return_series(aligned_returns, weights_arr) * np.sqrt(holding_period)
+                portfolio_returns = portfolio_returns * np.sqrt(holding_period)
+            else:
+                portfolio_returns = windowed.to_numpy()
         q95 = np.percentile(portfolio_returns, 5)
         q99 = np.percentile(portfolio_returns, 1)
         var_95 = -q95 * total_value
@@ -299,10 +305,20 @@ class VaRCalculator:
 
     @staticmethod
     def _ewma_conditional_volatility(
-        *, portfolio_returns: np.ndarray, lambda_param: float, eps: float = 1e-12
+        *,
+        portfolio_returns: np.ndarray,
+        lambda_param: float,
+        eps: float = 1e-12,
+        init_window: int = 20,
     ) -> np.ndarray:
         ewma_var = np.zeros_like(portfolio_returns, dtype=float)
-        ewma_var[0] = np.var(portfolio_returns)
+        # Seed the recursion with the variance of the FIRST `init_window`
+        # observations only. Seeding with the full-sample variance leaked
+        # future information into the t=0 conditional volatility (a mild
+        # look-ahead that biased early FHS conditioning toward the terminal
+        # variance regime).
+        window = min(max(int(init_window), 1), len(portfolio_returns))
+        ewma_var[0] = np.var(portfolio_returns[:window])
         for i in range(1, len(portfolio_returns)):
             ewma_var[i] = (
                 lambda_param * ewma_var[i - 1] + (1 - lambda_param) * portfolio_returns[i - 1] ** 2
@@ -800,31 +816,42 @@ class StressTest:
     Stress testing framework for extreme scenarios.
     """
 
-    # Predefined stress scenarios
+    # Predefined stress scenarios. Only shocks computable from the
+    # (positions, greeks) inputs are modelled: `spot_shock` and `vol_shock`.
+    # Fields that would require data this API does not receive are
+    # intentionally NOT included:
+    #   - correlation_spike: needs an asset correlation matrix (positions +
+    #     greeks carry no second-moment information), so cross-gamma /
+    #     diversification-breakdown PnL cannot be estimated here.
+    #   - bid_ask_widening: needs a current spread or per-instrument
+    #     transaction-cost estimate; inventing a base spread would fabricate
+    #     a liquidation cost out of thin air.
+    #   - recovery / duration_minutes: a partial-rebound profile is a
+    #     multi-period path effect; this single-shot Greeks expansion cannot
+    #     represent it, and keeping `recovery` around implied the crash PnL
+    #     was being netted down when it never was.
+    # Callers needing those effects must layer them on separately with the
+    # required data rather than expecting this class to consume them.
     SCENARIOS = {
         "market_crash": {
             "description": "1987-style market crash",
             "spot_shock": -0.20,
             "vol_shock": 0.50,
-            "correlation_spike": True,
         },
         "vol_spike": {
             "description": "Sudden volatility explosion",
             "spot_shock": -0.05,
             "vol_shock": 1.00,
-            "correlation_spike": False,
         },
         "liquidity_crisis": {
             "description": "Liquidity drought",
             "spot_shock": -0.10,
             "vol_shock": 0.30,
-            "bid_ask_widening": 3.0,
         },
         "flash_crash": {
             "description": "2010-style flash crash",
             "spot_shock": -0.10,
-            "recovery": 0.08,
-            "duration_minutes": 15,
+            "vol_shock": 0.0,
         },
     }
 
@@ -844,6 +871,15 @@ class StressTest:
                 gamma_pnl = 0.5 * g.get("gamma", 0) * (spot_shock**2) * pos["value"]
                 vega_pnl = g.get("vega", 0) * vol_shock * 100 * pos["value"]
                 total_pnl += delta_pnl + gamma_pnl + vega_pnl
+            else:
+                # A position without Greeks contributes exactly 0 PnL, which
+                # silently understates the stress loss. Surface it so the
+                # caller knows the estimate is optimistic for that leg.
+                logger.warning(
+                    "Stress test skipping position %r: no Greeks row found; "
+                    "its PnL is counted as 0 and stress is understated",
+                    idx,
+                )
         gross_exposure = float(np.abs(positions["value"]).sum()) if "value" in positions else 0.0
         pct_of_portfolio = (total_pnl / gross_exposure * 100) if gross_exposure > 1e-12 else 0.0
         return {

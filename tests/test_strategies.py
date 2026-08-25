@@ -260,8 +260,87 @@ class TestAvellanedaStoikov:
             )
             strategy.quote(state, position)
 
-        assert strategy.config.sigma != pytest.approx(initial_sigma)
-        assert strategy.config.k != pytest.approx(initial_k)
+        # Calibrated values are instance state (`_effective_*`), NOT config
+        # mutations: one shared ASConfig across replicas must stay immutable.
+        assert strategy._effective_sigma != pytest.approx(initial_sigma)
+        assert strategy._effective_k != pytest.approx(initial_k)
+        # The config itself must remain untouched by online calibration.
+        assert strategy.config.sigma == initial_sigma
+        assert strategy.config.k == initial_k
+
+    def test_online_calibration_does_not_contaminate_shared_config_replicas(self):
+        """Experiment grids share one ASConfig across replicas; calibration of
+        one replica (including its reset) must not leak into the others."""
+        shared_config = ASConfig(
+            gamma=0.1,
+            sigma=0.3,
+            k=1.0,
+            enable_online_calibration=True,
+            calibration_window=12,
+        )
+        busy = AvellanedaStoikov(shared_config)
+        idle = AvellanedaStoikov(shared_config)
+        position = Position(instrument="BTC-PERPETUAL", size=0, avg_entry_price=0)
+        base_time = datetime.now(timezone.utc)
+
+        for i in range(20):
+            mid = 50000.0 + (220.0 if i % 2 == 0 else -180.0)
+            state = MarketState(
+                timestamp=base_time + timedelta(seconds=i),
+                instrument="BTC-PERPETUAL",
+                spot_price=mid,
+                order_book=OrderBook(
+                    timestamp=base_time + timedelta(seconds=i),
+                    instrument="BTC-PERPETUAL",
+                    bids=[OrderBookLevel(price=mid - 5.0, size=2.0)],
+                    asks=[OrderBookLevel(price=mid + 5.0, size=2.0)],
+                ),
+                recent_trades=[],
+            )
+            busy.quote(state, position)
+
+        # Shared config stays at its authored values.
+        assert shared_config.sigma == 0.3
+        assert shared_config.k == 1.0
+        # The quoting replica adapted; the idle replica did not.
+        assert busy._effective_sigma != pytest.approx(idle._effective_sigma)
+        assert busy._effective_k != pytest.approx(idle._effective_k)
+        assert idle._effective_sigma == 0.3
+        assert idle._effective_k == 1.0
+
+        # reset() restores instance state only and never touches the config.
+        busy.reset()
+        assert busy._effective_sigma == 0.3
+        assert busy._effective_k == 1.0
+        assert shared_config.sigma == 0.3
+        assert shared_config.k == 1.0
+
+    def test_internal_state_reports_real_elapsed_time(self, sample_order_book):
+        """get_internal_state must report actual elapsed time, not a constant 0."""
+        strategy = AvellanedaStoikov(ASConfig(gamma=0.1, sigma=0.5, k=1.5))
+        position = Position(instrument="BTC-PERPETUAL", size=0, avg_entry_price=0)
+        base_time = datetime.now(timezone.utc)
+
+        before = strategy.get_internal_state()
+        assert before["elapsed_time"] == 0.0
+        assert before["time_remaining"] == pytest.approx(1.0)
+
+        # Quote at t=30s, 60s, 90s: the first quote fixes the start at t=30s,
+        # so elapsed since start is 60s.
+        for i in range(1, 4):
+            state = MarketState(
+                timestamp=base_time + timedelta(seconds=i * 30),
+                instrument="BTC-PERPETUAL",
+                spot_price=50000,
+                order_book=sample_order_book,
+                recent_trades=[],
+            )
+            strategy.quote(state, position)
+
+        internal = strategy.get_internal_state()
+        assert internal["elapsed_time"] == pytest.approx(60.0)
+        seconds_per_year = 365.25 * 24 * 3600
+        assert internal["time_remaining"] == pytest.approx(1.0 - 60.0 / seconds_per_year)
 
 
 class TestStrategyComparison:

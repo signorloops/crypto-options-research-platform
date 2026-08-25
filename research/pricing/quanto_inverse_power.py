@@ -97,14 +97,28 @@ class QuantoInversePowerOptionPricer:
         legacy_pricer_kwargs: Dict[str, Any],
     ) -> tuple[int, int | None, float]:
         """Resolve supported inverse-power pricer kwargs with legacy compatibility."""
-        merged_pricer_kwargs: Dict[str, Any] = {
-            "n_paths": 100_000,
-            "seed": 42,
-            "bump_rel": 1e-3,
-        }
+        supported_keys = ("n_paths", "seed", "bump_rel")
         if pricer_kwargs:
-            merged_pricer_kwargs.update(pricer_kwargs)
-        for key in ("n_paths", "seed", "bump_rel"):
+            # The dict form must reject unknown keys just like the legacy
+            # **kwargs path does; silently merging them would swallow typos
+            # (e.g. {"seed": 1, "bumpRel": 1e-3}) with no error and no effect.
+            unknown = set(pricer_kwargs) - set(supported_keys)
+            if unknown:
+                unknown_keys = ", ".join(sorted(unknown))
+                raise TypeError(f"Unexpected keyword arguments: {unknown_keys}")
+            merged_pricer_kwargs = {
+                "n_paths": 100_000,
+                "seed": 42,
+                "bump_rel": 1e-3,
+                **pricer_kwargs,
+            }
+        else:
+            merged_pricer_kwargs: Dict[str, Any] = {
+                "n_paths": 100_000,
+                "seed": 42,
+                "bump_rel": 1e-3,
+            }
+        for key in supported_keys:
             if key in legacy_pricer_kwargs:
                 merged_pricer_kwargs[key] = legacy_pricer_kwargs.pop(key)
         if legacy_pricer_kwargs:

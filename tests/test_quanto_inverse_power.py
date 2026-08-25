@@ -120,6 +120,45 @@ def test_quanto_inverse_power_greeks_reject_unknown_kwargs():
         )
 
 
+def test_quanto_inverse_power_greeks_reject_unknown_pricer_kwargs_keys():
+    """Unknown keys inside the pricer_kwargs dict must raise, like **kwargs does.
+
+    Previously the dict path merged keys without validation, so a typo like
+    {"bumpRel": ...} was silently ignored while the same typo as a bare
+    keyword raised TypeError. Both paths now validate against
+    {n_paths, seed, bump_rel}.
+    """
+    with pytest.raises(TypeError):
+        QuantoInversePowerOptionPricer.calculate_price_and_greeks(
+            S=53000.0,
+            K=50000.0,
+            T=0.25,
+            r=0.02,
+            sigma=0.45,
+            option_type="put",
+            fx_rate=1.15,
+            sigma_fx=0.65,
+            rho=0.2,
+            power=1.1,
+            pricer_kwargs={"n_paths": 20000, "bumpRel": 1e-3},
+        )
+
+    with pytest.raises(TypeError):
+        QuantoInversePowerOptionPricer.calculate_price_and_greeks(
+            S=53000.0,
+            K=50000.0,
+            T=0.25,
+            r=0.02,
+            sigma=0.45,
+            option_type="put",
+            fx_rate=1.15,
+            sigma_fx=0.65,
+            rho=0.2,
+            power=1.1,
+            pricer_kwargs={"unknown": 1},
+        )
+
+
 def test_quanto_inverse_power_input_validation():
     with pytest.raises(ValueError):
         QuantoInversePowerOptionPricer.calculate_price(

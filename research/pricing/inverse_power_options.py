@@ -67,7 +67,14 @@ class _InversePowerFDBumps:
 
 @dataclass(frozen=True)
 class _InversePowerFDPrices:
-    """Finite-difference prices for each bumped dimension."""
+    """Finite-difference prices for each bumped dimension.
+
+    ``vega_forward_only`` / ``theta_forward_only`` record that the down-bump
+    collapsed onto a boundary (sigma=0 or T=0, where the pricer switches to the
+    intrinsic branch). In that case the realized down-step is smaller than the
+    nominal ``2 * bump`` denominator, so the Greek must be computed as a
+    one-sided forward difference against the unbumped price.
+    """
 
     p_up_s: float
     p_dn_s: float
@@ -77,6 +84,8 @@ class _InversePowerFDPrices:
     p_dn_r: float
     p_up_t: float
     p_dn_t: float
+    vega_forward_only: bool = False
+    theta_forward_only: bool = False
 
 
 class InversePowerOptionPricer:
@@ -266,6 +275,8 @@ class InversePowerOptionPricer:
             p_dn_r=eval_price(r=base.r - bumps.dr),
             p_up_t=eval_price(T=base.T + bumps.dt),
             p_dn_t=eval_price(T=max(base.T - bumps.dt, 0.0)),
+            vega_forward_only=base.sigma - bumps.dv <= 0.0,
+            theta_forward_only=base.T - bumps.dt <= 0.0,
         )
 
     @staticmethod
@@ -327,9 +338,21 @@ class InversePowerOptionPricer:
     ) -> InversePowerGreeks:
         delta = (fd_prices.p_up_s - fd_prices.p_dn_s) / (2.0 * bumps.ds)
         gamma = (fd_prices.p_up_s - 2.0 * price + fd_prices.p_dn_s) / (bumps.ds**2)
-        vega = (fd_prices.p_up_v - fd_prices.p_dn_v) / (2.0 * bumps.dv)
+        if fd_prices.vega_forward_only:
+            # The sigma down-bump collapsed onto the sigma=0 intrinsic branch:
+            # the realized step is `bumps.dv`, not `2 * bumps.dv`, so a
+            # symmetric-difference quotient would silently halve (and bias) vega.
+            vega = (fd_prices.p_up_v - price) / bumps.dv
+        else:
+            vega = (fd_prices.p_up_v - fd_prices.p_dn_v) / (2.0 * bumps.dv)
         rho = (fd_prices.p_up_r - fd_prices.p_dn_r) / (2.0 * bumps.dr)
-        theta = -(fd_prices.p_up_t - fd_prices.p_dn_t) / (2.0 * bumps.dt)
+        if fd_prices.theta_forward_only:
+            # The T down-bump collapsed onto the T=0 intrinsic branch: the
+            # realized step is `bumps.dt`, not `2 * bumps.dt`, so theta must use
+            # a one-sided forward difference to stay unbiased.
+            theta = -(fd_prices.p_up_t - price) / bumps.dt
+        else:
+            theta = -(fd_prices.p_up_t - fd_prices.p_dn_t) / (2.0 * bumps.dt)
         return InversePowerGreeks(
             delta=float(delta),
             gamma=float(gamma),

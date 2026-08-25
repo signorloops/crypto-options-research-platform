@@ -204,7 +204,9 @@ def _connection_target(
     if raw_url:
         parsed = urlparse(raw_url)
         if parsed.hostname:
-            return parsed.hostname, parsed.port or default_port
+            # `or` would silently replace an explicit port 0 with the default.
+            port = parsed.port if parsed.port is not None else default_port
+            return parsed.hostname, port
         logger.warning("Unable to parse %s=%r", url_env, raw_url)
 
     host = os.getenv(host_env)
@@ -350,8 +352,8 @@ class HealthServer:
     """Async health check server using FastAPI."""
 
     def __init__(self, host: str = None, port: int = None, service_name: str = "trading-engine"):
-        self.host = host or os.getenv("HEALTH_HOST", "0.0.0.0")
-        self.port = port or int(os.getenv("HEALTH_PORT", "8080"))
+        self.host = host if host is not None else os.getenv("HEALTH_HOST", "0.0.0.0")
+        self.port = port if port is not None else int(os.getenv("HEALTH_PORT", "8080"))
         self.service_name = service_name
         self.app = create_health_app(service_name=self.service_name)
         self._server: Optional[asyncio.Task] = None

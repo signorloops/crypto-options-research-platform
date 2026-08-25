@@ -172,14 +172,29 @@ class HawkesScenarioConfig:
 def _hawkes_intensity_sequence(
     events: List[float], config: HawkesScenarioConfig
 ) -> List[float]:
+    """Compute post-jump Hawkes intensities via the exact recursion.
+
+    λ(t_i⁺) = (λ(t_{i−1}⁺) − μ)·e^(−β·Δt_i) + μ + α
+
+    The (λ − μ) term is the accumulated excitation from all prior events;
+    it decays over the inter-arrival gap and the new event adds its own jump
+    α. Unlike the previous per-step formula μ + α·e^(−β·Δt), excitation
+    accumulates across clustered arrivals instead of being discarded.
+    """
     if not events:
         return []
-    intensities = [config.mu]
-    intensities.extend(
-        config.mu + config.alpha * np.exp(-config.beta * (events[i] - events[i - 1]))
-        for i in range(1, len(events))
-    )
-    return [float(value) for value in intensities]
+    mu = float(config.mu)
+    alpha = float(config.alpha)
+    beta = float(config.beta)
+    # Before the first observed event the process carries no excitation
+    # (λ = μ), so just after that event the intensity is μ + α.
+    lam = mu + alpha
+    intensities = [lam]
+    for i in range(1, len(events)):
+        dt = float(events[i] - events[i - 1])
+        lam = (lam - mu) * float(np.exp(-beta * dt)) + mu + alpha
+        intensities.append(lam)
+    return intensities
 
 
 def _hawkes_timestamps(events: List[float], *, base_time: datetime) -> List[datetime]:

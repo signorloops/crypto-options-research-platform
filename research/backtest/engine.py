@@ -20,6 +20,7 @@ from core.types import (
 from research.backtest.fill_model import FillSimulatorConfig, RealisticFillSimulator
 from research.pricing.inverse_options import InverseOptionPricer
 from strategies.base import MarketMakingStrategy
+from utils.logging_config import get_logger
 
 __all__ = [
     "FillSimulatorConfig",
@@ -28,9 +29,18 @@ __all__ = [
     "BacktestEngine",
 ]
 
+logger = get_logger(__name__)
+
+# Decay factor for the rolling order-flow imbalance that biases synthetic
+# trade direction (see BacktestEngine._update_flow_imbalance).
+_FLOW_IMBALANCE_DECAY: float = 0.9
+
 
 def _build_market_state_snapshot(
-    timestamp: datetime, price: float, order_book: OrderBook
+    timestamp: datetime,
+    price: float,
+    order_book: OrderBook,
+    recent_trades: Optional[List[Trade]] = None,
 ) -> MarketState:
     """Create a market state snapshot for current tick."""
     return MarketState(
@@ -38,7 +48,7 @@ def _build_market_state_snapshot(
         instrument="SYNTHETIC",
         spot_price=price,
         order_book=order_book,
-        recent_trades=[],
+        recent_trades=list(recent_trades or []),
     )
 
 
@@ -384,6 +394,7 @@ class BacktestEngine:
         self._history_sampling_interval: int = 10
         self._max_history_points: int = 1_000_000
         self._tick_counter: int = 0
+        self._flow_imbalance: float = 0.0
 
     def _reset_run_state(self) -> None:
         """Reset runtime state before each backtest run."""
@@ -395,6 +406,7 @@ class BacktestEngine:
         self._inventory_history = []
         self._crypto_balance_history = []
         self._tick_counter = 0
+        self._flow_imbalance = 0.0
         self.strategy.reset()
 
         self.rng = np.random.default_rng(self.random_seed)
@@ -410,20 +422,25 @@ class BacktestEngine:
         position: Position,
         event_volume: float,
         current_price: float,
-    ) -> Position:
-        """Try to fill previous quote against synthetic trades and update position."""
+    ) -> Tuple[Position, List[Trade]]:
+        """Try to fill previous quote against synthetic trades and update position.
+
+        Returns the (possibly updated) position together with the synthetic
+        trades generated for this event, so the run loop can expose observed
+        order flow to the next snapshot.
+        """
         if previous_quote is None or self.fill_simulator is None:
-            return position
+            return position, []
         synthetic_trades = self._generate_synthetic_trades(market_state, volume=event_volume, start_timestamp=quote_timestamp)
         if not synthetic_trades:
-            return position
+            return position, synthetic_trades
         fill = self.fill_simulator.simulate_fill(previous_quote, market_state, synthetic_trades, quote_timestamp=quote_timestamp, transaction_cost_bps=self.transaction_cost_bps)
         if fill is None:
-            return position
+            return position, synthetic_trades
         self._process_fill(fill, position, current_price)
         updated_position = self.positions.get("SYNTHETIC", position)
         self.strategy.on_fill(fill, updated_position)
-        return updated_position
+        return updated_position, synthetic_trades
 
     def _quote_with_lagged_snapshot(
         self, quote_state: MarketState, position: Position
@@ -451,7 +468,7 @@ class BacktestEngine:
         the ScenarioGenerator and StrategyArena pipelines.
         """
         self._reset_run_state()
-        prices = market_data[price_column].to_numpy(dtype=np.float64)
+        prices = self._sanitize_prices(market_data[price_column], price_column)
         if timestamp_column in market_data.columns:
             timestamps_arr = market_data[timestamp_column].to_numpy()
         elif isinstance(market_data.index, pd.DatetimeIndex):
@@ -464,12 +481,13 @@ class BacktestEngine:
         event_volumes = self._prepare_event_volumes(market_data)
         current_ob = self._create_dummy_order_book(prices[0])
         previous_quote: Optional[QuoteAction] = None; previous_quote_timestamp = None
+        recent_synthetic_trades: List[Trade] = []
         for i in range(n_events):
             price = float(prices[i]); timestamp = timestamps_arr[i]
-            current_ob = self._update_order_book(current_ob, price)
-            market_state = _build_market_state_snapshot(timestamp=timestamp, price=price, order_book=current_ob)
+            current_ob = self._update_order_book(current_ob, price, timestamp=timestamp)
+            market_state = _build_market_state_snapshot(timestamp=timestamp, price=price, order_book=current_ob, recent_trades=recent_synthetic_trades)
             position = self.positions.get("SYNTHETIC", Position("SYNTHETIC", 0, 0))
-            position = self._maybe_process_previous_quote(previous_quote=previous_quote, quote_timestamp=previous_quote_timestamp, market_state=market_state, position=position, event_volume=float(event_volumes[i]), current_price=price)
+            position, recent_synthetic_trades = self._maybe_process_previous_quote(previous_quote=previous_quote, quote_timestamp=previous_quote_timestamp, market_state=market_state, position=position, event_volume=float(event_volumes[i]), current_price=price)
             new_quote = self._quote_with_lagged_snapshot(quote_state=market_state, position=position)
             self.quotes.append(new_quote)
             previous_quote = new_quote
@@ -487,6 +505,38 @@ class BacktestEngine:
             values = np.nan_to_num(values, nan=1.0, posinf=1.0, neginf=0.0)
         return np.maximum(values, 0.0)
 
+    @staticmethod
+    def _sanitize_prices(price_series: pd.Series, price_column: str) -> np.ndarray:
+        """Return a fully finite price array, forward-filling invalid values.
+
+        A single NaN/inf price would otherwise silently propagate into the
+        synthetic order book, trade generation, and the entire PnL series.
+        Invalid observations are replaced with the last valid price (leading
+        invalid values use the first valid one) and a warning is logged so
+        callers know their input was patched.
+        """
+        values = price_series.to_numpy(dtype=np.float64)
+        invalid_mask = ~np.isfinite(values)
+        n_invalid = int(np.count_nonzero(invalid_mask))
+        if n_invalid == 0:
+            return values
+        if n_invalid == len(values):
+            raise ValueError(
+                f"price column '{price_column}' contains no finite values; "
+                "cannot run backtest"
+            )
+        # ffill/bfill only patch NaN, so fold non-finite values into NaN first.
+        sanitized = pd.Series(np.where(invalid_mask, np.nan, values))
+        sanitized = sanitized.ffill().bfill().to_numpy(dtype=np.float64)
+        logger.warning(
+            "Backtest input contains %d non-finite price value(s) in column "
+            "'%s'; patched via forward/back-fill with the last valid price so "
+            "they cannot poison the order book or PnL series",
+            n_invalid,
+            price_column,
+        )
+        return sanitized
+
     def _create_dummy_order_book(self, price: float) -> OrderBook:
         """Create a simple order book around given price."""
         from core.types import OrderBookLevel
@@ -500,13 +550,33 @@ class BacktestEngine:
             asks=[OrderBookLevel(price=price + spread / 2, size=1.0)],
         )
 
-    def _update_order_book(self, ob: OrderBook, new_price: float) -> OrderBook:
-        """Update order book with new price."""
-        spread = ob.spread or new_price * 0.001
+    def _update_order_book(
+        self, ob: OrderBook, new_price: float, timestamp=None
+    ) -> OrderBook:
+        """Update order book with new price.
+
+        The book keeps its relative width (spread / mid), so the absolute
+        spread scales with the current price instead of staying pinned to
+        the spread observed when the book was first created. The timestamp
+        advances to the event's timestamp instead of remaining the
+        wall-clock time of book creation.
+        """
         from core.types import OrderBookLevel
 
+        previous_mid = ob.mid_price
+        previous_spread = ob.spread
+        if (
+            previous_mid is not None
+            and previous_mid > 0
+            and previous_spread is not None
+            and previous_spread > 0
+        ):
+            relative_spread = previous_spread / previous_mid
+        else:
+            relative_spread = 0.001  # 10 bps fallback
+        spread = relative_spread * new_price
         return OrderBook(
-            timestamp=ob.timestamp,
+            timestamp=timestamp if timestamp is not None else ob.timestamp,
             instrument=ob.instrument,
             bids=[OrderBookLevel(price=new_price - spread / 2, size=1.0)],
             asks=[OrderBookLevel(price=new_price + spread / 2, size=1.0)],
@@ -522,8 +592,8 @@ class BacktestEngine:
         arrival_intensity = float(max(volume, 0.0))
         max_trades = int(np.clip(np.ceil(arrival_intensity) + 2, 1, 50))
         num_trades = int(np.clip(self.rng.poisson(arrival_intensity), 0, max_trades))
-        imbalance = market_state.order_book.imbalance() if hasattr(market_state.order_book, "imbalance") else 0
-        side_bias = 0.5 + imbalance * 0.2
+        imbalance = self._current_flow_imbalance(market_state)
+        side_bias = float(np.clip(0.5 + imbalance * 0.2, 0.05, 0.95))
         mid = market_state.spot_price
         spread = market_state.order_book.spread or mid * 0.001
         half_spread = spread / 2
@@ -537,7 +607,36 @@ class BacktestEngine:
             trade_size = volume * self.rng.random() * 0.3
             trade_timestamp = self._sample_trade_timestamp(start_timestamp, end_timestamp)
             trades.append(Trade(timestamp=trade_timestamp, instrument=market_state.instrument, price=abs(trade_price), size=abs(trade_size), side=side))
+            self._update_flow_imbalance(side, trade_size)
         return trades
+
+    def _current_flow_imbalance(self, market_state: MarketState) -> float:
+        """Estimate order-flow imbalance in [-1, 1] for trade-direction bias.
+
+        The synthetic book has symmetric 1x1-lot levels, so book imbalance is
+        structurally zero and must not be used. Prefer genuinely observed
+        recent trades (signed-volume imbalance) when available; otherwise use
+        the engine's rolling EMA of signed synthetic flow.
+        """
+        recent = list(getattr(market_state, "recent_trades", None) or [])
+        if recent:
+            buy_vol = sum(t.size for t in recent if t.side == OrderSide.BUY)
+            sell_vol = sum(t.size for t in recent if t.side == OrderSide.SELL)
+            total = buy_vol + sell_vol
+            if total > 0:
+                return float(np.clip((buy_vol - sell_vol) / total, -1.0, 1.0))
+        return float(np.clip(self._flow_imbalance, -1.0, 1.0))
+
+    def _update_flow_imbalance(self, side: OrderSide, size: float) -> None:
+        """Fold a generated trade's signed size into the rolling imbalance."""
+        weight = min(abs(float(size)), 1.0)
+        if weight <= 0.0:
+            return
+        sign = 1.0 if side == OrderSide.BUY else -1.0
+        self._flow_imbalance = (
+            _FLOW_IMBALANCE_DECAY * self._flow_imbalance
+            + (1.0 - _FLOW_IMBALANCE_DECAY) * sign * weight
+        )
 
     def _sample_trade_timestamp(self, start_timestamp, end_timestamp):
         """Sample a synthetic trade timestamp between quote placement and current event."""
@@ -590,6 +689,16 @@ class BacktestEngine:
             self._pnl_history = self._pnl_history[remove_count:]
             self._inventory_history = self._inventory_history[remove_count:]
             self._crypto_balance_history = self._crypto_balance_history[remove_count:]
+            # Metrics computed later (Sharpe, drawdown) use only the retained
+            # window; surface the truncation so callers know the history was
+            # cropped instead of silently reporting a shorter horizon.
+            logger.warning(
+                "Backtest history exceeded %d points; dropped the oldest %d "
+                "samples. Risk metrics (Sharpe, drawdown, CIs) are computed "
+                "on the truncated window only.",
+                self._max_history_points,
+                remove_count,
+            )
 
     def _calculate_crypto_pnl_components(self, current_price: Optional[float] = None) -> Tuple[float, float]:
         """Calculate realized and unrealized coin PnL components.

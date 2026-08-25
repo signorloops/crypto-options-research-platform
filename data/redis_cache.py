@@ -26,10 +26,11 @@ class RedisCache:
         password: Optional[str] = None,
         decode_responses: bool = True
     ):
-        self.host = host or os.getenv("REDIS_HOST", "localhost")
-        self.port = port or int(os.getenv("REDIS_PORT", "6379"))
-        self.db = db or int(os.getenv("REDIS_DB", "0"))
-        self.password = password or os.getenv("REDIS_PASSWORD")
+        # Explicit values (including db=0) must not fall through to env/defaults.
+        self.host = host if host is not None else os.getenv("REDIS_HOST", "localhost")
+        self.port = port if port is not None else int(os.getenv("REDIS_PORT", "6379"))
+        self.db = db if db is not None else int(os.getenv("REDIS_DB", "0"))
+        self.password = password if password is not None else os.getenv("REDIS_PASSWORD")
         self.decode_responses = decode_responses
         self._pool: Optional[redis.asyncio.Redis] = None
 
@@ -528,7 +529,7 @@ def create_redis_cache(
 ) -> RedisCache:
     """Create RedisCache from environment or defaults."""
     return RedisCache(
-        host=host or os.getenv("REDIS_HOST", "localhost"),
-        port=port or int(os.getenv("REDIS_PORT", "6379")),
-        db=db or int(os.getenv("REDIS_DB", "0"))
+        host=host,
+        port=port,
+        db=db
     )

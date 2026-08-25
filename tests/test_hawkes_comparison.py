@@ -25,6 +25,7 @@ from research.backtest.hawkes_comparison import (
     HawkesScenarioConfig,
     ScenarioType,
     HawkesSpecificMetrics,
+    _hawkes_intensity_sequence,
 )
 from data.generators.hawkes import HawkesProcess, HawkesParameters, PoissonProcess
 from strategies.market_making.hawkes_mm import HawkesIntensityMonitor, HawkesMarketMaker, HawkesMMConfig
@@ -534,6 +535,62 @@ class TestHawkesScenarioConfig(unittest.TestCase):
             self.assertEqual(config.clustering_level, expected)
 
 
+class TestHawkesIntensityRecursion(unittest.TestCase):
+    """Regression tests for the exact Hawkes intensity recursion."""
+
+    def test_intensity_recursion_matches_closed_form(self):
+        """λ(t_i⁺) = (λ(t_{i−1}⁺) − μ)e^(−βΔt) + μ + α must hold exactly."""
+        config = HawkesScenarioConfig(name="test", mu=0.1, alpha=0.4, beta=0.8)
+        events = [1.0, 1.1, 1.2, 2.0, 5.0, 5.01]
+
+        intensities = _hawkes_intensity_sequence(events, config)
+
+        self.assertEqual(len(intensities), len(events))
+        mu, alpha, beta = config.mu, config.alpha, config.beta
+        expected = mu + alpha  # first event excites from λ = μ
+        self.assertAlmostEqual(intensities[0], expected, places=12)
+        lam = expected
+        for i in range(1, len(events)):
+            dt = events[i] - events[i - 1]
+            lam = (lam - mu) * np.exp(-beta * dt) + mu + alpha
+            self.assertAlmostEqual(intensities[i], lam, places=12)
+
+    def test_clustered_events_accumulate_excitation(self):
+        """Rapid successive events must stack excitation, not discard it.
+
+        The old per-step formula μ + α·e^(−β·Δt) ignored everything before
+        the previous event, so a burst of arrivals all mapped to nearly the
+        same intensity regardless of burst length.
+        """
+        config = HawkesScenarioConfig(name="test", mu=0.1, alpha=0.4, beta=0.8)
+        # Ten arrivals back-to-back within a negligible gap.
+        events = [1.0 + 0.001 * i for i in range(10)]
+
+        intensities = _hawkes_intensity_sequence(events, config)
+
+        # With the exact recursion, intensity climbs monotonically during
+        # the burst toward μ + α/(1 − e^(−βΔt)) territory, well above the
+        # single-jump ceiling of μ + α.
+        for i in range(1, len(intensities)):
+            self.assertGreaterEqual(
+                intensities[i], intensities[i - 1] - 1e-12,
+                f"Intensity should not decay during a back-to-back burst (step {i})"
+            )
+        self.assertGreater(intensities[-1], config.mu + config.alpha)
+
+    def test_long_gap_decays_excitation_back_toward_mu_plus_alpha(self):
+        """After a long quiet gap, the intensity must decay to μ + α at the next jump."""
+        config = HawkesScenarioConfig(name="test", mu=0.1, alpha=0.4, beta=0.8)
+        events = [1.0, 1.01, 1.02, 1_000_000.0]
+
+        intensities = _hawkes_intensity_sequence(events, config)
+
+        # The burst at t≈1 built up excitation; the huge gap decays all of it
+        # before the final event adds its single jump of α.
+        self.assertGreater(intensities[2], config.mu + config.alpha)
+        self.assertAlmostEqual(intensities[3], config.mu + config.alpha, places=6)
+
+
 class TestIntegration(unittest.TestCase):
     """Integration tests for the full comparison workflow."""
 
@@ -736,6 +793,76 @@ class TestMarkedHawkesControls(unittest.TestCase):
         )
         strategy.quote(state2, Position("BTC-USD", 0.0, 0.0))
 
+        self.assertEqual(strategy.trade_count, 3)
+
+    def test_quote_counts_identical_prints_without_trade_id(self):
+        """Identical same-second prints (no trade_id) must all be ingested.
+
+        Exchange feeds routinely report multiple identical prints in
+        illiquid option books; deduping on
+        (instrument, ts, price, size, side) alone undercounts intensity.
+        """
+        strategy = HawkesMarketMaker(HawkesMMConfig())
+        ts = datetime(2024, 1, 1, 0, 0, 0)
+        order_book = OrderBook(
+            timestamp=ts,
+            instrument="BTC-USD",
+            bids=[OrderBookLevel(price=49995.0, size=2.0)],
+            asks=[OrderBookLevel(price=50005.0, size=2.0)],
+        )
+
+        identical_trades = [
+            Trade(
+                timestamp=ts,
+                instrument="BTC-USD",
+                price=50000.0,
+                size=1.0,
+                side=OrderSide.BUY,
+            )
+            for _ in range(5)
+        ]
+        state = MarketState(
+            timestamp=ts + timedelta(seconds=1),
+            instrument="BTC-USD",
+            spot_price=50000.0,
+            order_book=order_book,
+            recent_trades=identical_trades,
+        )
+
+        strategy.quote(state, Position("BTC-USD", 0.0, 0.0))
+        self.assertEqual(strategy.trade_count, 5)
+
+    def test_quote_does_not_recount_identical_prints_across_windows(self):
+        """Sliding-window re-presentation must not double count identical prints."""
+        strategy = HawkesMarketMaker(HawkesMMConfig())
+        ts = datetime(2024, 1, 1, 0, 0, 0)
+        order_book = OrderBook(
+            timestamp=ts,
+            instrument="BTC-USD",
+            bids=[OrderBookLevel(price=49995.0, size=2.0)],
+            asks=[OrderBookLevel(price=50005.0, size=2.0)],
+        )
+
+        def make_state(trades, offset_seconds: int):
+            return MarketState(
+                timestamp=ts + timedelta(seconds=offset_seconds),
+                instrument="BTC-USD",
+                spot_price=50000.0,
+                order_book=order_book,
+                recent_trades=trades,
+            )
+
+        # Window 1: two identical prints + one distinct print at the same ts.
+        trades = [
+            Trade(timestamp=ts, instrument="BTC-USD", price=50000.0, size=1.0, side=OrderSide.BUY),
+            Trade(timestamp=ts, instrument="BTC-USD", price=50000.0, size=1.0, side=OrderSide.BUY),
+            Trade(timestamp=ts, instrument="BTC-USD", price=50000.5, size=1.2, side=OrderSide.SELL),
+        ]
+        strategy.quote(make_state(trades[:2], 1), Position("BTC-USD", 0.0, 0.0))
+        self.assertEqual(strategy.trade_count, 2)
+
+        # Window 2 re-presents the same trades plus the new distinct one.
+        strategy.quote(make_state(trades, 2), Position("BTC-USD", 0.0, 0.0))
         self.assertEqual(strategy.trade_count, 3)
 
     def test_metrics_collector_workflow(self):

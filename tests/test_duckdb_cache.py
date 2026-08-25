@@ -158,6 +158,42 @@ class TestAnalyticsQueries:
         assert 'STDDEV' in query
         assert 'annualized_vol' in query
 
+    def test_analytics_queries_sanitize_table_names(self):
+        """AnalyticsQueries must sanitize identifiers like DuckDBCache does.
+
+        Previously the table name was interpolated raw, allowing SQL injection
+        through e.g. `tick; DROP TABLE x --`.
+        """
+        with pytest.raises(ValueError, match="Invalid SQL identifier"):
+            AnalyticsQueries.spread_analysis('tick; DROP TABLE x --')
+
+        with pytest.raises(ValueError, match="Invalid SQL identifier"):
+            AnalyticsQueries.liquidity_profile('table with spaces')
+
+        with pytest.raises(ValueError, match="Invalid SQL identifier"):
+            AnalyticsQueries.trade_intensity('trades; DELETE FROM t')
+
+        with pytest.raises(ValueError, match="Invalid SQL identifier"):
+            AnalyticsQueries.volatility_estimate('tick -- comment')
+
+        # Valid names are emitted quoted, matching DuckDBCache methods.
+        assert '"tick_data"' in AnalyticsQueries.spread_analysis('tick_data')
+        assert '"trades"' in AnalyticsQueries.trade_intensity('trades')
+
+    def test_analytics_queries_execute_against_duckdb(self, duckdb_cache):
+        """Sanitized queries must remain executable SQL."""
+        df = pd.DataFrame({
+            'timestamp': pd.date_range('2024-01-01', periods=10, freq='min'),
+            'mid': [100.0 + i for i in range(10)],
+        })
+        duckdb_cache.load_dataframe(df, 'ticks')
+
+        # Use a lookback large enough to cover the historical fixture timestamps.
+        volatility = duckdb_cache.query_scalar(
+            AnalyticsQueries.volatility_estimate('ticks', lookback_hours=100000)
+        )
+        assert volatility is not None
+
 
 class TestDuckDBContextManager:
     """Test context manager functionality."""
