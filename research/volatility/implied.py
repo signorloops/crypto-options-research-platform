@@ -93,6 +93,11 @@ class SVIParams:
     SVI 参数化 (raw SVI): w(k) = a + b * [rho*(k-m) + sqrt((k-m)^2 + sigma^2)].
 
     其中 w(k) 是总方差 (sigma_impl^2 * T), k 是 log-moneyness.
+
+    ``spot`` 记录拟合时锚定的参考标的价（拟合切片中最新的 underlying_price）。
+    查询端（surface_query）必须用同一参考价计算 log-moneyness，否则当曲面含有
+    陈旧点位（各点 underlying_price 不一致）时，查询的 k 网格与拟合的 k 网格
+    会错位。为 None 时调用方回退到 points[0].underlying_price（旧行为）。
     """
 
     a: float
@@ -100,15 +105,20 @@ class SVIParams:
     rho: float
     m: float
     sigma: float
+    spot: Optional[float] = None
 
 
 @dataclass
 class SSVIParams:
-    """Global SSVI parameters."""
+    """Global SSVI parameters.
+
+    ``spot`` 的含义与 ``SVIParams.spot`` 相同：拟合锚定的参考标的价。
+    """
 
     rho: float
     eta: float
     lam: float
+    spot: Optional[float] = None
 
 
 class VolatilitySurface:

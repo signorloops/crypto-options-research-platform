@@ -105,6 +105,38 @@ def test_strategy_page_rejects_file_outside_results(tmp_path):
     assert response.status_code == 404
 
 
+def test_strategy_page_tolerates_non_numeric_metrics(tmp_path):
+    # Regression: a summary containing string metrics such as "n/a" used to
+    # raise ValueError in float() and 500 the whole /strategy page.
+    data = {
+        "Weird Run": {
+            "summary": {
+                "total_pnl": "n/a",
+                "sharpe_ratio": "n/a",
+                "max_drawdown": None,
+                "trade_count": "12",
+                "spread_capture": "n/a",
+            },
+            "pnl_history": [["2024-01-01T00:05:00", 5.0]],
+        }
+    }
+    results_dir = _write_strategy_json(tmp_path, data=data)
+    app = create_dashboard_app(results_dir=results_dir)
+    with TestClient(app) as client:
+        page_response = client.get("/strategy")
+        api_response = client.get("/api/strategy/compare")
+
+    assert page_response.status_code == 200
+    assert "Weird Run" in page_response.text
+    assert api_response.status_code == 200
+    metrics = api_response.json()["strategies"]["Weird Run"]
+    assert metrics["total_pnl"] == 0.0
+    assert metrics["sharpe_ratio"] == 0.0
+    assert metrics["max_drawdown"] == 0.0
+    assert metrics["trade_count"] == 12  # parseable strings still parse
+    assert metrics["spread_capture"] == 0.0
+
+
 def test_strategy_api_invalid_payload_returns_422(tmp_path):
     results_dir = _write_strategy_json(tmp_path, data={"status": "READY_FOR_CLOSE"})
     app = create_dashboard_app(results_dir=results_dir)

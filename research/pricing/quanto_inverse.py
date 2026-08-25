@@ -2,9 +2,16 @@
 
 This module extends inverse option pricing with a lightweight quanto adjustment
 for settlement-currency mismatch risk.
+
+Greek unit convention — DIFFERENT from quanto_inverse_power.py, do not mix:
+- theta: daily (annual theta / 365, inherited from InverseGreeks)
+- vega:  per 1% volatility change
+- rho:   per 1% rate change
+research/pricing/quanto_inverse_power.py reports **annual** theta and
+**per-unit-vol** vega under the same field names.
 """
 from dataclasses import dataclass
-from typing import Dict, Literal, Tuple
+from typing import ClassVar, Dict, Literal, Tuple
 
 import numpy as np
 
@@ -13,7 +20,17 @@ from research.pricing.inverse_options import InverseOptionPricer
 
 @dataclass
 class QuantoInverseGreeks:
-    """Greeks for a quanto-inverse option quoted in settlement currency."""
+    """Greeks for a quanto-inverse option quoted in settlement currency.
+
+    Unit convention (inherited from the wrapped ``InverseGreeks``): theta is
+    **daily** (annual theta / 365) and vega is **per 1% vol change**.
+    ``QuantoInversePowerGreeks`` reports annual theta / per-unit-vol vega under
+    the same field names — rescale before combining them.
+    """
+
+    THETA_UNIT: ClassVar[str] = "daily"
+    VEGA_UNIT: ClassVar[str] = "per_1pct_vol"
+    RHO_UNIT: ClassVar[str] = "per_1pct_rate"
 
     delta: float
     gamma: float
@@ -32,6 +49,10 @@ class QuantoInverseOptionPricer:
     - Start from inverse option value in base collateral currency.
     - Convert into settlement currency by dividing by FX rate.
     - Apply a drift-style quanto adjustment factor exp(-rho*sigma_s*sigma_fx*T).
+
+    Greeks carry over the InverseGreeks unit convention: daily theta, per-1%
+    vega, per-1% rho (the quanto drift terms are scaled to match — see the
+    ``DAYS_PER_YEAR`` / ``0.01`` factors in ``calculate_price_and_greeks``).
     """
 
     DAYS_PER_YEAR = 365.0

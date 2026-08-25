@@ -54,6 +54,30 @@ def test_risk_page_loads_snapshot_file(tmp_path):
     assert api_response.json()["regime"]["state"] == "HIGH"
 
 
+def test_risk_page_tolerates_null_snapshot_fields(tmp_path):
+    # Regression: dict.get(key, default) only defaults on a missing key;
+    # explicit nulls made state.upper() raise AttributeError and the VaR
+    # f-string formatting raise TypeError (both -> HTTP 500).
+    snapshot = {
+        "circuit_breaker": {"state": None, "multiplier": None, "violations": None},
+        "greeks": {"delta": None, "gamma": 0.01},
+        "var": {"var_95": None, "var_99": None, "cvar_95": None, "cvar_99": None},
+        "regime": {"state": None, "volatility_percentile": None},
+    }
+    (tmp_path / "risk_snapshot.json").write_text(json.dumps(snapshot), encoding="utf-8")
+
+    app = create_dashboard_app(results_dir=tmp_path)
+    with TestClient(app) as client:
+        response = client.get("/risk")
+
+    assert response.status_code == 200
+    # Null circuit-breaker/regime state falls back to the documented defaults.
+    assert "NORMAL" in response.text
+    assert "LOW" in response.text
+    # Null VaR values render as $0 instead of raising.
+    assert "$0" in response.text
+
+
 def test_risk_page_renders_violation_table(tmp_path):
     snapshot = {
         "circuit_breaker": {

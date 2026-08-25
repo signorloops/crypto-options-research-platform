@@ -197,3 +197,49 @@ def test_vega_uses_forward_stencil_when_sigma_bump_collapses():
     assert np.isclose(greeks.vega, forward_only, rtol=1e-6, atol=0.0)
     # The old symmetric quotient with the collapsed stencil differs materially.
     assert not np.isclose(greeks.vega, biased, rtol=0.1, atol=0.0)
+
+
+def test_greek_unit_metadata_declared_and_units_are_annual_per_unit():
+    """InversePowerGreeks reports ANNUAL theta and PER-UNIT-VOL vega.
+
+    This is the opposite of ``InverseGreeks`` (daily / per-1%), which is why
+    both classes expose THETA_UNIT/VEGA_UNIT classvars: the two modules share
+    field names while reporting different units, and consumers must rescale
+    before combining. Guarded here so the convention cannot silently drift.
+    """
+    from research.pricing.inverse_power_options import InversePowerGreeks
+
+    assert InversePowerGreeks.THETA_UNIT == "annual"
+    assert InversePowerGreeks.VEGA_UNIT == "per_unit_vol"
+    assert InversePowerGreeks.RHO_UNIT == "per_unit_rate"
+
+    _, greeks = InversePowerOptionPricer.calculate_price_and_greeks(
+        S=50000.0,
+        K=50000.0,
+        T=30.0 / 365.0,
+        r=0.02,
+        sigma=0.6,
+        option_type="call",
+        power=1.0,
+        n_paths=20000,
+        seed=42,
+    )
+
+    # Annual theta: same order of magnitude as -dV/dT (not /365 like the
+    # daily convention used by InverseOptionPricer).
+    assert greeks.theta < 0.0
+    assert abs(greeks.theta) > 1e-8
+
+    # Per-unit-vol vega: bumping sigma by 0.01 must move the price by
+    # approximately vega * 0.01 (a per-1% vega would equal that move exactly).
+    dv = 0.01
+    p_up = InversePowerOptionPricer.calculate_price(
+        S=50000.0, K=50000.0, T=30.0 / 365.0, r=0.02, sigma=0.6 + dv,
+        option_type="call", power=1.0, n_paths=20000, seed=42,
+    )
+    p_dn = InversePowerOptionPricer.calculate_price(
+        S=50000.0, K=50000.0, T=30.0 / 365.0, r=0.02, sigma=0.6 - dv,
+        option_type="call", power=1.0, n_paths=20000, seed=42,
+    )
+    per_unit_estimate = (p_up - p_dn) / (2.0 * dv)
+    assert np.isclose(greeks.vega, per_unit_estimate, rtol=0.15)

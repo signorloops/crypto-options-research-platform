@@ -1,6 +1,7 @@
 """
 Tests for Volatility Regime Detector.
 """
+from collections import deque
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -493,3 +494,50 @@ class TestRegimeMappingAndStickiness:
 
         regime = detector.update(0.001)
         assert regime == RegimeState.LOW
+
+
+class TestRegimeHistoryBound:
+    """regime_history must be bounded for long-running sessions.
+
+    Each update() appends one tuple plus a copy of the posterior array, so an
+    unbounded list grows memory without limit in 24/7 crypto sessions. The
+    deque keeps the most recent MAX_REGIME_HISTORY observations.
+    """
+
+    def test_history_is_a_bounded_deque(self):
+        detector = VolatilityRegimeDetector()
+        assert isinstance(detector.regime_history, deque)
+        assert detector.regime_history.maxlen == VolatilityRegimeDetector.MAX_REGIME_HISTORY
+        assert VolatilityRegimeDetector.MAX_REGIME_HISTORY == 10_000
+
+    def test_history_capped_after_many_updates(self):
+        # Append more entries than the cap; length must stop at maxlen and
+        # retain the NEWEST observations.
+        detector = VolatilityRegimeDetector(RegimeConfig(min_samples_for_training=20))
+        detector._is_fitted = True
+        now = datetime.now()
+        total = 25
+        for i in range(total):
+            detector.regime_history.append((now, RegimeState.LOW, np.array([1.0, 0.0, 0.0])))
+        assert len(detector.regime_history) == total  # below the cap
+
+        detector.regime_history.extend(
+            (now, RegimeState.HIGH, np.array([0.0, 0.0, 1.0]))
+            for _ in range(VolatilityRegimeDetector.MAX_REGIME_HISTORY + 500)
+        )
+        assert len(detector.regime_history) == VolatilityRegimeDetector.MAX_REGIME_HISTORY
+        # Most recent entries survive.
+        assert detector.regime_history[-1][1] == RegimeState.HIGH
+
+    def test_history_stats_and_reset_still_work_when_bounded(self):
+        detector = VolatilityRegimeDetector(RegimeConfig(min_samples_for_training=20))
+        np.random.seed(42)
+        for ret in np.random.normal(0, 0.001, 30):
+            detector.update(ret)
+
+        stats = detector.get_regime_stats()
+        assert stats["total_observations"] == len(detector.regime_history)
+        assert stats["total_observations"] > 0
+
+        detector.reset()
+        assert len(detector.regime_history) == 0

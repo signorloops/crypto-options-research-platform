@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import ast
 import json
 import sys
 from pathlib import Path
@@ -94,6 +95,26 @@ def helper(x, y):
     assert report["metrics"]["max_methods_per_class"] == 2
     assert report["violations"] == []
     assert any(row["name"] == "run" for row in report["top_functions_by_loc"])
+
+
+def test_func_args_count_includes_positional_only_parameters():
+    # Fixed behaviour: positional-only parameters (before ``/``) used to be
+    # ignored, so this signature counted 2 instead of 5.
+    module = _load_module()
+
+    tree = ast.parse(
+        "def foo(a, b, /, c, *, d=1, **kw):\n    pass\n"
+    )
+
+    assert module._func_args_count(tree.body[0]) == 5
+
+
+def test_func_args_count_counts_vararg_and_kwarg():
+    module = _load_module()
+
+    tree = ast.parse("def foo(a, *args, b, **kwargs):\n    pass\n")
+
+    assert module._func_args_count(tree.body[0]) == 4
 
 
 def test_main_returns_nonzero_in_strict_mode_on_violation(tmp_path, monkeypatch):

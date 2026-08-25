@@ -33,9 +33,12 @@ def render_weekly_summary(
     inverse_power_summary = (inverse_power_report or {}).get("summary", {})
     passed = bool(drift_report.get("passed", False))
     violations = drift_report.get("violations", [])
-    best_model = model.get("current_best_model") or model_report.get("results", [{}])[0].get(
-        "model", ""
-    )
+    # Mirror research_audit_snapshot.py: guard against a report whose "results"
+    # key is present but empty (the old `[{}]` default only applied when the key
+    # itself was missing, so `"results": []` raised IndexError).
+    model_results = model_report.get("results") or []
+    best_row = model_results[0] if model_results else {}
+    best_model = model.get("current_best_model") or best_row.get("model", "")
 
     lines = [
         "# Research Audit Weekly Card",

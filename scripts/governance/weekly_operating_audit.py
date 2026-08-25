@@ -287,10 +287,12 @@ def _collect_issue_messages(
 
 
 def _report_issue_messages(issue_messages: list[str], *, strict: bool) -> int | None:
+    # Print every collected issue before deciding the exit code, so strict runs
+    # surface all failures instead of only the first one.
     for message in issue_messages:
         print(message)
-        if strict:
-            return 2
+    if issue_messages and strict:
+        return 2
     return None
 
 

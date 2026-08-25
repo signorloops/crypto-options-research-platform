@@ -10,6 +10,35 @@ import numpy as np
 from research.volatility.iv_solvers import black_scholes_price
 
 
+def _reference_spot(surface, fitted_spot: Optional[float] = None) -> float:
+    """Resolve the spot used to convert strike -> log-moneyness.
+
+    SVI/SSVI fits were calibrated on the k-grid ``log(K / spot_fit)``, so the
+    query must evaluate the fit on the *same* grid. Preference order:
+
+    1. an explicitly passed fitted spot (``SVIParams.spot``/``SSVIParams.spot``
+       of the fit being queried),
+    2. any spot recorded on the surface's SSVI or SVI fits,
+    3. ``points[0].underlying_price`` — the historical fallback, which is also
+       the de-facto grid origin the fit used when all points share one
+       underlying price.
+
+    Without this, a surface holding stale points (mixed underlying prices)
+    evaluates the fit on a k-grid shifted away from the one it was fitted on.
+    """
+    candidates = [fitted_spot]
+    ssvi_params = getattr(surface, "_ssvi_params", None)
+    if ssvi_params is not None:
+        candidates.append(getattr(ssvi_params, "spot", None))
+    svi_params = getattr(surface, "_svi_params", None) or {}
+    for params in svi_params.values():
+        candidates.append(getattr(params, "spot", None))
+    for candidate in candidates:
+        if candidate is not None and np.isfinite(candidate) and candidate > 0:
+            return float(candidate)
+    return float(surface.points[0].underlying_price)
+
+
 def vol_from_ssvi(surface, strike: float, expiry: float, ssvi_total_variance_fn) -> Optional[float]:
     missing = (
         surface._ssvi_params is None
@@ -33,7 +62,7 @@ def vol_from_ssvi(surface, strike: float, expiry: float, ssvi_total_variance_fn)
         right=float(surface._ssvi_atm_total_vars[-1]),
     )
     theta = float(max(theta, 1e-10))
-    k = np.log(strike / surface.points[0].underlying_price)
+    k = np.log(strike / _reference_spot(surface, getattr(surface._ssvi_params, "spot", None)))
     total_var = ssvi_total_variance_fn(
         np.array([k], dtype=float),
         np.array([theta], dtype=float),
@@ -52,7 +81,7 @@ def vol_from_svi(surface, strike: float, expiry: float, svi_total_variance_fn) -
 
     nearest_expiry = min(surface._svi_params.keys(), key=lambda x: abs(x - expiry))
     params = surface._svi_params[nearest_expiry]
-    k = np.log(strike / surface.points[0].underlying_price)
+    k = np.log(strike / _reference_spot(surface, getattr(params, "spot", None)))
     total_var = svi_total_variance_fn(np.array([k]), params)[0]
     t_eff = max(expiry, 1e-8)
     vol = np.sqrt(max(total_var, 1e-10) / t_eff)
@@ -62,7 +91,7 @@ def vol_from_svi(surface, strike: float, expiry: float, svi_total_variance_fn) -
 def vol_from_idw(surface, strike: float, expiry: float) -> float:
     points_array = np.array([[p.log_moneyness, p.expiry, p.volatility] for p in surface.points])
 
-    x_target = np.log(strike / surface.points[0].underlying_price)
+    x_target = np.log(strike / _reference_spot(surface))
     y_target = expiry
     distances = np.sqrt((points_array[:, 0] - x_target) ** 2 + (points_array[:, 1] - y_target) ** 2)
     distances = np.maximum(distances, 1e-10)
@@ -155,7 +184,7 @@ def get_term_structure(surface, moneyness: float = 1.0) -> List[Tuple[float, flo
 
 
 def atm_volatility(surface, expiry: float) -> float:
-    return surface.get_volatility(surface.points[0].underlying_price, expiry)
+    return surface.get_volatility(_reference_spot(surface), expiry)
 
 
 def summary(surface) -> Dict:
@@ -178,7 +207,7 @@ def check_butterfly_arbitrage(
     if not surface.points:
         return {"has_arbitrage": False, "violations": []}
 
-    spot = surface.points[0].underlying_price
+    spot = _reference_spot(surface)
     risk_free_rate = float(os.getenv("RISK_FREE_RATE", "0.05"))
     strikes = np.linspace(0.6 * spot, 1.4 * spot, n_strikes)
     vols = np.array([surface.get_volatility(float(k), expiry, method="svi") for k in strikes])
@@ -226,7 +255,7 @@ def check_calendar_arbitrage(
     if len(expiries) < 2:
         return {"has_arbitrage": False, "violations": []}
 
-    spot = surface.points[0].underlying_price
+    spot = _reference_spot(surface)
     if moneyness_grid is None:
         moneyness_grid = [0.8, 0.9, 1.0, 1.1, 1.2]
 

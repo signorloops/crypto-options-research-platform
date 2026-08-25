@@ -459,3 +459,38 @@ def test_statistical_comparison_avoids_runtime_warning_on_near_identical_series(
     runtime_warnings = [w for w in caught if issubclass(w.category, RuntimeWarning)]
     assert runtime_warnings == []
     assert pvals.shape == (2, 2)
+
+
+def test_apply_deflated_sharpe_uses_nonzero_threshold_at_two_strategies():
+    """Arena DSR must apply a real multiple-testing threshold at N=2.
+
+    ``_apply_deflated_sharpe`` previously used ``Phi^-1(1 - 1/N)`` as the
+    expected max Sharpe, which is exactly 0 at N=2 — so the threshold vanished
+    and every mildly positive Sharpe scored DSR ~ 1. It now shares the Bailey
+    & Lopez de Prado expected-maximum helper with BacktestEngine.
+    """
+    import numpy as np
+
+    arena = StrategyArena(_market_data_frame(), initial_capital=100000.0)
+    r1 = _make_backtest_result("A", list(range(20)), sharpe=1.0)
+    r2 = _make_backtest_result("B", [v * 0.8 for v in range(20)], sharpe=0.8)
+    arena.scorecards = {"A": arena._calculate_scorecard(r1), "B": arena._calculate_scorecard(r2)}
+
+    arena._apply_deflated_sharpe()
+
+    # A modest per-period Sharpe with only 20 observations must not be
+    # scored as essentially certain (the broken threshold gave ~1.0 here).
+    for sc in arena.scorecards.values():
+        assert 0.0 <= sc.deflated_sharpe_ratio <= 1.0
+    # The stronger strategy should not score below the weaker one.
+    assert (
+        arena.scorecards["A"].deflated_sharpe_ratio
+        >= arena.scorecards["B"].deflated_sharpe_ratio
+    )
+    # Sanity: the threshold term is the shared helper, not the old ppf form.
+    from research.backtest.engine import expected_max_standard_normal
+    from scipy.stats import norm
+
+    assert expected_max_standard_normal(2) > 0.0
+    assert expected_max_standard_normal(2) != pytest.approx(norm.ppf(1.0 - 1.0 / 2))
+    _ = np

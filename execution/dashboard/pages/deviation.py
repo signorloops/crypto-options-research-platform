@@ -29,7 +29,13 @@ def _bucket_expiry(expiry_years: pd.Series) -> pd.Series:
     days = expiry_years.astype(float) * 365.0
     bins = [-float("inf"), 7.0, 30.0, 90.0, 180.0, float("inf")]
     labels = ["<=7D", "8-30D", "31-90D", "91-180D", ">180D"]
-    return pd.cut(days, bins=bins, labels=labels)
+    buckets = pd.cut(days, bins=bins, labels=labels)
+    # Missing/unparseable expiry must not default to 0 days, which would
+    # pollute the "<=7D" bucket — the maturity that matters most. Keep
+    # unknown-expiry rows in their own bucket instead.
+    if buckets.isna().any():
+        buckets = buckets.cat.add_categories(["UNKNOWN"]).fillna("UNKNOWN")
+    return buckets
 
 
 def _bucket_abs_delta(abs_delta: pd.Series) -> pd.Series:
@@ -73,8 +79,10 @@ def _prepare_deviation_frame(
     work["deviation_bps"] = (work["market_px"] - work["model_px"]) / denom * 10000.0
     work["abs_deviation_bps"] = work["deviation_bps"].abs()
     if expiry_col:
+        # Missing/unparseable expiry stays NaN so _bucket_expiry can route
+        # it to "UNKNOWN" instead of 0 days landing in the "<=7D" bucket.
         work["expiry_bucket"] = _bucket_expiry(
-            pd.to_numeric(work[expiry_col], errors="coerce").fillna(0.0)
+            pd.to_numeric(work[expiry_col], errors="coerce")
         )
     else:
         work["expiry_bucket"] = "ALL"
@@ -92,9 +100,15 @@ def _build_deviation_heatmap(work: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataF
         .mean()
         .reset_index()
     )
-    heatmap["abs_deviation_bps"] = heatmap["abs_deviation_bps"].fillna(0.0)
     pivot = heatmap.pivot(index="expiry_bucket", columns="delta_bucket", values="abs_deviation_bps")
-    pivot = pivot.fillna(0.0)
+    # Empty (expiry, delta) combinations stay null instead of being filled
+    # with 0.0, which was indistinguishable from "perfectly matched prices".
+    # Plotly renders null cells as blank and json serializes them as null.
+    heatmap["abs_deviation_bps"] = (
+        heatmap["abs_deviation_bps"]
+        .astype(object)
+        .where(heatmap["abs_deviation_bps"].notna(), None)
+    )
     return heatmap, pivot
 
 
@@ -136,7 +150,9 @@ def build_cross_market_deviation_report(
     }
     return {
         "summary": summary,
-        "heatmap_matrix": pivot.to_dict(),
+        # Serialize empty cells as null (not NaN), which strict JSON
+        # encoders such as starlette's JSONResponse would reject.
+        "heatmap_matrix": pivot.astype(object).where(pivot.notna(), None).to_dict(),
         "heatmap_records": heatmap.to_dict(orient="records"),
         "alerts": alerts[alert_cols].head(50).to_dict(orient="records"),
         "columns": {

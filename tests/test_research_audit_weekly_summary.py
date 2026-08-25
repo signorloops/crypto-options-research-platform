@@ -76,3 +76,38 @@ def test_render_weekly_summary_shows_fail_violations():
 
     assert "- Status: `FAIL`" in markdown
     assert "- Best-model RMSE increase too large" in markdown
+
+
+def test_render_weekly_summary_handles_empty_results_list_without_index_error():
+    # Fixed behaviour: a report with "results": [] used to raise IndexError
+    # because the `[{}]` default only applied when the key itself was missing.
+    iv_report = {"summary": {"no_arbitrage": True, "avg_max_jump_reduction_short": 0.02}}
+    model_report = {"results": []}
+    drift_report = {
+        "current_generated_at": "2026-02-25T00:00:00+00:00",
+        "passed": True,
+        "model_zoo": {},
+        "iv_surface": {},
+        "violations": [],
+    }
+
+    markdown = render_weekly_summary(iv_report, model_report, drift_report)
+
+    assert "| Best model | `` |" in markdown
+    assert "- None" in markdown
+
+
+def test_render_weekly_summary_falls_back_to_first_model_result():
+    iv_report = {"summary": {}}
+    model_report = {"results": [{"model": "bates", "rmse": 55.0}, {"model": "heston"}]}
+    drift_report = {
+        "current_generated_at": "t0",
+        "passed": True,
+        "model_zoo": {},
+        "iv_surface": {},
+        "violations": [],
+    }
+
+    markdown = render_weekly_summary(iv_report, model_report, drift_report)
+
+    assert "| Best model | `bates` |" in markdown

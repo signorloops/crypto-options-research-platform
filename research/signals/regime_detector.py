@@ -125,6 +125,13 @@ class VolatilityRegimeDetector:
     - Regime switch probability prediction
     """
 
+    # Cap on regime_history length. Each entry stores a timestamp, a regime
+    # enum and a copy of the posterior probabilities; at 1-minute crypto bars
+    # 10000 entries ~ 7 days of history, which is ample for
+    # get_regime_stats()/predict_regime_switch_probability() and keeps the
+    # detector's footprint flat over multi-week sessions.
+    MAX_REGIME_HISTORY = 10_000
+
     def __init__(self, config: Optional[RegimeConfig] = None):
         self.config = config or RegimeConfig()
         self.model: Optional[hmm.GaussianHMM] = None
@@ -147,8 +154,12 @@ class VolatilityRegimeDetector:
         self._state_map: Dict[int, int] = {i: i for i in range(self.config.n_regimes)}
         self._current_regime_run_length: int = 0
 
-        # Regime history
-        self.regime_history: List[Tuple[datetime, RegimeState, np.ndarray]] = []
+        # Regime history: bounded so long-running (24/7 crypto) sessions do
+        # not grow memory without limit — one tuple plus a probs array copy is
+        # appended per update(). Retains the most recent observations.
+        self.regime_history: Deque[Tuple[datetime, RegimeState, np.ndarray]] = deque(
+            maxlen=VolatilityRegimeDetector.MAX_REGIME_HISTORY
+        )
 
         # Initialize model
         self._init_model()

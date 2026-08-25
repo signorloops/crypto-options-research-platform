@@ -1,9 +1,17 @@
-"""Quanto adjustment layer for inverse-power option pricing."""
+"""Quanto adjustment layer for inverse-power option pricing.
+
+Greek unit convention — DIFFERENT from quanto_inverse.py, do not mix:
+- theta: annual (-dV/dT, T in years; inherited from InversePowerGreeks)
+- vega:  per unit of volatility (dV/dsigma)
+- rho:   per unit of risk-free rate
+research/pricing/quanto_inverse.py reports **daily** theta and **per-1%-vol**
+vega under the same field names.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Literal, Optional, Tuple
+from typing import Any, ClassVar, Dict, Literal, Optional, Tuple
 
 import numpy as np
 
@@ -12,7 +20,17 @@ from research.pricing.inverse_power_options import InversePowerOptionPricer
 
 @dataclass
 class QuantoInversePowerGreeks:
-    """Greeks for quanto-inverse-power options in settlement currency."""
+    """Greeks for quanto-inverse-power options in settlement currency.
+
+    Unit convention (inherited from the wrapped ``InversePowerGreeks``): theta
+    is **annual** and vega is **per unit of volatility**.
+    ``QuantoInverseGreeks`` (quanto_inverse.py) reports daily theta and
+    per-1%-vol vega under the same field names — rescale before combining.
+    """
+
+    THETA_UNIT: ClassVar[str] = "annual"
+    VEGA_UNIT: ClassVar[str] = "per_unit_vol"
+    RHO_UNIT: ClassVar[str] = "per_unit_rate"
 
     delta: float
     gamma: float
@@ -30,6 +48,10 @@ class QuantoInversePowerOptionPricer:
     Approximation:
     - Start from inverse-power option value in collateral currency.
     - Convert by FX and apply quanto factor exp(-rho*sigma_s*sigma_fx*T).
+
+    Greeks carry over the InversePowerGreeks convention: annual theta,
+    per-unit-vol vega, per-unit-rate rho (the quanto drift terms are added
+    unscaled, matching the base Greeks' units).
     """
 
     EPS = 1e-12

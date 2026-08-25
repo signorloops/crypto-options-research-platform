@@ -9,7 +9,13 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from execution.dashboard.chart_builders import comparison_bars, multi_pnl_overlay
-from execution.dashboard.data_helpers import available_json_results, load_backtest_json, normalize_strategy_results_payload, resolve_json_result_path
+from execution.dashboard.data_helpers import (
+    _to_float,
+    available_json_results,
+    load_backtest_json,
+    normalize_strategy_results_payload,
+    resolve_json_result_path,
+)
 from execution.dashboard.templates import base_layout, data_table, file_selector
 
 
@@ -17,8 +23,9 @@ def _extract_metric(summary: Dict[str, Any], *keys: str) -> float:
     """Extract a metric trying multiple key names."""
     for k in keys:
         if k in summary:
-            val = summary[k]
-            return float(val) if val is not None else 0.0
+            # Defensive coercion: summaries can contain "n/a" or other
+            # non-numeric strings, which float() would turn into a 500.
+            return _to_float(summary[k])
     return 0.0
 
 

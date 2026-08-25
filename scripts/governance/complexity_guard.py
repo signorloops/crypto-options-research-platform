@@ -86,7 +86,9 @@ def _func_args_count(node: ast.AST) -> int:
     if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
         return 0
     args = node.args
-    count = len(args.args) + len(args.kwonlyargs)
+    # ``posonlyargs`` exists on every supported Python but is kept optional so the
+    # helper stays tolerant of stubbed AST nodes in tests.
+    count = len(getattr(args, "posonlyargs", [])) + len(args.args) + len(args.kwonlyargs)
     if args.vararg:
         count += 1
     if args.kwarg:

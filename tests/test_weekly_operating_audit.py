@@ -272,7 +272,51 @@ def test_run_regression_command_returns_report_and_ignores_blank(tmp_path, monke
     regression_cmd, regression_kwargs = calls[0]
     assert regression_cmd == ["python", "-m", "pytest", "-q", "tests/test_pricing_inverse.py"]
     assert regression_kwargs["cwd"] == tmp_path
+    assert regression_kwargs["timeout"] > 0
     assert regression_kwargs.get("shell") in (None, False)
+
+
+def test_run_regression_command_records_failed_row_on_malformed_quoting(monkeypatch):
+    # Fixed behaviour: shlex.split raised an uncaught ValueError for commands
+    # with malformed quoting, crashing the audit run instead of failing the row.
+    module = _load_module()
+
+    def fail_run(cmd, **kwargs):  # pragma: no cover - must never be reached
+        raise AssertionError("runner must not be called for unparseable commands")
+
+    monkeypatch.setattr(module.subprocess, "run", fail_run)
+
+    report = module._run_regression_command('pytest "unclosed', Path("."))
+
+    assert report is not None
+    assert report["executed"] is True
+    assert report["passed"] is False
+    assert report["return_code"] == 127
+    assert "failed to parse regression command" in report["output_tail"]
+
+
+def test_run_regression_command_times_out_hung_command(monkeypatch):
+    # Fixed behaviour: the regression subprocess previously had no timeout, so a
+    # hung test run blocked the weekly audit forever.
+    from scripts.governance.weekly_operating_cli_utils import SUBPROCESS_TIMEOUT_SEC
+
+    module = _load_module()
+    seen_kwargs: dict[str, object] = {}
+
+    def fake_run(cmd, **kwargs):
+        seen_kwargs.update(kwargs)
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=kwargs.get("timeout"))
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    report = module._run_regression_command("python -m pytest -q tests", Path("."))
+
+    assert report is not None
+    assert report["executed"] is True
+    assert report["passed"] is False
+    assert report["return_code"] == 124
+    assert "timed out" in report["output_tail"]
+    assert seen_kwargs.get("timeout") == SUBPROCESS_TIMEOUT_SEC
 
 
 def test_resolve_input_files_prefers_explicit_inputs_before_discovery(tmp_path, monkeypatch):
@@ -361,11 +405,24 @@ def test_report_issue_messages_returns_exit_only_when_strict(capsys):
 
     captured = capsys.readouterr()
     assert "problem-1" in captured.out
-    assert captured.out.count("problem-1") == 2
-    assert "problem-2" not in captured.out
+    assert "problem-2" in captured.out
     assert strict_exit == 2
     assert relaxed_exit is None
     assert empty_exit is None
+
+
+def test_report_issue_messages_strict_prints_all_collected_issues(capsys):
+    # Fixed behaviour: strict mode must surface every collected issue, not stop
+    # after the first one (the old loop returned inside the first iteration).
+    module = _load_module()
+
+    strict_exit = module._report_issue_messages(
+        ["problem-1", "problem-2", "problem-3"], strict=True
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out.splitlines() == ["problem-1", "problem-2", "problem-3"]
+    assert strict_exit == 2
 
 
 def test_handle_strict_close_returns_exit_when_gate_not_ready(tmp_path, monkeypatch):

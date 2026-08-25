@@ -512,3 +512,40 @@ class TestEdgeCases:
         # Deep ITM put should be close to intrinsic value
         intrinsic = 1/S - 1/K
         assert abs(price - intrinsic) < 0.0001
+
+
+class TestGreekUnitConvention:
+    """Guards for the documented theta/vega unit convention.
+
+    ``InverseGreeks`` (daily theta, per-1% vega) and ``InversePowerGreeks``
+    (annual theta, per-unit-vol vega) expose identical field names with
+    different units; the THETA_UNIT/VEGA_UNIT classvars make the distinction
+    machine-readable so consumers can rescale before combining them.
+    """
+
+    def test_unit_metadata_declared(self):
+        assert InverseGreeks.THETA_UNIT == "daily"
+        assert InverseGreeks.VEGA_UNIT == "per_1pct_vol"
+        assert InverseGreeks.RHO_UNIT == "per_1pct_rate"
+
+    def test_theta_is_daily_scale(self):
+        greeks = InverseOptionPricer.calculate_greeks(
+            S=50000, K=50000, T=0.25, r=0.05, sigma=0.60, option_type="call"
+        )
+        # A daily number must be ~365x smaller than the annual -dV/dT;
+        # verify via a finite-difference re-derivation of the annual figure.
+        h = 1e-5
+        p_up = InverseOptionPricer.calculate_price(50000, 50000, 0.25 + h, 0.05, 0.60, "call")
+        p_dn = InverseOptionPricer.calculate_price(50000, 50000, 0.25 - h, 0.05, 0.60, "call")
+        annual_theta = -(p_up - p_dn) / (2 * h)
+        assert greeks.theta == pytest.approx(annual_theta / 365.0, rel=0.05)
+
+    def test_vega_is_per_1pct_scale(self):
+        greeks = InverseOptionPricer.calculate_greeks(
+            S=50000, K=50000, T=0.25, r=0.05, sigma=0.60, option_type="call"
+        )
+        h = 1e-4
+        p_up = InverseOptionPricer.calculate_price(50000, 50000, 0.25, 0.05, 0.60 + h, "call")
+        p_dn = InverseOptionPricer.calculate_price(50000, 50000, 0.25, 0.05, 0.60 - h, "call")
+        per_unit_vega = (p_up - p_dn) / (2 * h)
+        assert greeks.vega == pytest.approx(per_unit_vega * 0.01, rel=0.05)

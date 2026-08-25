@@ -112,3 +112,42 @@ def test_main_handles_empty_command_as_failed_without_crashing(tmp_path, monkeyp
     assert report["summary"]["all_passed"] is False
     assert report["results"][0]["return_code"] == 127
     assert report["results"][0]["output_tail"] == "empty command"
+
+
+def test_run_command_times_out_hung_command_as_failed_row(monkeypatch):
+    # Fixed behaviour: subprocess.run previously had no timeout, so a hung test
+    # command blocked the gate forever. It must map to a failed row instead.
+    module = _load_module()
+    seen_kwargs: dict[str, object] = {}
+
+    def fake_run(cmd, **kwargs):
+        seen_kwargs.update(kwargs)
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=kwargs.get("timeout"))
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    row = module._run_command("python -m pytest -q tests", cwd=Path("."))
+
+    assert seen_kwargs.get("timeout") == module.SUBPROCESS_TIMEOUT_SEC
+    assert row["return_code"] == 124
+    assert row["passed"] is False
+    assert "timed out" in row["output_tail"]
+    assert str(module.SUBPROCESS_TIMEOUT_SEC) in row["output_tail"]
+
+
+def test_run_command_timeout_row_includes_partial_output(monkeypatch):
+    module = _load_module()
+
+    def fake_run(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(
+            cmd=cmd,
+            timeout=kwargs.get("timeout"),
+            output=b"partial stdout",
+        )
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    row = module._run_command("python -m pytest -q tests", cwd=Path("."))
+
+    assert row["passed"] is False
+    assert "partial stdout" in row["output_tail"]

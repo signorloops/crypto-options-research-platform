@@ -90,3 +90,33 @@ def test_quanto_input_validation():
         QuantoInverseOptionPricer.calculate_price(
             50000.0, 50000.0, 0.25, 0.03, 0.6, "call", fx_rate=1.2, sigma_fx=0.5, rho=1.2
         )
+
+
+def test_quanto_greek_unit_convention_matches_base_inverse_pricer():
+    """QuantoInverseGreeks inherits the daily-theta / per-1%-vega convention.
+
+    ``QuantoInversePowerGreeks`` (quanto_inverse_power.py) reports annual
+    theta and per-unit-vol vega under the same field names; the classvars
+    make the distinction explicit so consumers can rescale before mixing.
+    """
+    from research.pricing.quanto_inverse import QuantoInverseGreeks
+
+    assert QuantoInverseGreeks.THETA_UNIT == "daily"
+    assert QuantoInverseGreeks.VEGA_UNIT == "per_1pct_vol"
+    assert QuantoInverseGreeks.RHO_UNIT == "per_1pct_rate"
+
+    _, greeks = QuantoInverseOptionPricer.calculate_price_and_greeks(
+        S=50000.0,
+        K=50000.0,
+        T=0.25,
+        r=0.03,
+        sigma=0.6,
+        option_type="call",
+        fx_rate=1.1,
+        sigma_fx=0.7,
+        rho=0.25,
+    )
+    # Daily theta for a 3m option: small but not ~1e-9 tiny (annual would be
+    # ~365x larger), and per-1% vega is two orders below per-unit vega.
+    assert 1e-9 < abs(greeks.theta) < 1e-5
+    assert 0.0 < greeks.vega < 1e-5

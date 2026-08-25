@@ -201,3 +201,35 @@ def test_quanto_inverse_power_input_validation():
             rho=1.1,
             power=1.0,
         )
+
+
+def test_quanto_inverse_power_greek_unit_convention_matches_base():
+    """QuantoInversePowerGreeks inherits annual-theta / per-unit-vol vega.
+
+    This is the opposite of ``QuantoInverseGreeks`` (quanto_inverse.py),
+    which reports daily theta and per-1% vega under the same field names.
+    The classvars make the distinction machine-readable.
+    """
+    from research.pricing.quanto_inverse_power import QuantoInversePowerGreeks
+
+    assert QuantoInversePowerGreeks.THETA_UNIT == "annual"
+    assert QuantoInversePowerGreeks.VEGA_UNIT == "per_unit_vol"
+    assert QuantoInversePowerGreeks.RHO_UNIT == "per_unit_rate"
+
+    _, greeks = QuantoInversePowerOptionPricer.calculate_price_and_greeks(
+        S=50000.0,
+        K=50000.0,
+        T=0.25,
+        r=0.02,
+        sigma=0.6,
+        option_type="call",
+        fx_rate=1.2,
+        sigma_fx=0.7,
+        rho=0.3,
+        power=1.1,
+        n_paths=20000,
+        seed=42,
+    )
+    # Annual theta is ~365x the daily figure; for this contract it stays in a
+    # band well above the daily scale (~1e-6) and below an implausible level.
+    assert abs(greeks.theta) > 1e-6

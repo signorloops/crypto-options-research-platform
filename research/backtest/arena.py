@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 
-from research.backtest.engine import BacktestEngine, BacktestResult
+from research.backtest.engine import BacktestEngine, BacktestResult, expected_max_standard_normal
 from strategies.base import MarketMakingStrategy
 from utils.logging_config import get_logger, log_extra
 
@@ -660,14 +660,21 @@ class StrategyArena:
         return result, scorecard
 
     def _apply_deflated_sharpe(self) -> None:
-        """Apply multiple-testing correction to Sharpe across all compared strategies."""
+        """Apply multiple-testing correction to Sharpe across all compared strategies.
+
+        The expected-maximum Sharpe under the null uses the Bailey & Lopez de
+        Prado (2014) closed form via ``expected_max_standard_normal`` (shared
+        with BacktestEngine._deflated_sharpe_ratio). The previous
+        ``Phi^-1(1 - 1/N)`` term is exactly 0 at n_trials=2, so the threshold
+        vanished and every mildly positive Sharpe scored DSR ~ 1.
+        """
         n_trials = max(1, len(self.scorecards))
         for sc in self.scorecards.values():
             n_obs = max(len(sc.pnl_series.diff().dropna()), 1)
             if n_obs < 5:
                 sc.deflated_sharpe_ratio = 0.0
                 continue
-            expected_max_sr = norm.ppf(1.0 - 1.0 / max(n_trials, 2)) / np.sqrt(max(n_obs - 1, 1))
+            expected_max_sr = expected_max_standard_normal(n_trials) / np.sqrt(max(n_obs - 1, 1))
             denom = max(np.sqrt(1.0 / max(n_obs - 1, 1)), 1e-12)
             z = (sc.sharpe_ratio - expected_max_sr) / denom
             sc.deflated_sharpe_ratio = float(norm.cdf(z))

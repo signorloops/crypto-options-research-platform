@@ -141,10 +141,29 @@ def fit_ssvi(surface, ssvi_params_cls: Type, expiry_tol: float = 0.01):
     rho, eta, lam = _fit_ssvi_parameters(surface, ssvi_params_cls, x_exp, y_theta)
     eta_upper = _ssvi_eta_upper_bound(y_theta, rho, lam)
     eta = float(np.clip(eta, 1e-4, eta_upper))
-    surface._ssvi_params = ssvi_params_cls(rho=rho, eta=eta, lam=lam)
+    surface._ssvi_params = ssvi_params_cls(rho=rho, eta=eta, lam=lam, spot=_fitted_spot(surface))
     surface._ssvi_atm_expiries = x_exp
     surface._ssvi_atm_total_vars = y_theta
     return surface._ssvi_params
+
+
+def _fitted_spot(surface) -> float | None:
+    """Reference spot the k-grid was fitted against.
+
+    The k observations are ``log(strike / point.underlying_price)`` per point;
+    when every point shares one underlying_price that value is the exact
+    anchor. With stale points (mixed underlying prices — e.g. the surface was
+    re-stamped with a newer spot) there is no single anchor that reproduces
+    the grid, so the freshest (last-added) point's price is recorded: it is
+    the current market spot and the denominator future queries should use.
+    """
+    points = surface.points
+    if not points:
+        return None
+    spots = {float(p.underlying_price) for p in points}
+    if len(spots) == 1:
+        return next(iter(spots))
+    return float(points[-1].underlying_price)
 
 
 def _svi_observations(
@@ -161,13 +180,14 @@ def _svi_observations(
     return k, w
 
 
-def _default_svi_params(svi_params_cls: Type, k: np.ndarray, w: np.ndarray):
+def _default_svi_params(svi_params_cls: Type, k: np.ndarray, w: np.ndarray, spot=None):
     return svi_params_cls(
         a=float(np.min(w) * 0.8),
         b=float(max(1e-4, np.std(w))),
         rho=0.0,
         m=float(np.median(k)),
         sigma=0.1,
+        spot=spot,
     )
 
 
@@ -206,13 +226,15 @@ def fit_svi(surface, expiry: float, svi_params_cls: Type, expiry_tol: float = 0.
     if observations is None:
         return None
     k, w = observations
+    fitted_spot = _fitted_spot(surface)
     if not HAS_SCIPY_OPT:
-        params = _default_svi_params(svi_params_cls, k, w)
+        params = _default_svi_params(svi_params_cls, k, w, spot=fitted_spot)
         surface._svi_params[float(expiry)] = params
         return params
     x = _fit_svi_vector(k, w)
     params = svi_params_cls(
-        a=float(x[0]), b=float(x[1]), rho=float(x[2]), m=float(x[3]), sigma=float(x[4])
+        a=float(x[0]), b=float(x[1]), rho=float(x[2]), m=float(x[3]), sigma=float(x[4]),
+        spot=fitted_spot,
     )
     surface._svi_params[float(expiry)] = params
     return params

@@ -27,7 +27,16 @@ STRATEGY_RESULT_FIELDS = (
 def available_result_files(results_dir: Path) -> List[Path]:
     """Return sorted result files supported by the dashboard."""
     files = list(results_dir.glob("*.csv")) + list(results_dir.glob("*.parquet"))
-    return sorted(files, key=lambda path: path.stat().st_mtime, reverse=True)
+    timed: List[Tuple[float, Path]] = []
+    for path in files:
+        # A file can be deleted between glob() and stat(); skip it rather
+        # than fail the whole listing with FileNotFoundError (-> HTTP 500).
+        try:
+            timed.append((path.stat().st_mtime, path))
+        except OSError:
+            continue
+    timed.sort(key=lambda item: item[0], reverse=True)
+    return [path for _, path in timed]
 
 
 def _find_time_column(df: pd.DataFrame) -> Optional[str]:
@@ -90,6 +99,24 @@ def _build_summary_rows(summary: Dict[str, Any]) -> str:
 
 
 # --- JSON backtest result helpers ---
+
+
+def _to_float(value: Any, default: float = 0.0) -> float:
+    """Coerce an arbitrary JSON value to float, falling back to default.
+
+    Mirrors the defensive _to_float used by governance scripts: unparseable
+    strings ("n/a", ""), None, booleans, NaN and infinities all fall back so
+    a single malformed metric cannot 500 a dashboard page.
+    """
+    if value is None or isinstance(value, bool):
+        return default
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return default
+    if num != num or num in (float("inf"), float("-inf")):
+        return default
+    return num
 
 def load_backtest_json(path: Path) -> Dict[str, Any]:
     """Load a backtest results JSON file and return its contents."""

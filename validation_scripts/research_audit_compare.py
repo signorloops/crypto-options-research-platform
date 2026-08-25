@@ -37,14 +37,18 @@ def compare_snapshots(
     base_best_rmse = float(base_model.get("best_rmse", 0.0))
     curr_best_rmse = float(curr_model.get("best_rmse", 0.0))
     rmse_increase_pct = 0.0
-    if base_best_rmse > 0:
+    baseline_rmse_degenerate = base_best_rmse <= 0
+    if not baseline_rmse_degenerate:
         rmse_increase_pct = (curr_best_rmse - base_best_rmse) / base_best_rmse * 100.0
 
     base_iv_reduction = float(base_iv.get("avg_max_jump_reduction_short", 0.0))
     curr_iv_reduction = float(curr_iv.get("avg_max_jump_reduction_short", 0.0))
     iv_drop_pct = 0.0
-    if base_iv_reduction > 0:
-        iv_drop_pct = (base_iv_reduction - curr_iv_reduction) / base_iv_reduction * 100.0
+    baseline_iv_reduction_degenerate = base_iv_reduction <= 0
+    if not baseline_iv_reduction_degenerate:
+        iv_drop_pct = (
+            (base_iv_reduction - curr_iv_reduction) / base_iv_reduction * 100.0
+        )
 
     base_best_model = str(base_model.get("best_model", ""))
     curr_best_model = str(curr_model.get("best_model", ""))
@@ -72,10 +76,24 @@ def compare_snapshots(
             "Best-model RMSE increase too large: "
             f"{rmse_increase_pct:.4f}% > {max_best_rmse_increase_pct:.4f}%"
         )
+    elif baseline_rmse_degenerate and curr_best_rmse > 0:
+        # A missing/zero baseline must not silently disable the RMSE guard: when
+        # the current run reports a positive RMSE there is no way to prove the
+        # increase is within budget, so fail closed with a distinct reason.
+        violations.append(
+            "Baseline best-model RMSE missing or non-positive "
+            f"({base_best_rmse:.6f}) while current RMSE is {curr_best_rmse:.6f}"
+        )
     if iv_drop_pct > max_iv_reduction_drop_pct:
         violations.append(
             "Short-maturity stabilization dropped too much: "
             f"{iv_drop_pct:.4f}% > {max_iv_reduction_drop_pct:.4f}%"
+        )
+    elif baseline_iv_reduction_degenerate and curr_iv_reduction > 0:
+        violations.append(
+            "Baseline short-maturity stabilization missing or non-positive "
+            f"({base_iv_reduction:.6f}) while current reduction is "
+            f"{curr_iv_reduction:.6f}"
         )
     if not bool(curr_iv.get("no_arbitrage", False)):
         violations.append("Current IV snapshot no_arbitrage=false")

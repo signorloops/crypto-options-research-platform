@@ -7,6 +7,18 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 
+# Bound the regression command so a hung test run cannot block the audit forever.
+SUBPROCESS_TIMEOUT_SEC = 60 * 60
+
+
+def _as_text(value: object) -> str:
+    """Best-effort conversion of captured subprocess output to text."""
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", "replace")
+    return str(value)
+
 
 def resolve_input_files(
     *,
@@ -27,19 +39,55 @@ def run_regression_command(
     *,
     repo_root: Path,
     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    timeout_sec: float = SUBPROCESS_TIMEOUT_SEC,
 ) -> Optional[dict[str, Any]]:
     """Execute an optional regression command without shell interpolation."""
     if not command.strip():
         return None
-    regression_cmd = shlex.split(command)
+    try:
+        regression_cmd = shlex.split(command)
+    except ValueError as exc:
+        # Malformed quoting must be recorded as a failed regression row instead of
+        # crashing the whole audit run.
+        return {
+            "executed": True,
+            "command": command,
+            "passed": False,
+            "return_code": 127,
+            "output_tail": f"failed to parse regression command: {exc}",
+        }
     if not regression_cmd:
-        raise ValueError("Regression command is empty after parsing")
-    completed = runner(
-        regression_cmd,
-        cwd=repo_root,
-        text=True,
-        capture_output=True,
-    )
+        return {
+            "executed": True,
+            "command": command,
+            "passed": False,
+            "return_code": 127,
+            "output_tail": "Regression command is empty after parsing",
+        }
+    try:
+        completed = runner(
+            regression_cmd,
+            cwd=repo_root,
+            text=True,
+            capture_output=True,
+            timeout=timeout_sec,
+        )
+    except subprocess.TimeoutExpired as exc:
+        # A hung regression command must surface as a failed row, not a stalled audit.
+        timed_out_output = "\n".join(
+            part for part in (_as_text(exc.stdout), _as_text(exc.stderr)) if part
+        )
+        output_tail = (
+            f"regression command timed out after {timeout_sec} seconds"
+            + (f"\n{timed_out_output}" if timed_out_output else "")
+        )
+        return {
+            "executed": True,
+            "command": command,
+            "passed": False,
+            "return_code": 124,
+            "output_tail": output_tail,
+        }
     combined_output = f"{completed.stdout}\n{completed.stderr}".strip()
     output_lines = combined_output.splitlines()
     return {

@@ -6,12 +6,20 @@ This module provides a Monte Carlo baseline for inverse-power payoff family:
 - Put payoff:  max(0, S_T^{-p} - K^{-p})
 
 When p=1, it degenerates to classic inverse-option payoff shape.
+
+Greek unit convention — DIFFERENT from inverse_options.py, do not mix:
+- theta: annual (per unit of calendar time T, i.e. -dV/dT)
+- vega:  per unit of volatility (dV/dsigma)
+- rho:   per unit of risk-free rate (dV/dr)
+research/pricing/inverse_options.py reports the same field names with **daily**
+theta and **per-1%** vega/rho. Rescale before combining the two modules'
+outputs (annual theta = daily theta * 365; per-unit vega = per-1% vega * 100).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import ClassVar, Literal
 
 import numpy as np
 
@@ -31,7 +39,19 @@ class InversePowerQuote:
 
 @dataclass
 class InversePowerGreeks:
-    """Finite-difference Greeks for inverse-power option."""
+    """Finite-difference Greeks for inverse-power option.
+
+    Unit convention (explicitly declared so it cannot be confused with
+    ``InverseGreeks``): theta is **annual** (-dV/dT with T in years) and vega
+    is **per unit of volatility** (dV/dsigma). ``InverseGreeks`` in
+    research/pricing/inverse_options.py reports daily theta and per-1% vega
+    under the same field names — rescale before mixing the two.
+    """
+
+    # Unit metadata mirroring InverseGreeks.THETA_UNIT / VEGA_UNIT.
+    THETA_UNIT: ClassVar[str] = "annual"
+    VEGA_UNIT: ClassVar[str] = "per_unit_vol"
+    RHO_UNIT: ClassVar[str] = "per_unit_rate"
 
     delta: float
     gamma: float
@@ -89,7 +109,12 @@ class _InversePowerFDPrices:
 
 
 class InversePowerOptionPricer:
-    """Monte Carlo baseline pricer for inverse-power options."""
+    """Monte Carlo baseline pricer for inverse-power options.
+
+    Greeks are raw finite-difference derivatives: theta annual (-dV/dT), vega
+    per unit vol (dV/dsigma), rho per unit rate (dV/dr). See
+    ``InversePowerGreeks`` for the unit metadata.
+    """
 
     EPS = 1e-12
 

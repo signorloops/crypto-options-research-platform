@@ -35,6 +35,32 @@ logger = get_logger(__name__)
 # trade direction (see BacktestEngine._update_flow_imbalance).
 _FLOW_IMBALANCE_DECAY: float = 0.9
 
+# Euler-Mascheroni constant, used by the Bailey & Lopez de Prado (2014)
+# expected-maximum term of the Deflated Sharpe Ratio.
+_EULER_MASCHERONI: float = 0.5772156649015329
+
+
+def expected_max_standard_normal(n_trials: int) -> float:
+    """Expected maximum of ``n_trials`` i.i.d. standard normal draws.
+
+    Bailey & Lopez de Prado (2014), "The Deflated Sharpe Ratio":
+
+        E[max] = (1 - gamma) * Phi^-1(1 - 1/N) + gamma * Phi^-1(1 - 1/(N*e))
+
+    The plain tail quantile ``Phi^-1(1 - 1/N)`` previously used here is
+    *exactly zero* at N=2, so the deflation threshold vanished and DSR
+    collapsed to Phi(SR * sqrt(n-1)) ~ 1 for any mildly positive Sharpe —
+    i.e. no multiple-testing correction at all. This expected-maximum form is
+    strictly positive for every N >= 2 (about 0.52 sigma at N=2) and is a far
+    tighter approximation of the true E[max] than the crude asymptotic upper
+    bound sqrt(2 * ln N) (1.18 sigma at N=2 vs. a true 0.56).
+    """
+    n = max(int(n_trials), 2)
+    return float(
+        (1.0 - _EULER_MASCHERONI) * norm.ppf(1.0 - 1.0 / n)
+        + _EULER_MASCHERONI * norm.ppf(1.0 - 1.0 / (n * np.e))
+    )
+
 
 def _build_market_state_snapshot(
     timestamp: datetime,
@@ -787,10 +813,20 @@ class BacktestEngine:
 
     @staticmethod
     def _deflated_sharpe_ratio(sharpe: float, n_obs: int, n_trials: int = 1) -> float:
-        """Simplified deflated Sharpe ratio approximation."""
+        """Deflated Sharpe ratio (Bailey & Lopez de Prado 2014 approximation).
+
+        DSR = Phi( (SR_hat - E[max SR under H0]) * sqrt(n - 1) )
+
+        where E[max SR under H0] is the expected maximum Sharpe over
+        ``n_trials`` independent trials, each with zero true Sharpe. The
+        expected-maximum term uses ``expected_max_standard_normal`` so that the
+        threshold is strictly positive even at n_trials=2 (the former
+        ``Phi^-1(1 - 1/N)`` term is exactly 0 there, which made DSR ~ 1 for
+        any mildly positive Sharpe and defeated the correction).
+        """
         if n_obs < 5:
             return 0.0
-        expected_max_sr = norm.ppf(1.0 - 1.0 / max(n_trials, 2)) / np.sqrt(max(n_obs - 1, 1))
+        expected_max_sr = expected_max_standard_normal(n_trials) / np.sqrt(max(n_obs - 1, 1))
         denom = max(1e-12, np.sqrt(1.0 / max(n_obs - 1, 1)))
         z = (sharpe - expected_max_sr) / denom
         return float(norm.cdf(z))

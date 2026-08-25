@@ -26,6 +26,10 @@ DEFAULT_COMMANDS = [
 ]
 
 SUBPROCESS_RUN_EXCEPTIONS = (OSError, ValueError, IndexError)
+# Bound each gate command so a hung test run cannot block the gate forever.
+SUBPROCESS_TIMEOUT_SEC = 60 * 60
+
+
 def _run_command(command: str, cwd: Path) -> dict[str, Any]:
     start = time.time()
     try:
@@ -48,9 +52,29 @@ def _run_command(command: str, cwd: Path) -> dict[str, Any]:
         }
 
     try:
-        completed = subprocess.run(argv, cwd=cwd, text=True, capture_output=True, check=False)
+        completed = subprocess.run(
+            argv,
+            cwd=cwd,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=SUBPROCESS_TIMEOUT_SEC,
+        )
         return_code = completed.returncode
         combined_output = f"{completed.stdout}\n{completed.stderr}".strip()
+    except subprocess.TimeoutExpired as exc:
+        # A hung command must surface as a failed gate row, not a stalled gate.
+        return_code = 124
+        timed_out_argv = list(exc.cmd) if isinstance(exc.cmd, (list, tuple)) else list(argv)
+        combined_output = (
+            f"command timed out after {SUBPROCESS_TIMEOUT_SEC} seconds: "
+            f"{' '.join(str(part) for part in timed_out_argv)}"
+        )
+        if exc.stdout:
+            combined_output += f"\n{exc.stdout if isinstance(exc.stdout, str) else exc.stdout.decode('utf-8', 'replace')}"
+        if exc.stderr:
+            combined_output += f"\n{exc.stderr if isinstance(exc.stderr, str) else exc.stderr.decode('utf-8', 'replace')}"
+        combined_output = combined_output.strip()
     except SUBPROCESS_RUN_EXCEPTIONS as exc:
         return_code = 127
         combined_output = str(exc)

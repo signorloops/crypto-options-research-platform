@@ -5,9 +5,11 @@ Generate an IV surface stability and no-arbitrage report.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import sys
 import time
+from pathlib import Path
 from typing import Dict, List
 
 import numpy as np
@@ -18,6 +20,8 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from research.volatility.implied import VolatilitySurface, black_scholes_price
+from research.volatility import implied as _implied_module
+from research.volatility import surface_audit as _surface_audit_module
 from research.volatility.surface_audit import audit_surface_stability
 from validation_scripts.io_utils import (
     load_json as _load_json,
@@ -139,8 +143,36 @@ def evaluate_quality_gates(
     return violations
 
 
+def _source_fingerprint(*source_files: Path) -> str:
+    """Hash the source/config that determines the cached report's content.
+
+    The synthetic-surface construction and the audit implementation both feed the
+    cached payload, so any edit to either module must invalidate the cache rather
+    than silently serving a stale report under an unchanged key.
+    """
+    digest = hashlib.sha256()
+    for source_file in source_files:
+        digest.update(str(source_file).encode("utf-8"))
+        digest.update(b"\0")
+        try:
+            digest.update(source_file.read_bytes())
+        except OSError:
+            # Unreadable source: fall back to a content-independent marker so the
+            # key at least changes whenever the path set itself changes.
+            digest.update(b"<unreadable>")
+        digest.update(b"\0")
+    return digest.hexdigest()[:16]
+
+
 def _cache_key(seed: int) -> str:
-    return f"iv-surface-stability-seed-{int(seed)}-v1"
+    # Fold a hash of the surface/audit implementation into the key so changes to
+    # _build_synthetic_surface or audit_surface_stability invalidate old caches.
+    fingerprint = _source_fingerprint(
+        Path(__file__).resolve(),
+        Path(_implied_module.__file__).resolve(),
+        Path(_surface_audit_module.__file__).resolve(),
+    )
+    return f"iv-surface-stability-seed-{int(seed)}-{fingerprint}-v2"
 
 
 def _cache_path(cache_dir: str, cache_key: str) -> str:
@@ -219,10 +251,26 @@ def main() -> None:
     cache_hit = False
     start = time.perf_counter()
 
+    report: Dict[str, object] | None = None
     if args.fast_calibration and os.path.exists(cache_file):
-        report = _load_json(cache_file)
-        cache_hit = True
-    else:
+        try:
+            candidate = _load_json(cache_file)
+        except (OSError, ValueError):
+            # A corrupt or partially-written cache file must degrade to a rebuild
+            # instead of aborting the whole report run. json.JSONDecodeError is a
+            # ValueError subclass, so malformed JSON is covered as well.
+            candidate = None
+        if isinstance(candidate, dict):
+            report = candidate
+            cache_hit = True
+        else:
+            print(
+                f"iv-surface-stability: ignoring unreadable cache file {cache_file}; "
+                "rebuilding report.",
+                file=sys.stderr,
+            )
+
+    if report is None:
         surface = _build_synthetic_surface(seed=args.seed)
         report = audit_surface_stability(surface=surface)
         if args.fast_calibration:

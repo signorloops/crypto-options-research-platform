@@ -7,6 +7,155 @@ from unittest.mock import AsyncMock
 from execution.research_dashboard import create_dashboard_app
 
 
+def test_dashboard_renders_parquet_with_named_index(tmp_path):
+    # Regression: reset_index().rename(columns={"index": "index"}) only works
+    # for an unnamed RangeIndex; a parquet round-trip of set_index("timestamp")
+    # yields a named index and previously crashed px.line with
+    # "Value of 'x' is not the name of a column".
+    df = pd.DataFrame(
+        {"equity": [100.0, 101.0, 102.0]},
+        index=pd.date_range("2024-01-01", periods=3, freq="h").rename("timestamp"),
+    )
+    parquet_path = tmp_path / "equity_curve.parquet"
+    df.to_parquet(parquet_path)
+
+    app = create_dashboard_app(results_dir=tmp_path)
+    with TestClient(app) as client:
+        files_response = client.get("/api/files")
+        html_response = client.get("/")
+
+    assert files_response.status_code == 200
+    assert html_response.status_code == 200
+    assert "CORP Research Dashboard" in html_response.text
+    assert "Return Distribution" in html_response.text
+
+
+def test_dashboard_renders_csv_with_index_column_already_present(tmp_path):
+    # Regression: when the frame already has an "index" data column the
+    # reset-index column cannot also be named "index"; the overview chart
+    # must still render instead of colliding.
+    csv_path = tmp_path / "backtest.csv"
+    csv_path.write_text(
+        "index,equity\n" "5,100\n" "6,101\n" "7,102\n",
+        encoding="utf-8",
+    )
+
+    app = create_dashboard_app(results_dir=tmp_path)
+    with TestClient(app) as client:
+        response = client.get("/")
+
+    assert response.status_code == 200
+    assert "CORP Research Dashboard" in response.text
+
+
+def test_available_result_files_skips_vanished_files(tmp_path, monkeypatch):
+    # Regression: stat() raised FileNotFoundError (-> HTTP 500) when a result
+    # file was deleted between glob() and the mtime sort.
+    from pathlib import Path
+
+    from execution.dashboard.data_helpers import available_result_files
+
+    kept = tmp_path / "kept.csv"
+    kept.write_text("equity\n100\n", encoding="utf-8")
+    (tmp_path / "vanished.csv").write_text("equity\n100\n", encoding="utf-8")
+
+    original_stat = Path.stat
+
+    def failing_stat(self, *args, **kwargs):
+        if self.name == "vanished.csv":
+            raise FileNotFoundError(str(self))
+        return original_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", failing_stat)
+    files = available_result_files(tmp_path)
+    monkeypatch.setattr(Path, "stat", original_stat)
+
+    assert [path.name for path in files] == ["kept.csv"]
+
+
+def test_dashboard_deviation_api_buckets_unknown_expiry_separately(tmp_path):
+    # Regression: NaN expiry previously defaulted to 0 days and polluted the
+    # "<=7D" bucket; it now lands in a distinct "UNKNOWN" bucket.
+    csv_path = tmp_path / "options_deviation.csv"
+    csv_path.write_text(
+        (
+            "timestamp,exchange,maturity,delta,market_price,model_price\n"
+            "2024-01-01T00:00:00Z,deribit,0.01,0.25,1200,1180\n"
+            "2024-01-01T00:01:00Z,okx,,0.45,980,920\n"
+        ),
+        encoding="utf-8",
+    )
+
+    app = create_dashboard_app(results_dir=tmp_path)
+    with TestClient(app) as client:
+        response = client.get("/api/deviation")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["n_rows"] == 2
+    # observed=False keeps every (expiry, delta) combo in the records; only
+    # judge the populated cells (value is not null).
+    populated = [
+        row
+        for row in payload["heatmap_records"]
+        if row["abs_deviation_bps"] is not None
+    ]
+    # 0.01y = 3.65 days -> "<=7D"; |delta| = 0.25 -> "10-25d".
+    assert any(
+        row["expiry_bucket"] == "<=7D" and row["delta_bucket"] == "10-25d"
+        for row in populated
+    )
+    # The row with missing maturity must NOT be merged into "<=7D": it keeps
+    # its own "UNKNOWN" expiry bucket (|delta| = 0.45 -> "40-60d").
+    assert any(
+        row["expiry_bucket"] == "UNKNOWN" and row["delta_bucket"] == "40-60d"
+        for row in populated
+    )
+    assert not any(
+        row["expiry_bucket"] == "<=7D" and row["delta_bucket"] == "40-60d"
+        for row in populated
+    )
+
+
+def test_dashboard_deviation_api_emits_null_for_empty_heatmap_cells(tmp_path):
+    # Regression: unpopulated (expiry, delta) combinations were reported as
+    # 0.0 bps — indistinguishable from perfectly matched prices; they are
+    # now emitted as null.
+    csv_path = tmp_path / "options_deviation.csv"
+    csv_path.write_text(
+        (
+            "timestamp,exchange,maturity,delta,market_price,model_price\n"
+            "2024-01-01T00:00:00Z,deribit,0.02,0.25,1200,1180\n"
+        ),
+        encoding="utf-8",
+    )
+
+    app = create_dashboard_app(results_dir=tmp_path)
+    with TestClient(app) as client:
+        response = client.get("/api/deviation")
+
+    assert response.status_code == 200
+    payload = response.json()
+    # The response must be strict-JSON safe: no NaN floats anywhere.
+    assert "NaN" not in response.text
+    populated = [
+        row for row in payload["heatmap_records"] if row["abs_deviation_bps"] is not None
+    ]
+    assert populated, "populated cell must still be reported"
+    assert all(row["abs_deviation_bps"] > 0.0 for row in populated)
+    empty_records = [
+        row for row in payload["heatmap_records"] if row["abs_deviation_bps"] is None
+    ]
+    assert empty_records, "empty cells must serialize as null, not 0.0"
+    empty_cells = [
+        value
+        for column in payload["heatmap_matrix"].values()
+        for value in column.values()
+        if value is None
+    ]
+    assert empty_cells, "empty cells must serialize as null, not 0.0"
+
+
 def test_dashboard_lists_files_and_renders_html(tmp_path):
     csv_path = tmp_path / "backtest.csv"
     csv_path.write_text(

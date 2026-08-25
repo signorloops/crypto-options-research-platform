@@ -18,9 +18,16 @@
 参考：
 - OKX documentation on inverse options
 - Black-Scholes with numeraire change for inverse contracts
+
+Greek 单位约定 (Unit convention) — 与 inverse_power_options.py 不同，勿混用：
+- theta: 每日 (daily) —— 年化时间价值衰减 / 365
+- vega:  每 1% 波动率变化 (per-unit vega * 0.01)
+- rho:   每 1% 无风险利率变化
+research/pricing/inverse_power_options.py 在相同字段名下报告 **年化** theta 和
+**每单位波动率** vega；两个模块的输出混合使用前必须先换算单位。
 """
 from dataclasses import dataclass
-from typing import Callable, Literal, Tuple, Optional
+from typing import Callable, ClassVar, Literal, Tuple, Optional
 
 import numpy as np
 from scipy.stats import norm
@@ -39,7 +46,20 @@ class InverseGreeks:
     - Delta: 对标的价变化的敏感度（单位：BTC per USD）
     - Gamma: Delta对标的价变化的二阶导
     - 其他希腊字母相应调整
+
+    单位约定（显式声明，避免与 InversePowerGreeks 混淆）：
+    - theta 为**每日**时间价值衰减（年化值 / THETA_DAYS_PER_YEAR = 365）
+    - vega 为**每 1% 波动率变化**（每单位波动率 vega * VEGA_SCALING = 0.01）
+    - rho 为**每 1% 利率变化**（每单位利率 rho / RHO_SCALING = 100）
     """
+
+    # Unit metadata so downstream consumers can branch without hard-coding
+    # the convention. InversePowerGreeks reports the *annual* / *per-unit*
+    # convention under the same field names.
+    THETA_UNIT: ClassVar[str] = "daily"
+    VEGA_UNIT: ClassVar[str] = "per_1pct_vol"
+    RHO_UNIT: ClassVar[str] = "per_1pct_rate"
+
     delta: float          # Delta (per USD)
     gamma: float          # Gamma (per USD^2)
     theta: float          # Theta (daily time decay)
@@ -242,6 +262,12 @@ class InverseOptionPricer:
     波动率说明：
     - 输入的sigma是标的S的波动率（不是Y的波动率）
     - 由于d(1/S) ≈ -sigma*(1/S)*dW，Y和S的波动率相同
+
+    Greeks 单位约定：
+    - theta：每日（年化 / THETA_DAYS_PER_YEAR）
+    - vega：每 1% 波动率（每单位波动率 * VEGA_SCALING）
+    - rho：每 1% 利率（每单位利率 / RHO_SCALING）
+    详见 InverseGreeks 的文档字符串与 THETA_UNIT/VEGA_UNIT 常量。
     """
 
     EPSILON = 1e-10  # 数值计算的小量

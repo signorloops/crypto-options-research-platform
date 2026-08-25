@@ -509,3 +509,55 @@ class TestVolatilitySurface:
 
         assert stabilized_max_jump < raw_max_jump
         assert stabilized_vols[2] < raw_vols[2]
+
+
+class TestSurfaceQueryReferenceSpot:
+    """Query-side log-moneyness must use the spot the fits were calibrated on.
+
+    SVI/SSVI are fitted on each point's own log_moneyness grid; when a surface
+    carries stale points (points[0] stamped at an old spot), computing the
+    query k as log(K / points[0].underlying_price) evaluates the fit on a
+    shifted grid. The fits record their anchor spot (params.spot) and the
+    query resolves it first, falling back to points[0] when absent.
+    """
+
+    def _stale_surface(self):
+        surface = VolatilitySurface()
+        S_fresh, S_stale = 110.0, 100.0
+        # Stale point first: points[0].underlying_price disagrees with the rest.
+        surface.add_point(
+            VolatilityPoint(strike=100.0, expiry=0.25, volatility=0.2, underlying_price=S_stale)
+        )
+        for T in [0.25, 0.5]:
+            for K in [88.0, 94.0, 99.0, 104.0, 110.0, 121.0, 132.0]:
+                vol = 0.2 + 0.05 * abs(np.log(K / S_fresh))
+                surface.add_point(
+                    VolatilityPoint(strike=K, expiry=T, volatility=vol, underlying_price=S_fresh)
+                )
+        return surface, S_fresh
+
+    def test_fits_record_reference_spot(self):
+        surface, S_fresh = self._stale_surface()
+        svi = surface.fit_all_svi()
+        assert all(p.spot == pytest.approx(S_fresh) for p in svi.values())
+        assert surface.fit_ssvi().spot == pytest.approx(S_fresh)
+
+    def test_query_uses_fitted_spot_not_stale_points0(self):
+        surface, S_fresh = self._stale_surface()
+        surface.fit_all_svi()
+        surface.fit_ssvi()
+
+        # ATM at the *fitted* spot must sit near the ATM level of the input
+        # vols (~0.20). Under the old points[0] anchor the same strike was
+        # queried 9.5% out of the money (log(110/100)) and priced off-skew.
+        assert surface.get_volatility(S_fresh, 0.25, method="svi") == pytest.approx(0.2, abs=0.02)
+        assert surface.get_volatility(S_fresh, 0.25, method="ssvi") == pytest.approx(0.2, abs=0.03)
+
+    def test_query_falls_back_to_points0_when_no_spot_recorded(self):
+        # Params carrying no spot (e.g. constructed directly, or a surface
+        # whose fits predate the field) must keep the historical behaviour.
+        from research.volatility.surface_query import _reference_spot
+
+        surface, _ = self._stale_surface()
+        assert _reference_spot(surface) == pytest.approx(surface.points[0].underlying_price)
+        assert _reference_spot(surface, 123.0) == pytest.approx(123.0)

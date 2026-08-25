@@ -14,7 +14,15 @@ from execution.dashboard.chart_builders import (
     greeks_bar_chart,
     regime_badge,
 )
+from execution.dashboard.data_helpers import _to_float
 from execution.dashboard.templates import base_layout, data_table, metric_card
+
+
+def _coerce_str(value: Any, default: str) -> str:
+    """Default on null (dict.get's default only fires on a missing key)."""
+    if value is None:
+        return default
+    return value if isinstance(value, str) and value else default
 
 # Default demo data when no snapshot file exists
 DEMO_RISK_DATA: Dict[str, Any] = {
@@ -62,8 +70,10 @@ def _build_risk_page(data: Dict[str, Any]) -> str:
     regime = data.get("regime", {})
 
     # Circuit breaker section
-    cb_badge = circuit_breaker_badge(cb.get("state", "NORMAL"))
-    cb_multiplier = f'{cb.get("multiplier", 1.0):.2f}'
+    # dict.get's default only fires when the key is absent; explicit nulls
+    # must be coerced too, otherwise str.upper()/float formatting raise.
+    cb_badge = circuit_breaker_badge(_coerce_str(cb.get("state"), "NORMAL"))
+    cb_multiplier = f'{_to_float(cb.get("multiplier"), 1.0):.2f}'
 
     violations = cb.get("violations", [])
     if violations:
@@ -77,19 +87,21 @@ def _build_risk_page(data: Dict[str, Any]) -> str:
         violations_html = "<p>No violations recorded.</p>"
 
     # Greeks section
-    greeks_chart = greeks_bar_chart(greeks)
+    # Drop null greeks: the bar-chart color logic compares values against 0,
+    # and an explicit null (not just a missing key) would raise TypeError.
+    greeks_chart = greeks_bar_chart({k: v for k, v in greeks.items() if v is not None})
 
     # VaR section
     var_cards = "".join([
-        metric_card("VaR 95%", f'${var_data.get("var_95", 0):,.0f}'),
-        metric_card("VaR 99%", f'${var_data.get("var_99", 0):,.0f}'),
-        metric_card("CVaR 95%", f'${var_data.get("cvar_95", 0):,.0f}'),
-        metric_card("CVaR 99%", f'${var_data.get("cvar_99", 0):,.0f}'),
+        metric_card("VaR 95%", f'${_to_float(var_data.get("var_95")):,.0f}'),
+        metric_card("VaR 99%", f'${_to_float(var_data.get("var_99")):,.0f}'),
+        metric_card("CVaR 95%", f'${_to_float(var_data.get("cvar_95")):,.0f}'),
+        metric_card("CVaR 99%", f'${_to_float(var_data.get("cvar_99")):,.0f}'),
     ])
 
     # Regime section
-    regime_html = regime_badge(regime.get("state", "LOW"))
-    vol_pct = regime.get("volatility_percentile", 0)
+    regime_html = regime_badge(_coerce_str(regime.get("state"), "LOW"))
+    vol_pct = _to_float(regime.get("volatility_percentile"))
 
     body = f"""
 <div class="card">

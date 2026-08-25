@@ -1079,3 +1079,57 @@ class TestFillSimulatorQueuePositionConfig:
         # A deterministic fraction (e.g. exactly 1.0 every time) would mean
         # the random placement never took effect.
         assert len(set(np.round(depths, 6))) > 1
+
+
+class TestDeflatedSharpeRatio:
+    """Guards for the multiple-testing correction in the Deflated Sharpe Ratio.
+
+    The old expected-max term ``Phi^-1(1 - 1/N)`` is exactly 0 at N=2, so the
+    deflation threshold vanished and DSR collapsed to Phi(SR*sqrt(n-1)) ~ 1
+    for any mildly positive Sharpe — i.e. no correction at all. The Bailey &
+    Lopez de Prado (2014) expected-maximum form is strictly positive for
+    every N >= 2 and closely tracks the simulated E[max].
+    """
+
+    def test_expected_max_is_strictly_positive_at_two_trials(self):
+        from research.backtest.engine import expected_max_standard_normal
+
+        assert expected_max_standard_normal(2) == pytest.approx(0.5198, abs=1e-3)
+        for n_trials in range(2, 50):
+            assert expected_max_standard_normal(n_trials) > 0.0
+
+    def test_expected_max_is_monotone_in_trials(self):
+        from research.backtest.engine import expected_max_standard_normal
+
+        values = [expected_max_standard_normal(n) for n in (2, 3, 5, 10, 100)]
+        assert all(b > a for a, b in zip(values, values[1:]))
+
+    def test_zero_sharpe_is_not_confident_at_two_trials(self):
+        # Under the broken formula SR=0 with trials=2 scored DSR=0.5 *only*
+        # because the threshold was 0; more importantly any SR>0 scored ~1.
+        # With a real expected-max threshold, SR=0 must fall well below 0.5.
+        dsr = BacktestEngine._deflated_sharpe_ratio(sharpe=0.0, n_obs=250, n_trials=2)
+        assert dsr < 0.5
+        assert dsr == pytest.approx(0.30, abs=0.05)
+
+    def test_mildly_positive_sharpe_no_longer_scores_one(self):
+        # On the per-period Sharpe scale (annualized SR/sqrt(periods per year))
+        # the old threshold of exactly 0 pushed any SR>0 to DSR ~ 1. With the
+        # real expected-max threshold (~0.033 at n=250, trials=2) a modest
+        # per-period SR of 0.10 lands well below 1.
+        dsr = BacktestEngine._deflated_sharpe_ratio(sharpe=0.10, n_obs=250, n_trials=2)
+        assert 0.5 < dsr < 0.95
+        # And the correction must bite harder as trials grow.
+        dsr_100 = BacktestEngine._deflated_sharpe_ratio(sharpe=0.10, n_obs=250, n_trials=100)
+        assert dsr_100 < dsr
+
+    def test_dsr_is_monotone_in_sharpe(self):
+        prev = -1.0
+        for sharpe in np.linspace(-1.0, 3.0, 21):
+            dsr = BacktestEngine._deflated_sharpe_ratio(float(sharpe), n_obs=100, n_trials=5)
+            assert dsr >= prev - 1e-12
+            assert 0.0 <= dsr <= 1.0
+            prev = dsr
+
+    def test_short_series_returns_zero(self):
+        assert BacktestEngine._deflated_sharpe_ratio(1.0, n_obs=4, n_trials=2) == 0.0

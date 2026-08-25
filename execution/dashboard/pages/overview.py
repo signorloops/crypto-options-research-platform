@@ -30,8 +30,17 @@ def _resolve_dashboard_axis(
 ) -> tuple:
     if time_col:
         return df, time_col
-    indexed = df.reset_index(drop=False).rename(columns={"index": "index"})
-    return indexed, "index"
+    # reset_index only produces a column literally named "index" for an
+    # unnamed RangeIndex; a named index (e.g. a parquet round-trip of
+    # set_index("timestamp")) must be addressed by its real name.
+    index_name = df.index.name or "index"
+    if isinstance(df.index, pd.MultiIndex) or index_name in df.columns:
+        # A MultiIndex has no single name, and reset_index cannot re-insert
+        # an index whose name already exists as a data column; fall back to
+        # a collision-free synthetic axis so the chart still renders.
+        positional = df.reset_index(drop=True).rename_axis("_row")
+        return positional.reset_index(drop=False), "_row"
+    return df.reset_index(drop=False), index_name
 
 
 def _build_dashboard_summary(df: pd.DataFrame, value_col: str) -> Dict[str, Any]:
