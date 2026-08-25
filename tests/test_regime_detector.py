@@ -354,6 +354,46 @@ class TestFeatureExtraction:
         # log(1.01) ≈ 0.00995
         assert abs(detector._returns_buffer[0] - np.log(1.01)) < 0.0001
 
+    def test_extract_features_uses_provided_timestamp(self):
+        """Features should be stamped with the data timestamp when given."""
+        from datetime import timezone
+
+        detector = VolatilityRegimeDetector()
+        data_ts = datetime(2023, 6, 15, 12, 0, tzinfo=timezone.utc)
+
+        features = detector._extract_features(0.001, timestamp=data_ts)
+
+        assert features.timestamp == data_ts
+        assert detector._timestamps[-1] == data_ts
+
+    def test_extract_features_defaults_to_wall_clock(self):
+        """Without a timestamp the detector falls back to wall-clock time."""
+        from datetime import timezone
+
+        detector = VolatilityRegimeDetector()
+        before = datetime.now(timezone.utc)
+
+        features = detector._extract_features(0.001)
+
+        assert features.timestamp >= before
+
+    def test_update_stamps_regime_history_with_data_timestamp(self):
+        """Regime history must use data time in backtests, not wall-clock."""
+        from datetime import timezone
+
+        config = RegimeConfig(min_samples_for_training=20)
+        detector = VolatilityRegimeDetector(config)
+        base_ts = datetime(2023, 6, 15, 12, 0, tzinfo=timezone.utc)
+
+        np.random.seed(42)
+        for ret in np.random.normal(0, 0.001, 25):
+            detector.update(ret, timestamp=base_ts)
+
+        assert detector._is_fitted
+        assert detector.regime_history
+        assert all(ts == base_ts for ts, _, _ in detector.regime_history)
+        assert detector.regime_history[-1][0] == base_ts
+
 
 class TestIntegration:
     """Integration tests for regime detector."""

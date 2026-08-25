@@ -428,7 +428,14 @@ class BacktestEngine:
     def _quote_with_lagged_snapshot(
         self, quote_state: MarketState, position: Position
     ) -> QuoteAction:
-        """Quote using information set available at order placement time."""
+        """Quote using the information set available at order placement time.
+
+        The quote is built on the current event's market state (t_i); the
+        no-lookahead property comes from the fill side, which only matches
+        the resting quote against trades in (t_i, t_{i+1}]. Quoting on a
+        stale snapshot instead would make every quote two events old by
+        the time it can be filled.
+        """
         return self.strategy.quote(quote_state, position)
 
     def run(
@@ -456,19 +463,17 @@ class BacktestEngine:
         if (n_events := len(prices)) == 0: return self._compute_result(current_price=0.0)
         event_volumes = self._prepare_event_volumes(market_data)
         current_ob = self._create_dummy_order_book(prices[0])
-        previous_quote: Optional[QuoteAction] = None; previous_quote_timestamp = None; previous_market_state: Optional[MarketState] = None
+        previous_quote: Optional[QuoteAction] = None; previous_quote_timestamp = None
         for i in range(n_events):
             price = float(prices[i]); timestamp = timestamps_arr[i]
             current_ob = self._update_order_book(current_ob, price)
             market_state = _build_market_state_snapshot(timestamp=timestamp, price=price, order_book=current_ob)
             position = self.positions.get("SYNTHETIC", Position("SYNTHETIC", 0, 0))
             position = self._maybe_process_previous_quote(previous_quote=previous_quote, quote_timestamp=previous_quote_timestamp, market_state=market_state, position=position, event_volume=float(event_volumes[i]), current_price=price)
-            quote_state = previous_market_state if previous_market_state is not None else market_state
-            new_quote = self._quote_with_lagged_snapshot(quote_state=quote_state, position=position)
+            new_quote = self._quote_with_lagged_snapshot(quote_state=market_state, position=position)
             self.quotes.append(new_quote)
             previous_quote = new_quote
             previous_quote_timestamp = timestamp
-            previous_market_state = market_state
             self._record_state(timestamp, price)
         return self._compute_result(current_price=float(prices[-1]))
 

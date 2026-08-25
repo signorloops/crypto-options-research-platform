@@ -18,6 +18,7 @@ from __future__ import annotations
 import concurrent.futures
 import logging
 import threading
+import time
 import warnings
 from collections import deque
 from dataclasses import dataclass, field
@@ -47,11 +48,32 @@ def _snapshot_hmm_training_returns(detector: object) -> Optional[np.ndarray]:
         return np.array(list(detector._returns_buffer)).reshape(-1, 1)
 
 
-def _fit_hmm_with_warning_suppression(detector: object, returns: np.ndarray) -> bool:
-    """Fit detector HMM model with convergence-warning suppression."""
-    detector._init_hmm()
-    if detector._hmm_model is None:
-        return False
+def _build_hmm_model(detector: object) -> Optional[object]:
+    """Build a fresh unfitted HMM instance for background training."""
+    try:
+        from hmmlearn import hmm
+    except ImportError:
+        detector.config.use_hmm = False
+        return None
+    return hmm.GaussianHMM(
+        n_components=detector.config.n_regimes,
+        covariance_type="diag",  # 使用diag加速
+        n_iter=50,  # 减少迭代次数
+        random_state=42,
+        init_params="",  # 不重新初始化参数
+    )
+
+
+def _fit_hmm_with_warning_suppression(detector: object, returns: np.ndarray) -> Optional[object]:
+    """Fit a local HMM copy with convergence-warning suppression.
+
+    The fitted model is returned to the caller, which publishes it
+    atomically. The detector's live `_hmm_model` is never touched while
+    fitting, so concurrent inference cannot observe an unfitted model.
+    """
+    model = _build_hmm_model(detector)
+    if model is None:
+        return None
     with warnings.catch_warnings():
         try:
             from sklearn.exceptions import ConvergenceWarning
@@ -59,16 +81,32 @@ def _fit_hmm_with_warning_suppression(detector: object, returns: np.ndarray) -> 
             warnings.filterwarnings("ignore", category=ConvergenceWarning)
         except ImportError:
             warnings.filterwarnings("ignore", message=".*converge.*")
-        detector._hmm_model.fit(returns)
-    return True
+        model.fit(returns)
+    return model
 
 
-def _update_hmm_state_mapping(detector: object) -> None:
-    """Update sorted state mapping from fitted HMM means if available."""
-    if hasattr(detector._hmm_model, "means_"):
-        means = detector._hmm_model.means_
+def _compute_hmm_state_mapping(model: object, n_regimes: int) -> Dict[int, int]:
+    """Build sorted state mapping from fitted HMM means if available."""
+    if hasattr(model, "means_"):
+        means = model.means_
         vol_order = np.argsort(np.abs(means[:, 0]))
-        detector._state_map = {int(old): int(new) for new, old in enumerate(vol_order)}
+        return {int(old): int(new) for new, old in enumerate(vol_order)}
+    return {i: i for i in range(n_regimes)}
+
+
+def _publish_hmm_model(detector: object, new_model: object) -> None:
+    """Atomically publish a freshly fitted HMM for inference.
+
+    The `_hmm_model` reference is swapped last, so inference either sees
+    the previous fully fitted model or the new fully fitted one — never
+    the half-trained intermediate state.
+    """
+    state_map = _compute_hmm_state_mapping(new_model, detector.config.n_regimes)
+    with detector._hmm_lock:
+        detector._state_map = state_map
+        detector._hmm_last_train = detector._hmm_sample_count
+        detector._hmm_fitted = True
+        detector._hmm_model = new_model
 
 
 def _train_hmm_worker(detector: object) -> None:
@@ -77,10 +115,10 @@ def _train_hmm_worker(detector: object) -> None:
         returns = _snapshot_hmm_training_returns(detector)
         if returns is None:
             return
-        if _fit_hmm_with_warning_suppression(detector, returns):
-            _update_hmm_state_mapping(detector)
-            detector._hmm_fitted = True
-            detector._hmm_last_train = detector._hmm_sample_count
+        new_model = _fit_hmm_with_warning_suppression(detector, returns)
+        if new_model is None:
+            return
+        _publish_hmm_model(detector, new_model)
     except HMM_RUNTIME_EXCEPTIONS:
         logger.exception("Fast HMM training failed; keeping previous regime model")
     finally:
@@ -105,6 +143,18 @@ def _hmm_regime_switch_probability(detector: object) -> float:
     if current_idx < 0 or current_idx >= transmat.shape[0]:
         return 0.0
     return float(1.0 - transmat[current_idx, current_idx])
+
+
+def _compute_hmm_prediction(
+    model: object, features_row: np.ndarray
+) -> Tuple[int, np.ndarray] | Exception:
+    """Predict hidden state and posteriors against an immutable model snapshot."""
+    try:
+        hidden_state = model.predict(features_row)[0]
+        _, posteriors = model.score_samples(features_row)
+        return int(hidden_state), posteriors[0]
+    except HMM_RUNTIME_EXCEPTIONS as exc:
+        return exc
 
 
 class RegimeState(Enum):
@@ -179,6 +229,13 @@ class FastVolatilityRegimeDetector:
         # 线程同步锁
         self._hmm_lock = threading.Lock()  # 保护 _hmm_training
         self._buffer_lock = threading.RLock()  # 保护 _returns_buffer
+        # In-flight inference tracking (see _hmm_predict)
+        self._pending_hmm_future: Optional[concurrent.futures.Future] = None
+        self._last_hmm_result: Optional[Tuple[RegimeState, np.ndarray]] = None
+        self._last_hmm_result_wallclock: float = 0.0
+        # Staleness budget for reusing the last successful inference while the
+        # single-threaded inference pool is stuck on a slow prediction.
+        self._hmm_result_reuse_seconds: float = 1.0
         # HMM state mapping (sorted by volatility after training)
         self._state_map: dict = {i: i for i in range(self.config.n_regimes)}
         # 统计信息
@@ -236,33 +293,75 @@ class FastVolatilityRegimeDetector:
         return regime, probs
 
     def _hmm_predict(self, features: np.ndarray) -> Optional[Tuple[RegimeState, np.ndarray]]:
-        """Run HMM prediction with timeout and fallback."""
+        """Run HMM prediction with timeout and fallback.
+
+        The inference pool has a single worker. Once a prediction times out,
+        `future.cancel()` cannot interrupt it, so any newly submitted work
+        would just queue behind the stuck task and time out as well. Instead
+        we track the in-flight future and reuse the last successful result
+        while it is still within the staleness budget.
+        """
         if not self._hmm_fitted or self._hmm_model is None:
             return None
-        future = self._submit_hmm_future(features)
+        future, state_map = self._claim_pending_hmm_future(features)
         if future is None:
-            return None
+            return self._cached_hmm_result()
         result = self._resolve_hmm_future_result(future)
         if result is None:
-            return None
+            return self._cached_hmm_result()
         hidden_state, posteriors = result
-        return self._map_hmm_prediction(hidden_state=hidden_state, posteriors=posteriors)
+        mapped = self._map_hmm_prediction(
+            hidden_state=hidden_state, posteriors=posteriors, state_map=state_map
+        )
+        self._remember_hmm_result(mapped)
+        return mapped
 
-    def _submit_hmm_future(self, features: np.ndarray) -> Optional[concurrent.futures.Future]:
-        if self._inference_executor is None:
-            return None
-        X = features.reshape(1, -1)
-        return self._inference_executor.submit(self._compute_hmm_prediction, X)
+    def _claim_pending_hmm_future(
+        self, features: np.ndarray
+    ) -> Tuple[Optional[concurrent.futures.Future], Optional[Dict[int, int]]]:
+        """Return a runnable inference future with its state map.
+
+        Returns (None, None) when the single-worker pool is still busy with
+        (or queued behind) a slow prediction. The model reference and state
+        map are captured together under `_hmm_lock`, so a concurrent model
+        publish cannot leave prediction and mapping inconsistent.
+        """
+        with self._hmm_lock:
+            pending = self._pending_hmm_future
+            if pending is not None and not pending.done():
+                return None, None
+            model = self._hmm_model
+            state_map = dict(self._state_map)
+            if self._inference_executor is None or model is None:
+                return None, None
+            X = features.reshape(1, -1)
+            self._pending_hmm_future = self._inference_executor.submit(
+                _compute_hmm_prediction, model, X
+            )
+            return self._pending_hmm_future, state_map
+
+    def _cached_hmm_result(self) -> Optional[Tuple[RegimeState, np.ndarray]]:
+        """Reuse the last successful inference within the staleness budget."""
+        with self._hmm_lock:
+            result = self._last_hmm_result
+            if result is None:
+                return None
+            age = time.monotonic() - self._last_hmm_result_wallclock
+            if age > self._hmm_result_reuse_seconds + self.config.hmm_timeout_ms / 1000.0:
+                return None
+            regime, probs = result
+            return regime, probs.copy()
+
+    def _remember_hmm_result(self, result: Tuple[RegimeState, np.ndarray]) -> None:
+        with self._hmm_lock:
+            self._last_hmm_result = result
+            self._last_hmm_result_wallclock = time.monotonic()
 
     def _compute_hmm_prediction(
         self, features_row: np.ndarray
     ) -> Tuple[int, np.ndarray] | Exception:
-        try:
-            hidden_state = self._hmm_model.predict(features_row)[0]
-            _, posteriors = self._hmm_model.score_samples(features_row)
-            return int(hidden_state), posteriors[0]
-        except HMM_RUNTIME_EXCEPTIONS as exc:
-            return exc
+        """Run prediction against the currently published model."""
+        return _compute_hmm_prediction(self._hmm_model, features_row)
 
     def _resolve_hmm_future_result(
         self, future: concurrent.futures.Future
@@ -281,11 +380,16 @@ class FastVolatilityRegimeDetector:
         return result
 
     def _map_hmm_prediction(
-        self, *, hidden_state: int, posteriors: np.ndarray
+        self,
+        *,
+        hidden_state: int,
+        posteriors: np.ndarray,
+        state_map: Optional[Dict[int, int]] = None,
     ) -> Tuple[RegimeState, np.ndarray]:
-        mapped_state = self._state_map.get(int(hidden_state), int(hidden_state))
+        mapping = self._state_map if state_map is None else state_map
+        mapped_state = mapping.get(int(hidden_state), int(hidden_state))
         mapped_probs = np.zeros_like(posteriors)
-        for old_idx, new_idx in self._state_map.items():
+        for old_idx, new_idx in mapping.items():
             mapped_probs[new_idx] = posteriors[old_idx]
         regime = RegimeState(mapped_state)
         return regime, mapped_probs
@@ -385,6 +489,10 @@ class FastVolatilityRegimeDetector:
         self._hmm_inference_count = 0
         self._threshold_inference_count = 0
         self._fallback_count = 0
+        with self._hmm_lock:
+            self._pending_hmm_future = None
+            self._last_hmm_result = None
+            self._last_hmm_result_wallclock = 0.0
 
         if self._hmm_thread and self._hmm_thread.is_alive():
             # 等待线程结束 (最多1秒)

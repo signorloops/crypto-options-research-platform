@@ -168,6 +168,96 @@ class TestFastRegimeDetector:
         assert detector._fallback_count == 1
         assert detector._threshold_inference_count == 1
 
+    def test_stuck_worker_reuses_last_result_without_resubmitting(self):
+        """While the inference worker is stuck, later updates reuse the last result.
+
+        A running prediction cannot be cancelled, so submitting new work
+        would only queue behind it and time out too. The detector should
+        instead reuse the last successful inference within its staleness
+        budget, without enqueueing anything new.
+        """
+        config = FastRegimeConfig(use_hmm=True, hmm_timeout_ms=1.0)
+        detector = FastVolatilityRegimeDetector(config)
+
+        def _stuck_prediction(model, X):
+            time.sleep(0.05)
+            return int(RegimeState.MEDIUM.value), np.array([0.2, 0.6, 0.2])
+
+        submissions = {"count": 0}
+        original_submit = detector._inference_executor.submit
+
+        def _counting_submit(*args, **kwargs):
+            submissions["count"] += 1
+            return original_submit(*args, **kwargs)
+
+        detector._inference_executor.submit = _counting_submit
+        detector._hmm_fitted = True
+
+        # Put the single inference worker into a busy state.
+        detector._pending_hmm_future = detector._inference_executor.submit(
+            _stuck_prediction, None, np.zeros((1, 1))
+        )
+        submissions_before = submissions["count"]
+
+        cached = (RegimeState.HIGH, np.array([0.1, 0.2, 0.7]))
+        detector._last_hmm_result = cached
+        detector._last_hmm_result_wallclock = time.monotonic()
+
+        result = detector._hmm_predict(np.array([0.002]))
+
+        assert result is not None
+        assert result[0] == RegimeState.HIGH
+        np.testing.assert_allclose(result[1], cached[1])
+        # No new work was queued behind the stuck prediction.
+        assert submissions["count"] == submissions_before
+
+    def test_hmm_training_never_publishes_unfitted_model(self, monkeypatch):
+        """Background fit must not replace the live model mid-inference."""
+
+        class _RecordingModel:
+            def __init__(self, fitted: bool):
+                self.fitted = fitted
+
+            def predict(self, X):
+                assert self.fitted, "inference observed an unfitted model"
+                return np.array([RegimeState.LOW.value])
+
+            def score_samples(self, X):
+                return 0.0, np.array([[0.7, 0.2, 0.1]])
+
+        detector = FastVolatilityRegimeDetector(
+            FastRegimeConfig(use_hmm=True, hmm_min_samples=3)
+        )
+        for _ in range(5):
+            detector._returns_buffer.append(0.001)
+        original = _RecordingModel(fitted=True)
+        detector._hmm_model = original
+        detector._hmm_fitted = True
+
+        def _fake_build(detector):
+            fresh = _RecordingModel(fitted=False)
+
+            def _fit(returns):
+                # While "fitting", run an inference to prove the live model
+                # is still the old fully fitted one.
+                result = detector._hmm_predict(np.array([0.001]))
+                assert result is not None
+                fresh.fitted = True
+                return fresh
+
+            fresh.fit = _fit
+            return fresh
+
+        import research.signals.fast_regime_detector as frd
+
+        monkeypatch.setattr(frd, "_build_hmm_model", _fake_build)
+
+        frd._train_hmm_worker(detector)
+
+        assert detector._hmm_model is not original
+        assert detector._hmm_model.fitted is True
+        assert detector._hmm_fitted is True
+
     def test_switch_probability_uses_raw_hmm_state_after_mapping(self):
         """Switch probability should map sorted regime index back to raw HMM state."""
         detector = FastVolatilityRegimeDetector(FastRegimeConfig(use_hmm=False))

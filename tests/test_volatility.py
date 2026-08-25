@@ -205,6 +205,109 @@ class TestImpliedVolatility:
         iv = implied_volatility_jaeckel(price, S, K, T, r, is_call=True)
         assert np.isclose(iv, sigma, atol=1e-4)
 
+    def test_implied_volatility_non_positive_price_raises(self):
+        """A non-positive market price must raise instead of returning IV=0.
+
+        Regression guard: the solver used to return 0.0 for market_price <= 0,
+        silently injecting IV=0 into the surface instead of letting callers
+        log/skip the bad quote.
+        """
+        for method in ("hybrid", "bisection", "newton"):
+            with pytest.raises(ValueError):
+                implied_volatility(0.0, 100, 100, 0.5, 0.05, is_call=True, method=method)
+            with pytest.raises(ValueError):
+                implied_volatility(-1.5, 100, 100, 0.5, 0.05, is_call=True, method=method)
+
+    def test_implied_volatility_expired_price_equals_intrinsic_returns_zero(self):
+        """At T <= 0 an option is worth its intrinsic, so IV = 0 is well-defined."""
+        # Call: intrinsic = 110 - 100 = 10
+        assert implied_volatility(10.0, 110, 100, 0.0, 0.05, is_call=True) == 0.0
+        # Put: intrinsic = 100 - 95 = 5
+        assert implied_volatility(5.0, 95, 100, 0.0, 0.0, is_call=False) == 0.0
+        # Negative T treated the same as T = 0.
+        assert implied_volatility(10.0, 110, 100, -1e-9, 0.05, is_call=True) == 0.0
+
+    def test_implied_volatility_expired_price_off_intrinsic_raises(self):
+        """An expired price that differs from intrinsic is inconsistent and must raise."""
+        with pytest.raises(ValueError):
+            implied_volatility(15.0, 110, 100, 0.0, 0.05, is_call=True)
+        with pytest.raises(ValueError):
+            implied_volatility(2.0, 95, 100, 0.0, 0.0, is_call=False, method="bisection")
+
+    def test_ssvi_eta_upper_bound_satisfies_gatheral_jacquier_conditions(self):
+        """The eta bound must satisfy BOTH butterfly-arbitrage-free conditions.
+
+        Regression guard: the old bound only enforced the max-theta leg of
+        condition (ii) and ignored condition (i), which could admit
+        butterfly-arbitrageable SSVI parameters.
+        """
+        from research.volatility.surface_fit import _ssvi_eta_upper_bound
+
+        rng = np.random.default_rng(7)
+        for _ in range(50):
+            rho = rng.uniform(-0.95, 0.95)
+            lam = rng.uniform(0.0, 0.5)
+            # theta ascending: smallest theta is typically the binding one.
+            theta = np.sort(rng.uniform(1e-4, 2.0, size=6))
+
+            eta = _ssvi_eta_upper_bound(theta, rho, lam)
+            assert eta > 0
+
+            phi = eta * np.power(theta, -lam)
+            term = 1.0 + abs(rho)
+            # Condition (i): theta*phi*(1+|rho|) < 4
+            assert np.all(theta * phi * term < 4.0)
+            # Condition (ii): theta*phi^2*(1+|rho|) <= 4
+            assert np.all(theta * phi**2 * term <= 4.0)
+
+    def test_ssvi_eta_upper_bound_takes_min_over_all_theta(self):
+        """The bound must be the min of both conditions over EVERY theta.
+
+        For lam in [0, 0.5] both 4/((1+|rho|)*theta^(1-lam)) and
+        2/((1+|rho|)*theta^(0.5-lam)) decrease in theta, so the binding theta is
+        the largest one; the bound must also never exceed the value obtained
+        from any single theta on the curve.
+        """
+        from research.volatility.surface_fit import _ssvi_eta_upper_bound
+
+        theta = np.array([0.01, 0.05, 0.2])
+        rho, lam = -0.3, 0.2
+        eta = _ssvi_eta_upper_bound(theta, rho, lam)
+
+        # Binding at the largest theta for lam in [0, 0.5].
+        expected_at_max = min(
+            4.0 / ((1.0 + abs(rho)) * 0.2 ** (1.0 - lam)),
+            2.0 / ((1.0 + abs(rho)) * 0.2 ** (0.5 - lam)),
+        )
+        assert eta == pytest.approx(expected_at_max)
+
+        # Never larger than the bound derived from any individual theta.
+        for single_theta in theta:
+            single = _ssvi_eta_upper_bound(np.array([single_theta]), rho, lam)
+            assert eta <= single + 1e-12
+
+    def test_ssvi_fit_produces_butterfly_safe_params(self):
+        """Fitted SSVI params must satisfy the Gatheral-Jacquier butterfly bounds."""
+        surface = VolatilitySurface()
+        S = 100.0
+        r = 0.01
+        for T in [0.1, 0.25, 0.5, 1.0]:
+            for K in [85, 95, 100, 105, 115]:
+                k = np.log(K / S)
+                vol = 0.20 + 0.04 * np.sqrt(T) + 0.05 * abs(k)
+                price = black_scholes_price(S, K, T, r, vol, is_call=True)
+                surface.add_from_market_data([K], [T], [price], S, r)
+
+        params = surface.fit_ssvi()
+        assert params is not None
+
+        theta = np.asarray(surface._ssvi_atm_total_vars, dtype=float)
+        eta = float(np.clip(params.eta, 1e-4, 1e9))
+        phi = eta * np.power(theta, -params.lam)
+        term = 1.0 + abs(params.rho)
+        assert np.all(theta * phi * term < 4.0)
+        assert np.all(theta * phi**2 * term <= 4.0)
+
 
 class TestVolatilitySurface:
     """Test volatility surface functionality."""

@@ -142,9 +142,37 @@ def _lbr_halley_refinement(
     return None
 
 
-def _iv_trivial_solution(market_price: float, T: float) -> float | None:
-    if market_price <= 0 or T <= 0:
-        return 0.0
+def _iv_trivial_solution(
+    *,
+    market_price: float,
+    S: float,
+    K: float,
+    T: float,
+    is_call: bool,
+) -> float | None:
+    """Resolve degenerate IV problems, or return None if non-trivial.
+
+    A non-positive market price has no implied volatility: returning 0.0 here
+    would silently inject IV=0 into the surface, so raise ValueError and let
+    callers log/skip the quote instead.
+
+    At T <= 0 the option is worth exactly its intrinsic value, so IV = 0.0 is
+    only valid when the quoted price equals that intrinsic within tolerance;
+    any other expired price is inconsistent and must raise.
+    """
+    if market_price <= 0:
+        raise ValueError(
+            f"Cannot imply volatility from non-positive market price {market_price}"
+        )
+    if T <= 0:
+        intrinsic = max(S - K, 0.0) if is_call else max(K - S, 0.0)
+        tolerance = 1e-10 * max(1.0, abs(intrinsic), abs(S))
+        if abs(market_price - intrinsic) <= tolerance:
+            return 0.0
+        raise ValueError(
+            f"Expired option (T={T}) price {market_price} does not equal "
+            f"intrinsic value {intrinsic}"
+        )
     return None
 
 
@@ -179,7 +207,9 @@ def _prepare_lbr_problem(
     is_call: bool,
 ) -> Tuple[float, float | None]:
     resolved_r = _resolve_risk_free_rate(r)
-    trivial = _iv_trivial_solution(market_price, T)
+    trivial = _iv_trivial_solution(
+        market_price=market_price, S=S, K=K, T=T, is_call=is_call
+    )
     if trivial is not None:
         return resolved_r, trivial
     _ensure_price_within_bounds(
@@ -257,8 +287,13 @@ def _prepare_bisection_problem(
     is_call: bool,
 ) -> Tuple[float, float | None]:
     resolved_r = _resolve_risk_free_rate(r)
-    if market_price <= 0:
-        return resolved_r, 0.0
+    # Same policy as the LBR path: a non-positive price must raise (callers
+    # log/skip) instead of silently injecting IV=0 into the surface.
+    trivial = _iv_trivial_solution(
+        market_price=market_price, S=S, K=K, T=T, is_call=is_call
+    )
+    if trivial is not None:
+        return resolved_r, trivial
     _ensure_price_within_bounds(
         market_price=market_price,
         S=S,

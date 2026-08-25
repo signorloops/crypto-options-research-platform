@@ -23,6 +23,15 @@ from validation_scripts.io_utils import (
 )
 
 
+# Denominator floor for relative errors. Deep OTM inverse premiums can be
+# ~1e-10 BTC; an unfloored rel_error on those is pure Monte Carlo noise and
+# would make a relative gate flap randomly. Cases priced below this floor are
+# excluded from the relative gate (the absolute gate still covers them).
+REL_ERROR_DENOMINATOR_FLOOR = 1e-7
+# Maximum tolerated relative pricing error before the gate fails.
+DEFAULT_MAX_REL_ERROR = 0.05
+
+
 def build_validation_grid() -> list[dict[str, Any]]:
     """Build deterministic validation grid."""
     spots = [40000.0, 50000.0, 60000.0]
@@ -96,6 +105,13 @@ def run_validation(
 
     abs_errors = np.array([r["abs_error"] for r in rows], dtype=float)
     rel_errors = np.array([r["rel_error"] for r in rows], dtype=float)
+    # Relative-error gate scope: only cases whose closed-form premium is above
+    # the denominator floor. Sub-floor premiums (deep OTM, ~1e-10 BTC) carry
+    # pure MC noise in relative terms and are covered by the absolute gate.
+    gate_mask = np.array(
+        [abs(r["closed_form"]) >= REL_ERROR_DENOMINATOR_FLOOR for r in rows], dtype=bool
+    )
+    gated_rel_errors = rel_errors[gate_mask] if gate_mask.any() else rel_errors
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -106,8 +122,10 @@ def run_validation(
             "max_abs_error": float(np.max(abs_errors)),
             "mean_abs_error": float(np.mean(abs_errors)),
             "p95_abs_error": float(np.percentile(abs_errors, 95)),
-            "max_rel_error": float(np.max(rel_errors)),
-            "mean_rel_error": float(np.mean(rel_errors)),
+            "max_rel_error": float(np.max(gated_rel_errors)),
+            "mean_rel_error": float(np.mean(gated_rel_errors)),
+            "rel_gate_floor": REL_ERROR_DENOMINATOR_FLOOR,
+            "n_rel_gate_cases": int(gate_mask.sum()),
         },
         "cases": rows,
     }
@@ -131,6 +149,8 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"| P95 abs error | `{s['p95_abs_error']:.8f}` |",
         f"| Max rel error | `{s['max_rel_error']:.8f}` |",
         f"| Mean rel error | `{s['mean_rel_error']:.8f}` |",
+        f"| Rel gate floor | `{s.get('rel_gate_floor', 0.0):.1e}` |",
+        f"| Rel gate cases | `{s.get('n_rel_gate_cases', 0)}` |",
         "",
     ]
     return "\n".join(lines) + "\n"
@@ -146,7 +166,20 @@ def main() -> None:
         "--max-abs-error",
         type=float,
         default=6e-4,
-        help="Fail when max absolute pricing error exceeds this threshold.",
+        help=(
+            "Fail when max absolute pricing error exceeds this threshold. "
+            "Inverse premiums are ~1e-6 BTC, so this is a NaN/blowup tripwire; "
+            "the relative gate is the primary accuracy check."
+        ),
+    )
+    parser.add_argument(
+        "--max-rel-error",
+        type=float,
+        default=DEFAULT_MAX_REL_ERROR,
+        help=(
+            "Fail when max relative pricing error exceeds this threshold. "
+            "Cases priced below the rel-error denominator floor are excluded."
+        ),
     )
     parser.add_argument(
         "--output-md",
@@ -171,10 +204,18 @@ def main() -> None:
     print(f"inverse_power_validation_md={args.output_md}")
     print(f"inverse_power_validation_json={args.output_json}")
 
-    observed = float(report["summary"]["max_abs_error"])
-    if observed > float(args.max_abs_error):
+    # Absolute gate: inverse prices are in BTC (~2e-6 typical), so this only
+    # trips on NaN/blowups; the relative gate is the primary accuracy check.
+    observed_abs = float(report["summary"]["max_abs_error"])
+    if observed_abs > float(args.max_abs_error):
         raise SystemExit(
-            f"Inverse-power validation failed: max_abs_error={observed:.8f} > threshold={float(args.max_abs_error):.8f}"
+            f"Inverse-power validation failed: max_abs_error={observed_abs:.8f} > threshold={float(args.max_abs_error):.8f}"
+        )
+
+    observed_rel = float(report["summary"]["max_rel_error"])
+    if observed_rel > float(args.max_rel_error):
+        raise SystemExit(
+            f"Inverse-power validation failed: max_rel_error={observed_rel:.8f} > threshold={float(args.max_rel_error):.8f}"
         )
 
 

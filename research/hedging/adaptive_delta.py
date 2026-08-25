@@ -29,7 +29,10 @@ class AdaptiveHedgeConfig:
 
     # Hedge sizing
     min_hedge_size: float = 0.001  # Minimum hedge size
-    max_hedge_size_pct: float = 0.5  # Max hedge as % of position
+    # Absolute cap on a single hedge. Deliberately NOT a fraction of current
+    # delta: with target_delta = 0, a cap of |current_delta| * pct can never
+    # close the deviation -- every hedge would only halve it at best.
+    max_hedge_size: float = 1.0
 
     # Tracking window
     price_history_window: int = 100
@@ -92,7 +95,10 @@ class AdaptiveDeltaHedger:
         self.price_history: Deque[Tuple[datetime, float]] = deque(
             maxlen=self.config.price_history_window
         )
-        self.hedge_history: List[Tuple[datetime, float, str]] = []
+        # Bounded like price_history so a long backtest cannot grow memory without limit.
+        self.hedge_history: Deque[Tuple[datetime, float, str]] = deque(
+            maxlen=self.config.price_history_window
+        )
         self._cumulative_price_change: float = 0.0
 
     def update_price(self, timestamp: datetime, price: float) -> None:
@@ -135,7 +141,11 @@ class AdaptiveDeltaHedger:
     def _get_time_since_last_hedge(self, current_time: datetime) -> timedelta:
         """Get time elapsed since last hedge."""
         if self.last_hedge_time is None:
-            return timedelta(hours=1)  # Large default if never hedged
+            # Never hedged: treat as infinite elapsed time so the first hedge is
+            # always time-triggered. A hardcoded sentinel (previously 1 hour)
+            # deadlocked the first hedge whenever the configured interval
+            # exceeded the sentinel.
+            return timedelta.max
         return current_time - self.last_hedge_time
 
     def _calculate_price_change_pct(self, current_price: float) -> float:
@@ -288,7 +298,8 @@ class AdaptiveDeltaHedger:
             base_size *= gamma_adjustment
         # Apply limits
         hedge_size = max(self.config.min_hedge_size, base_size)
-        max_size = abs(current_delta) * self.config.max_hedge_size_pct
+        # Absolute risk cap, independent of current_delta (see AdaptiveHedgeConfig).
+        max_size = self.config.max_hedge_size
         hedge_size = min(hedge_size, max_size)
         # Preserve sign
         return np.sign(delta_diff) * hedge_size
@@ -308,7 +319,10 @@ class AdaptiveDeltaHedger:
             reasons.append(f"Urgency: {urgency}")
 
         if time_trigger:
-            reasons.append(f"Time trigger ({time_since_last.total_seconds()/60:.1f}min)")
+            if self.last_hedge_time is None:
+                reasons.append("Time trigger (never hedged)")
+            else:
+                reasons.append(f"Time trigger ({time_since_last.total_seconds()/60:.1f}min)")
 
         if delta_trigger:
             reasons.append(f"Delta deviation ({delta_deviation:.4f})")

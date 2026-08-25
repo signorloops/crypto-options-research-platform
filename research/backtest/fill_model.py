@@ -377,9 +377,18 @@ class RealisticFillSimulator:
 
     def _check_adverse_selection(self, trade: Trade, market_state: MarketState) -> bool:
         """Check if this trade represents informed flow."""
-        # Simple heuristic: large trades more likely to be informed
-        avg_trade_size = 0.1  # Assume average
-        if trade.size > 3 * avg_trade_size:
+        # Empirical mean trade size from observed flow; large trades
+        # (relative to what the market actually prints) are more likely informed.
+        sizes = [
+            float(t.size)
+            for t in (market_state.recent_trades or [])
+            if t is not trade and float(t.size) > 0
+        ]
+        if sizes:
+            avg_trade_size = float(np.mean(sizes))
+        else:
+            avg_trade_size = max(float(trade.size), 1e-12)
+        if avg_trade_size > 0 and trade.size > 3 * avg_trade_size:
             return self.rng.random() < self.config.adverse_selection_factor * 2
         return self.rng.random() < self.config.adverse_selection_factor
 
@@ -413,11 +422,14 @@ class RealisticFillSimulator:
             quote_price=quote_price,
             side=side,
         )
-        random_slip = abs(float(self.rng.normal(0.0, quote_price * 0.0001)))
+        # Maker semantics: a resting limit order fills at its own limit
+        # price or better — a resting buy never fills above its limit and a
+        # resting sell never fills below it. The book walk can only supply
+        # price improvement (min for BUY, max for SELL), never slippage
+        # past the quoted price.
         if side == OrderSide.BUY:
-            # No price-improvement assumption for passive fills.
-            return float(max(vwap, quote_price) + random_slip)
-        return float(max(min(vwap, quote_price) - random_slip, 0.0))
+            return float(min(vwap, quote_price))
+        return float(max(vwap, quote_price))
 
     @staticmethod
     def _cost_against_side(

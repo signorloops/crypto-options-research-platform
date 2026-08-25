@@ -280,17 +280,31 @@ class TestReturnCalculation:
         position = Position("BTC-USD", 0, 0)
         captured = []
 
-        def _capture_update(ret):
-            captured.append(float(ret))
+        def _capture_update(ret, timestamp=None):
+            captured.append((float(ret), timestamp))
             return strategy.regime_detector.current_regime
 
         strategy.regime_detector.update = _capture_update
-        strategy.quote(create_test_market_state(price=50000.0), position)
-        strategy.quote(create_test_market_state(price=51000.0), position)
+        state1 = create_test_market_state(price=50000.0)
+        state2 = create_test_market_state(price=51000.0)
+        strategy.quote(state1, position)
+        strategy.quote(state2, position)
 
         assert len(captured) == 1
-        assert captured[0] == pytest.approx((51000.0 / 50000.0) - 1.0)
+        assert captured[0][0] == pytest.approx((51000.0 / 50000.0) - 1.0)
         assert strategy._returns_history[0] == pytest.approx(np.log(51000.0 / 50000.0))
+
+    def test_regime_detector_receives_data_timestamp(self):
+        """Regime history should be stamped with data time, not wall-clock time."""
+        strategy = IntegratedMarketMakingStrategy()
+        position = Position("BTC-USD", 0, 0)
+        data_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+        for price in (50000.0, 51000.0, 52000.0):
+            strategy.quote(create_test_market_state(price=price, timestamp=data_ts), position)
+
+        assert strategy.regime_detector._timestamps
+        assert all(ts == data_ts for ts in strategy.regime_detector._timestamps)
 
 
 class TestPnLCalculation:

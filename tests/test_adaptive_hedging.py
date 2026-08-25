@@ -80,6 +80,24 @@ class TestPriceHistory:
 
         assert len(hedger.price_history) == 5
 
+    def test_hedge_history_maxlen(self):
+        """Test hedge history maximum length.
+
+        Regression guard: hedge_history was previously an unbounded list while
+        price_history was a capped deque, so long-running backtests grew memory
+        without limit.
+        """
+        config = AdaptiveHedgeConfig(price_history_window=5)
+        hedger = AdaptiveDeltaHedger(config)
+        now = datetime.now(timezone.utc)
+
+        for i in range(10):
+            hedger.execute_hedge(now + timedelta(minutes=i), -0.1, 50000.0)
+
+        assert len(hedger.hedge_history) == 5
+        # The most recent hedges are retained.
+        assert hedger.hedge_history[-1][0] == now + timedelta(minutes=9)
+
 
 class TestShouldHedge:
     """Tests for hedge decision logic."""
@@ -94,6 +112,23 @@ class TestShouldHedge:
 
         assert decision.should_hedge is True
         assert "First" in decision.reason or "Time" in decision.reason
+
+    def test_first_hedge_when_interval_exceeds_one_hour(self):
+        """First hedge must not be deadlocked by a long configured interval.
+
+        Regression guard: the never-hedged sentinel used to be a hardcoded 1
+        hour, so any config with base_hedge_interval_minutes > 60 never fired
+        the time trigger for the very first hedge.
+        """
+        config = AdaptiveHedgeConfig(base_hedge_interval_minutes=120)
+        hedger = AdaptiveDeltaHedger(config)
+        now = datetime.now(timezone.utc)
+        greeks = Greeks(delta=0.01, gamma=0.001, theta=-0.01, vega=0.02)
+
+        decision = hedger.should_hedge(now, 50000.0, greeks, 1.0)
+
+        assert decision.should_hedge is True
+        assert "Time" in decision.reason
 
     def test_time_based_hedge(self):
         """Test time-based hedge trigger."""
@@ -204,9 +239,26 @@ class TestHedgeSizeCalculation:
         assert size < 0  # Negative because we need to sell to reduce delta
         assert abs(size) > 0
 
+    def test_hedge_size_closes_full_deviation(self):
+        """Hedge size must fully close the delta deviation by default.
+
+        Regression guard: the cap used to be a fraction of current_delta,
+        i.e. a fraction of the very gap being hedged (target_delta == 0), so
+        every hedge only halved the deviation and never closed it. The cap is
+        now an absolute max_hedge_size that is independent of current_delta.
+        """
+        config = AdaptiveHedgeConfig()  # max_hedge_size=1.0 by default
+        hedger = AdaptiveDeltaHedger(config)
+
+        size = hedger._calculate_hedge_size(0.5, 0.0, 50000.0, 0.001)
+
+        # No inverse/gamma adjustments apply at these inputs, so the hedge
+        # equals the full deviation.
+        assert size == pytest.approx(-0.5)
+
     def test_hedge_size_respects_limits(self):
         """Test that hedge size respects min/max limits."""
-        config = AdaptiveHedgeConfig(min_hedge_size=0.0001, max_hedge_size_pct=0.5)
+        config = AdaptiveHedgeConfig(min_hedge_size=0.0001, max_hedge_size=0.5)
         hedger = AdaptiveDeltaHedger(config)
 
         # Small delta difference
@@ -218,8 +270,11 @@ class TestHedgeSizeCalculation:
         # Large delta difference
         size = hedger._calculate_hedge_size(1.0, 0.0, 50000.0, 0.01)
 
-        # Should respect max_hedge_size_pct
-        assert abs(size) <= 1.0 * config.max_hedge_size_pct
+        # Should respect max_hedge_size: an absolute cap independent of
+        # current_delta. Anchoring the cap to the gap being hedged (with
+        # target_delta fixed at 0) meant the hedge only ever halved the
+        # deviation instead of closing it.
+        assert abs(size) <= config.max_hedge_size
 
     def test_inverse_adjustment(self):
         """Test coin-margined adjustment."""

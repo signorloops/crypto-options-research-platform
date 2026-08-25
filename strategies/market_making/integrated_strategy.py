@@ -150,12 +150,14 @@ class IntegratedMarketMakingStrategy(MarketMakingStrategy):
             "calibrated_inventory_skew_factor": self._effective_inventory_skew_factor,
         }
 
-    def _update_regime_state(self, mid: float, prev_price: Optional[float]) -> RegimeState:
+    def _update_regime_state(
+        self, mid: float, prev_price: Optional[float], timestamp: datetime = None
+    ) -> RegimeState:
         """Update returns/regime from latest mid price."""
         ret = _log_return(mid, prev_price)
         if ret is not None:
             detector_input = np.expm1(ret) if self.regime_detector.config.use_log_returns else ret
-            self.regime_detector.update(detector_input)
+            self.regime_detector.update(detector_input, timestamp=timestamp)
             self._returns_history.append(ret)
         return self.regime_detector.current_regime
 
@@ -230,7 +232,9 @@ class IntegratedMarketMakingStrategy(MarketMakingStrategy):
         self._current_price = mid
         self._current_greeks = state.greeks
 
-        current_regime = self._update_regime_state(mid, prev_price)
+        current_regime = self._update_regime_state(
+            mid, prev_price, timestamp=state.timestamp
+        )
         calibration_meta = self._update_online_calibration(state, position.size)
         circuit_state, can_trade, reason = self._evaluate_trading_gate(state, position)
         return float(mid), current_regime, calibration_meta, circuit_state, can_trade, reason

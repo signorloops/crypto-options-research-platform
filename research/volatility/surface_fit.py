@@ -58,8 +58,27 @@ def _ssvi_theta_at_expiry(
     return np.interp(t, x_exp, y_theta, left=y_theta[0], right=y_theta[-1])
 
 
-def _ssvi_eta_upper_bound(max_theta: float, rho: float) -> float:
-    return 2.0 / (np.sqrt(max(max_theta, 1e-10)) * (1.0 + abs(rho) + 1e-8))
+def _ssvi_eta_upper_bound(theta: "np.ndarray | float", rho: float, lam: float) -> float:
+    """Butterfly-arbitrage-free upper bound on SSVI eta (Gatheral-Jacquier 2014).
+
+    The SSVI surface is free of butterfly arbitrage when, for every theta on
+    the ATM total-variance curve (phi = eta * theta**(-lam)):
+
+        (i)  theta * phi * (1 + |rho|) < 4
+        (ii) theta * phi**2 * (1 + |rho|) <= 4
+
+    Solving each for eta gives
+        (i)  eta < 4 / ((1 + |rho|) * theta**(1 - lam))
+        (ii) eta <= 2 / ((1 + |rho|) * theta**(1/2 - lam))
+
+    Both must hold at every theta, so the admissible eta is the minimum of the
+    two expressions over all observed theta values (the binding theta).
+    """
+    theta_arr = np.maximum(np.asarray(theta, dtype=float), 1e-10)
+    rho_term = 1.0 + abs(rho) + 1e-8
+    bound_i = 4.0 / (rho_term * np.power(theta_arr, 1.0 - lam))
+    bound_ii = 2.0 / (rho_term * np.power(theta_arr, 0.5 - lam))
+    return float(np.min(np.minimum(bound_i, bound_ii)))
 
 
 def _ssvi_objective(
@@ -77,7 +96,7 @@ def _ssvi_objective(
     if not np.all(np.isfinite(w_model)):
         return 1e9
 
-    eta_upper = _ssvi_eta_upper_bound(float(np.max(theta)), params.rho)
+    eta_upper = _ssvi_eta_upper_bound(theta, params.rho, params.lam)
     penalty = 0.0
     if params.eta > eta_upper:
         penalty += 1e5 * (params.eta - eta_upper) ** 2
@@ -120,7 +139,7 @@ def fit_ssvi(surface, ssvi_params_cls: Type, expiry_tol: float = 0.01):
 
     x_exp, y_theta = atm_curve
     rho, eta, lam = _fit_ssvi_parameters(surface, ssvi_params_cls, x_exp, y_theta)
-    eta_upper = _ssvi_eta_upper_bound(float(np.max(y_theta)), rho)
+    eta_upper = _ssvi_eta_upper_bound(y_theta, rho, lam)
     eta = float(np.clip(eta, 1e-4, eta_upper))
     surface._ssvi_params = ssvi_params_cls(rho=rho, eta=eta, lam=lam)
     surface._ssvi_atm_expiries = x_exp

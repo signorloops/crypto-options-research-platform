@@ -173,9 +173,18 @@ class VolatilityRegimeDetector:
             return X
         return (X - self._feature_mean) / self._feature_scale
 
-    def _extract_features(self, new_return: float) -> RegimeFeatures:
-        """Extract features from new return."""
-        now = datetime.now(timezone.utc)
+    def _extract_features(
+        self, new_return: float, timestamp: Optional[datetime] = None
+    ) -> RegimeFeatures:
+        """Extract features from new return.
+
+        `timestamp` should be the data timestamp of the observation (e.g. the
+        bar/event time in a backtest). It defaults to wall-clock time only for
+        live use where no event timestamp is available; stamping features with
+        `datetime.now()` during backtests would corrupt history with
+        wall-clock times instead of data time.
+        """
+        event_time = timestamp if timestamp is not None else datetime.now(timezone.utc)
 
         # Update returns buffer
         self._returns_buffer.append(new_return)
@@ -190,11 +199,11 @@ class VolatilityRegimeDetector:
             realized_vol_5min=rv_5,
             realized_vol_15min=rv_15,
             realized_vol_30min=rv_30,
-            timestamp=now,
+            timestamp=event_time,
         )
 
         self._features_buffer.append(features)
-        self._timestamps.append(now)
+        self._timestamps.append(event_time)
 
         return features
 
@@ -346,13 +355,17 @@ class VolatilityRegimeDetector:
         except (ValueError, np.linalg.LinAlgError):
             return self.current_regime, self.regime_probabilities
 
-    def update(self, returns: float) -> RegimeState:
-        """Update detector with new return and return current regime."""
+    def update(self, returns: float, timestamp: Optional[datetime] = None) -> RegimeState:
+        """Update detector with new return and return current regime.
+
+        Pass `timestamp` to stamp features and regime history with the data
+        time (required for backtest determinism); it defaults to wall-clock.
+        """
         self._sample_count += 1
         # Convert to log return if needed
         log_return = np.log1p(returns) if self.config.use_log_returns and returns > -1 else returns
         # Extract features
-        self._extract_features(log_return)
+        features = self._extract_features(log_return, timestamp=timestamp)
         # Train model if needed
         if (
             not self._is_fitted
@@ -369,8 +382,10 @@ class VolatilityRegimeDetector:
                 self.current_regime = selected_regime
                 self._current_regime_run_length = 1
             self.regime_probabilities = probs
-            # Record history
-            self.regime_history.append((datetime.now(timezone.utc), self.current_regime, probs.copy()))
+            # Record history using the observation's data timestamp.
+            self.regime_history.append(
+                (features.timestamp, self.current_regime, probs.copy())
+            )
         return self.current_regime
 
     def predict_regime_switch_probability(self) -> float:

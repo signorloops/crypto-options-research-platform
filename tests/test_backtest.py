@@ -125,9 +125,13 @@ class TestRealisticFillSimulator:
         )
 
         assert fill is not None
+        # Transaction fees push the all-in price above the quoted limit...
         assert fill.price > quote.bid_price
         assert sim.transaction_cost_paid > 0
-        assert sim.slippage_cost > 0
+        # ...but a resting buy limit never fills above its own limit price:
+        # maker executions are capped at the quote, so slippage against the
+        # quote is zero by construction (book walk can only improve it).
+        assert sim.slippage_cost == 0.0
 
     def test_order_book_slippage_uses_maker_side_depth(self):
         """BUY maker fills should not reference ask-side depth."""
@@ -149,6 +153,114 @@ class TestRealisticFillSimulator:
             side=OrderSide.BUY,
         )
         assert filled_price < 101.0
+
+    def test_maker_buy_never_fills_above_limit_price(self):
+        """A resting buy limit fills at its limit price or better, never above."""
+        sim = RealisticFillSimulator(
+            config=FillSimulatorConfig(base_latency_ms=0.0, latency_std_ms=0.0),
+            rng=np.random.default_rng(3),
+        )
+        now = datetime.now(timezone.utc)
+        # Deep, expensive book: walking it would push a taker's VWAP far
+        # above the quote. A maker must still fill at <= its limit price.
+        order_book = OrderBook(
+            timestamp=now,
+            instrument="SYNTHETIC",
+            bids=[OrderBookLevel(price=101.0, size=5.0), OrderBookLevel(price=102.0, size=5.0)],
+            asks=[OrderBookLevel(price=103.0, size=5.0)],
+        )
+        filled_price = sim._apply_order_book_slippage(
+            quote_price=100.0,
+            trade_size=4.0,
+            order_book=order_book,
+            side=OrderSide.BUY,
+        )
+        assert filled_price <= 100.0
+
+    def test_maker_sell_never_fills_below_limit_price(self):
+        """A resting sell limit fills at its limit price or better, never below."""
+        sim = RealisticFillSimulator(
+            config=FillSimulatorConfig(base_latency_ms=0.0, latency_std_ms=0.0),
+            rng=np.random.default_rng(3),
+        )
+        now = datetime.now(timezone.utc)
+        order_book = OrderBook(
+            timestamp=now,
+            instrument="SYNTHETIC",
+            bids=[OrderBookLevel(price=99.0, size=5.0)],
+            asks=[OrderBookLevel(price=99.0, size=5.0), OrderBookLevel(price=98.0, size=5.0)],
+        )
+        filled_price = sim._apply_order_book_slippage(
+            quote_price=100.0,
+            trade_size=4.0,
+            order_book=order_book,
+            side=OrderSide.SELL,
+        )
+        assert filled_price >= 100.0
+
+    def test_adverse_selection_uses_empirical_trade_size(self):
+        """Large-trade classification should use observed flow, not a constant."""
+
+        def _make_sim(recent_sizes, factor):
+            # Seed 1: first uniform draw ≈ 0.5118, which lies strictly
+            # between `factor` and `2*factor` for factor=0.3, so the
+            # large-trade branch (prob 0.6) and the ordinary branch
+            # (prob 0.3) return different verdicts.
+            sim = RealisticFillSimulator(
+                config=FillSimulatorConfig(
+                    base_latency_ms=0.0,
+                    latency_std_ms=0.0,
+                    adverse_selection_factor=factor,
+                ),
+                rng=np.random.default_rng(1),
+            )
+            now = datetime.now(timezone.utc)
+            order_book = OrderBook(
+                timestamp=now,
+                instrument="SYNTHETIC",
+                bids=[OrderBookLevel(price=99.9, size=1.0)],
+                asks=[OrderBookLevel(price=100.1, size=1.0)],
+            )
+            recent = [
+                Trade(
+                    timestamp=now,
+                    instrument="SYNTHETIC",
+                    price=100.0,
+                    size=size,
+                    side=OrderSide.BUY,
+                )
+                for size in recent_sizes
+            ]
+            market_state = MarketState(
+                timestamp=now,
+                instrument="SYNTHETIC",
+                spot_price=100.0,
+                order_book=order_book,
+                recent_trades=recent,
+            )
+            return sim, market_state
+
+        trade = Trade(
+            timestamp=datetime.now(timezone.utc),
+            instrument="SYNTHETIC",
+            price=99.95,
+            size=0.2,
+            side=OrderSide.SELL,
+        )
+
+        # Heavy observed flow (mean 5.0): 0.2 is small relative to flow, so
+        # the ordinary branch applies (draw 0.51 > 0.3 -> not adverse).
+        # Under the old hardcoded 0.1 mean, 0.2 > 3*0.1 would have taken the
+        # large-trade branch and reported adverse.
+        sim_heavy, state_heavy = _make_sim([5.0, 5.0, 5.0, 5.0], factor=0.3)
+        assert sim_heavy._check_adverse_selection(trade, state_heavy) is False
+
+        # Tiny observed flow (mean 0.01): 0.2 is 20x the empirical mean, so
+        # the large-trade branch applies (draw 0.51 < 0.6 -> adverse).
+        # Under the old hardcoded mean, 0.2 < 3*0.1 would have reported the
+        # ordinary branch and not adverse.
+        sim_tiny, state_tiny = _make_sim([0.01, 0.01, 0.01, 0.01], factor=0.3)
+        assert sim_tiny._check_adverse_selection(trade, state_tiny) is True
 
     def test_fill_simulator_tracks_adverse_selection_cost(self):
         """Adverse fills should be reflected in simulator cost metrics."""
@@ -580,8 +692,8 @@ class TestBacktestEngine:
         assert result.total_spread_captured == pytest.approx(8.0)
         assert result.avg_spread_captured_bps == pytest.approx(40.0)
 
-    def test_quote_uses_previous_snapshot_to_avoid_lookahead(self):
-        """Strategy quote should only see t-1 snapshot information."""
+    def test_quote_uses_current_snapshot_and_fills_against_next_trades(self):
+        """Strategy should quote on the current event and fill only on future trades."""
 
         class SnapshotRecordingStrategy:
             def __init__(self) -> None:
@@ -610,8 +722,10 @@ class TestBacktestEngine:
 
         engine.run(df)
 
-        # i=0 uses current snapshot; later ticks must use previous snapshot.
-        assert strategy.observed_spot_prices == [100.0, 100.0, 110.0]
+        # Each event quotes on its own (current) snapshot; no extra lag.
+        # Look-ahead is prevented on the fill side, which only matches the
+        # resting quote against trades in (t_i, t_{i+1}].
+        assert strategy.observed_spot_prices == [100.0, 110.0, 120.0]
 
 
 class TestBacktestWithDifferentStrategies:
