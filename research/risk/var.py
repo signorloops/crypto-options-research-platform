@@ -223,8 +223,14 @@ class VaRCalculator:
         z95, z99 = map(float, cf)
         var_95 = total_value * max(0.0, -mu + z95 * sigma)
         var_99 = total_value * max(0.0, -mu + z99 * sigma)
-        cvar_95 = total_value * max(0.0, -mu + sigma * stats.norm.pdf(z95) / 0.05)
-        cvar_99 = total_value * max(0.0, -mu + sigma * stats.norm.pdf(z99) / 0.01)
+        # Cornish-Fisher CVaR uses the *normal* ES density term evaluated at
+        # the normal quantile, not at the CF-adjusted quantile. Using z_cf
+        # here mixes two different quantile conventions and can be off by
+        # ~25% under heavy skew.
+        z_alpha_95 = float(stats.norm.ppf(0.05))
+        z_alpha_99 = float(stats.norm.ppf(0.01))
+        cvar_95 = total_value * max(0.0, -mu + sigma * stats.norm.pdf(z_alpha_95) / 0.05)
+        cvar_99 = total_value * max(0.0, -mu + sigma * stats.norm.pdf(z_alpha_99) / 0.01)
         return VaRResult(var_95=float(var_95), var_99=float(var_99), cvar_95=float(cvar_95), cvar_99=float(cvar_99), method="cornish_fisher")
 
     def historical_var(
@@ -238,12 +244,15 @@ class VaRCalculator:
         )
         portfolio_returns = self._portfolio_return_series(aligned_returns, weights_arr)
         if holding_period > 1:
-            n_periods = len(portfolio_returns) // holding_period
-            portfolio_returns = (
-                portfolio_returns[: n_periods * holding_period].reshape(n_periods, holding_period).sum(axis=1)
-                if n_periods > 0
-                else portfolio_returns * np.sqrt(holding_period)
-            )
+            # Use overlapping rolling windows so we don't discard the
+            # `len % holding_period` tail and so the quantile estimator sees
+            # ~n-h+1 observations instead of n/h.
+            portfolio_returns = portfolio_returns.rolling(holding_period).sum().dropna()
+            if portfolio_returns.empty:
+                # Fall back to scaling i.i.d. daily returns; this is a
+                # degenerate case (holding_period > len(data)) and the best
+                # we can do without more history.
+                portfolio_returns = self._portfolio_return_series(aligned_returns, weights_arr) * np.sqrt(holding_period)
         q95 = np.percentile(portfolio_returns, 5)
         q99 = np.percentile(portfolio_returns, 1)
         var_95 = -q95 * total_value

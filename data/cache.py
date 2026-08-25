@@ -29,13 +29,25 @@ def _iter_days_inclusive(start: datetime, end: datetime):
 
 
 def _read_cached_parquet(cache_path: Path) -> Optional[pd.DataFrame]:
+    """Read a parquet cache file, tolerating corruption.
+
+    A truncated or poisoned cache file raises pyarrow.lib.ArrowInvalid (a
+    ValueError subclass), not OSError. Catching only OSError / CSV parser
+    errors let corrupt cache files crash the read path instead of falling
+    back to the downloader.
+    """
     try:
         return pd.read_parquet(cache_path)
-    except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError) as exc:
+    except (OSError, ValueError, pd.errors.EmptyDataError, pd.errors.ParserError) as exc:
         logger.warning(
             "Failed to read cache file",
             extra=log_extra(path=str(cache_path), error=str(exc)),
         )
+        # Best-effort: delete the poison file so the next call does not
+        # keep hitting the same corrupted cache.
+        import contextlib
+        with contextlib.suppress(Exception):
+            cache_path.unlink(missing_ok=True)
         return None
 
 
@@ -237,7 +249,17 @@ class DataCache:
             df = df.copy()
             df['timestamp'] = pd.to_datetime(df['timestamp'])
 
-        df.to_parquet(cache_path, compression='zstd')
+        # Atomic write: write to a temp file in the same directory and
+        # rename, so an interrupted write never leaves a truncated parquet
+        # that the read path would then have to detect and delete.
+        tmp_path = cache_path.with_suffix(cache_path.suffix + ".tmp")
+        try:
+            df.to_parquet(tmp_path, compression='zstd')
+            tmp_path.replace(cache_path)
+        finally:
+            import contextlib
+            with contextlib.suppress(Exception):
+                tmp_path.unlink(missing_ok=True)
 
     def put_range(
         self,

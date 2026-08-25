@@ -22,6 +22,26 @@ class OrderSide(Enum):
     SELL = "sell"
 
 
+def _format_strike(strike: float) -> str:
+    """Format a strike for instrument names without losing precision.
+
+    Integer-valued strikes render as integers (e.g. 50000.0 -> "50000", matching
+    exchange conventions such as Deribit), while fractional strikes keep their
+    digits with trailing zeros stripped (e.g. 43250.5 -> "43250.5").
+
+    Args:
+        strike: Strike price.
+
+    Returns:
+        Strike formatted for use in an instrument name.
+    """
+    if strike == int(strike):
+        return str(int(strike))
+    # Fixed-point formatting avoids scientific notation; trailing zeros are
+    # stripped so 43250.50 renders as "43250.5".
+    return f"{strike:.10f}".rstrip("0").rstrip(".")
+
+
 @dataclass
 class Tick:
     """Market tick data."""
@@ -138,7 +158,8 @@ class OptionContract:
         """Generate standard instrument name."""
         expiry_str = self.expiry.strftime("%d%b%y").upper()
         opt_type = self.option_type.value
-        return f"{self.underlying}-{expiry_str}-{int(self.strike)}-{opt_type}"
+        strike_str = _format_strike(self.strike)
+        return f"{self.underlying}-{expiry_str}-{strike_str}-{opt_type}"
 
     @property
     def is_coin_margined(self) -> bool:

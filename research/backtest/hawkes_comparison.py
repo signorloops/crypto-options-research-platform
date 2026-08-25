@@ -940,8 +940,10 @@ class ComprehensiveHawkesComparison:
             for name, vals in scores.items()
         }
 
-        # Sort (reverse for most metrics, but not for drawdown)
-        reverse = metric != 'max_drawdown'
+        # Drawdowns are <= 0; "best" means closest to zero (least negative).
+        # The previous ascending sort for max_drawdown put the deepest (worst)
+        # drawdown first.
+        reverse = True
         return sorted(avg_scores.items(), key=lambda x: x[1], reverse=reverse)
 
     def get_comparison_dataframe(self) -> pd.DataFrame:

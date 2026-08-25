@@ -238,7 +238,7 @@ prepare-rollback-tag:
 
 daily-regression:
 	$(PYTHON) scripts/governance/daily_regression_gate.py \
-		--cmd "$(PYTHON) -m pytest -q --noconftest tests/test_pricing_inverse.py tests/test_volatility.py tests/test_hawkes_comparison.py tests/test_research_dashboard.py" \
+		--cmd "$(PYTHON) -m pytest -q --noconftest tests/test_pricing_boundary.py tests/test_inverse_power_options.py tests/test_volatility.py tests/test_hawkes_comparison.py tests/test_dashboard_strategy.py" \
 		--output-md artifacts/daily-regression-gate.md \
 		--output-json artifacts/daily-regression-gate.json \
 		--strict

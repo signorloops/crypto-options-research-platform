@@ -206,12 +206,18 @@ def _build_empty_scorecard(result: BacktestResult) -> StrategyScorecard:
 
 
 def _compute_sortino_ratio(daily_returns: pd.Series, periods_per_year: float) -> float:
+    """Compute Sortino ratio with the standard full-series denominator.
+
+    The previous implementation averaged squared downside deviations only
+    over the negative-return periods, which shrinks the denominator and
+    inflates the ratio whenever downside periods are rare.
+    """
     target_return = 0.0
-    downside_returns = daily_returns[daily_returns < target_return]
-    if len(downside_returns) == 0:
+    if len(daily_returns) == 0:
         return 0.0
 
-    downside_deviation = np.sqrt(np.mean((downside_returns - target_return) ** 2))
+    downside = np.minimum(daily_returns.to_numpy() - target_return, 0.0)
+    downside_deviation = float(np.sqrt(np.mean(downside ** 2)))
     if downside_deviation <= 0:
         return 0.0
 
@@ -562,11 +568,13 @@ def _build_backtest_engine(
     strategy: MarketMakingStrategy,
     initial_capital: float,
     transaction_cost_bps: float,
+    random_seed: Optional[int] = None,
 ) -> BacktestEngine:
     return BacktestEngine(
         strategy=strategy,
         initial_crypto_balance=initial_capital,
         transaction_cost_bps=transaction_cost_bps,
+        random_seed=random_seed,
     )
 
 
@@ -591,11 +599,15 @@ class StrategyArena:
         initial_capital: float = 100000.0,
         transaction_cost_bps: float = 2.0,
         annualization_periods: Optional[float] = None,
+        random_seed: Optional[int] = None,
     ):
         self.market_data = market_data.copy()
         self.initial_capital = initial_capital
         self.transaction_cost_bps = transaction_cost_bps
         self.annualization_periods = annualization_periods
+        # Seed used for every per-strategy backtest so each strategy sees the
+        # same random stream (fair comparison, reproducible tournaments).
+        self.random_seed = random_seed
 
         self.results: Dict[str, BacktestResult] = {}
         self.scorecards: Dict[str, StrategyScorecard] = {}
@@ -640,6 +652,7 @@ class StrategyArena:
             strategy=strategy,
             initial_capital=self.initial_capital,
             transaction_cost_bps=self.transaction_cost_bps,
+            random_seed=self.random_seed,
         ).run(self.market_data)
         scorecard = self._calculate_scorecard(result)
         if verbose:

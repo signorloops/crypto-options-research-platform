@@ -76,7 +76,14 @@ class RedisCache:
     async def disconnect(self) -> None:
         """Close Redis connection."""
         if self._pool:
-            await self._pool.close()
+            # redis-py 5.x deprecates close() in favor of aclose(); use
+            # aclose() when available, falling back to close() for older
+            # versions.
+            aclose = getattr(self._pool, "aclose", None)
+            if aclose is not None:
+                await aclose()
+            else:
+                await self._pool.close()
             self._pool = None
             logger.info("Redis disconnected")
 
@@ -286,8 +293,18 @@ class RedisCache:
             logger.info("Subscribed to channels", extra=log_extra(channels=list(channels)))
             yield pubsub
         finally:
-            await pubsub.unsubscribe(*channels)
-            await pubsub.close()
+            # Guard cleanup so a failure to unsubscribe does not mask the
+            # original exception that brought us here.
+            import contextlib
+            with contextlib.suppress(Exception):
+                await pubsub.unsubscribe(*channels)
+            aclose = getattr(pubsub, "aclose", None)
+            if aclose is not None:
+                with contextlib.suppress(Exception):
+                    await aclose()
+            else:
+                with contextlib.suppress(Exception):
+                    await pubsub.close()
             logger.info("Unsubscribed from channels", extra=log_extra(channels=list(channels)))
 
     _RATE_LIMIT_SCRIPT = """
@@ -295,6 +312,11 @@ class RedisCache:
     local max_requests = tonumber(ARGV[1])
     local window_seconds = tonumber(ARGV[2])
 
+    -- Fixed-window rate limiter: the TTL is set once at key creation. The
+    -- previous implementation called EXPIRE on every INCR *and* on every
+    -- denial, which means that under steady load the window never actually
+    -- expires (each request pushes the TTL out again) and a blocked client
+    -- stays blocked forever.
     local current = redis.call('GET', key)
     if current == false then
         redis.call('SET', key, 1, 'EX', window_seconds)
@@ -303,12 +325,10 @@ class RedisCache:
 
     local count = tonumber(current)
     if count >= max_requests then
-        redis.call('EXPIRE', key, window_seconds)
         return 0
     end
 
     redis.call('INCR', key)
-    redis.call('EXPIRE', key, window_seconds)
     return 1
     """
 
@@ -400,7 +420,9 @@ async def _fetch_and_store_greeks(
     if greeks:
         await manager.redis.set_greeks(instrument, greeks)
         manager._fetch_cache[instrument] = greeks
-        asyncio.get_event_loop().call_later(5.0, manager._fetch_cache.pop, instrument, None)
+        # Use get_running_loop inside a coroutine; get_event_loop is
+        # deprecated for this use and will raise on Python 3.12+.
+        asyncio.get_running_loop().call_later(5.0, manager._fetch_cache.pop, instrument, None)
     return greeks
 
 

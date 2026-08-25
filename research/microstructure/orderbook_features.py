@@ -152,7 +152,9 @@ class OrderBookFeatureExtractor:
         total = buy_volume + sell_volume
         if total > 0:
             trade_flow_imbalance = (buy_volume - sell_volume) / total
-        if len(recent_trades) > 0:
+        # Guard against None: zero-volume trade lists produce no imbalance
+        # signal, and multiplying None by depth_imbalance would crash.
+        if trade_flow_imbalance is not None and len(recent_trades) > 0:
             volume_order_imbalance = trade_flow_imbalance * depth_imbalance
 
         return trade_flow_imbalance, volume_order_imbalance
@@ -175,13 +177,19 @@ class OrderBookFeatureExtractor:
 
     @staticmethod
     def _extract_depth_features(order_book: "OrderBook") -> Dict[str, float]:
-        """Extract near-book depth aggregates and imbalance."""
+        """Extract near-book depth aggregates and imbalance.
+
+        depth_imbalance is normalized against the same 5-level depth used in
+        the numerator. Dividing the 5-level imbalance by the 10-level total
+        compresses the metric away from ±1 and ties its scale to however
+        much depth happens to sit between levels 5 and 10.
+        """
         bid_depth_5 = float(sum(lvl.size for lvl in order_book.bids[:5]))
         ask_depth_5 = float(sum(lvl.size for lvl in order_book.asks[:5]))
         bid_depth_10 = float(sum(lvl.size for lvl in order_book.bids[:10]))
         ask_depth_10 = float(sum(lvl.size for lvl in order_book.asks[:10]))
-        total_depth = bid_depth_10 + ask_depth_10
-        depth_imbalance = (bid_depth_5 - ask_depth_5) / total_depth if total_depth > 0 else 0.0
+        top5_total = bid_depth_5 + ask_depth_5
+        depth_imbalance = (bid_depth_5 - ask_depth_5) / top5_total if top5_total > 0 else 0.0
         return {
             "bid_depth_5": bid_depth_5,
             "ask_depth_5": ask_depth_5,
@@ -326,12 +334,15 @@ class FeaturePipeline:
         features_list = []
 
         for i, ob in enumerate(order_books):
-            # Get relevant trades for this order book
+            # Get relevant trades for this order book. Use a trailing window
+            # (only trades at or before the book snapshot) so predictive
+            # features cannot see future prints.
             recent_trades = None
             if trades:
                 ob_time = ob.timestamp
                 recent_trades = [
-                    t for t in trades if abs((t.timestamp - ob_time).total_seconds()) < 60
+                    t for t in trades
+                    if 0 <= (ob_time - t.timestamp).total_seconds() < 60
                 ]
 
             features = self.extractor.extract(ob, recent_trades)

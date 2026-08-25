@@ -8,6 +8,7 @@ import pytest
 from core.types import (
     Fill,
     Greeks,
+    OptionContract,
     OptionType,
     OrderSide,
     Position,
@@ -116,6 +117,26 @@ class TestOptionContract:
         assert "BTC-USD" in name
         assert "50000" in name
         assert name.endswith("-C")
+
+    def test_instrument_name_preserves_fractional_strike(self, sample_option_contract):
+        """Fractional strikes must not be truncated in instrument names."""
+        contract = OptionContract(
+            underlying="ETH-USD",
+            strike=43250.5,
+            expiry=datetime(2024, 12, 31),
+            option_type=OptionType.PUT,
+        )
+        assert contract.instrument_name == "ETH-USD-31DEC24-43250.5-P"
+
+    def test_instrument_name_integer_strike_has_no_decimal(self, sample_option_contract):
+        """Integer-valued floats should render without a trailing '.0'."""
+        contract = OptionContract(
+            underlying="BTC-USD",
+            strike=50000.0,
+            expiry=datetime(2024, 12, 31),
+            option_type=OptionType.CALL,
+        )
+        assert contract.instrument_name == "BTC-USD-31DEC24-50000-C"
 
     def test_time_to_expiry(self, sample_option_contract):
         """Test time to expiry calculation."""

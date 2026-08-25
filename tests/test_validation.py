@@ -317,6 +317,17 @@ class TestDownloadRequest:
         )
         assert req.exchange == "deribit"
 
+    def test_valid_okx_exchange(self):
+        """okx is a supported exchange and should validate."""
+        req = DownloadRequest(
+            exchange="okx",
+            data_type="trades",
+            instrument="BTC-USD-240329-50000-C",
+            start=datetime(2024, 1, 1),
+            end=datetime(2024, 1, 31),
+        )
+        assert req.exchange == "okx"
+
     def test_invalid_exchange(self):
         """Test exchange must be valid."""
         with pytest.raises(Exception):

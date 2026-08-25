@@ -10,6 +10,8 @@ import os
 from threading import Lock, Thread
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
+from utils.logging_config import log_extra
+
 import numpy as np
 import pandas as pd
 
@@ -230,10 +232,20 @@ def _select_var_result(
         "cornish_fisher": calculator.cornish_fisher_var,
         "evt": calculator.evt_var,
         "fhs": calculator.filtered_historical_var,
+        "historical": calculator.historical_var,
+        "monte_carlo": calculator.monte_carlo_var,
     }
     selected = method_map.get(method_key)
     if selected is not None:
         return selected(positions, returns)
+    # Hybrid is the explicit fallback for "hybrid" / unknown methods. Log
+    # loudly so configuration errors (e.g. typos) are visible instead of
+    # silently running the 4-method max.
+    if method_key != "hybrid":
+        logger.warning(
+            "Unknown var_method %r; falling back to hybrid max",
+            method,
+        )
     candidates = [
         calculator.parametric_var(positions, returns),
         calculator.cornish_fisher_var(positions, returns),
@@ -329,6 +341,10 @@ class CircuitBreakerConfig:
     # Position concentration - 从环境变量读取
     position_concentration_limit: float = float(os.getenv("CB_POSITION_CONCENTRATION_LIMIT", "0.30"))
     concentration_warning_pct: float = float(os.getenv("CB_CONCENTRATION_WARNING_PCT", "0.20"))
+
+    # Absolute position size cap in contracts (per instrument). Enforced by
+    # `can_trade` for NEW_POSITION actions; ignored when <= 0.
+    max_position_size: float = float(os.getenv("CB_MAX_POSITION_SIZE", "0"))
 
     # Cooldown period after state change - 从环境变量读取，默认 5 minutes
     cooldown_period_seconds: int = int(os.getenv("CB_COOLDOWN_SECONDS", "300"))
@@ -522,6 +538,10 @@ class CircuitBreaker:
         # Thread safety lock
         self._lock = Lock()
 
+        # Track in-flight alert tasks so they are not garbage-collected
+        # before delivery (Python only keeps weak refs to tasks).
+        self._alert_tasks: set = set()
+
         # Redis client for distributed state persistence (optional)
         self._redis_client: Optional[Any] = None
         self._redis_key_prefix = "circuit_breaker"
@@ -650,7 +670,12 @@ class CircuitBreaker:
             return self.state
 
     def _check_all_limits(self, portfolio: PortfolioState) -> List[Violation]:
-        """Check all risk limits and return violations."""
+        """Check all risk limits and return violations.
+
+        The VaR sub-check is wrapped so that a data-shape mismatch (e.g. a
+        held instrument with no return series) degrades to a conservative
+        warning instead of crashing the whole risk loop.
+        """
         violations = []; now = datetime.now(timezone.utc)
         for violation in (
             _daily_loss_violation_for_portfolio(portfolio=portfolio, config=self.config, now=now),
@@ -659,7 +684,25 @@ class CircuitBreaker:
         ):
             if violation is not None:
                 violations.append(violation)
-        if (var_violation := self._check_var_limit_from_portfolio(portfolio)) is not None: violations.append(var_violation)
+        try:
+            if (var_violation := self._check_var_limit_from_portfolio(portfolio)) is not None:
+                violations.append(var_violation)
+        except (ValueError, KeyError) as exc:
+            logger.warning(
+                "VaR check failed conservatively: %s",
+                exc,
+                extra=log_extra(error=str(exc)),
+            )
+            violations.append(
+                Violation(
+                    timestamp=now,
+                    violation_type="var_data_incomplete",
+                    severity="warning",
+                    current_value=0.0,
+                    limit_value=0.0,
+                    message=f"VaR check skipped due to incomplete data: {exc}",
+                )
+            )
         if self.config.enable_per_instrument_limits: violations.extend(self._check_per_instrument_limits(portfolio))
         return violations
 
@@ -778,14 +821,22 @@ class CircuitBreaker:
         self,
         coroutine_factory: Callable[[], Awaitable[None]],
     ) -> None:
-        """Schedule async alert delivery without blocking risk checks."""
+        """Schedule async alert delivery without blocking risk checks.
+
+        Keep a strong reference to the task so the event loop does not
+        garbage-collect it before delivery (Python only keeps weak refs to
+        tasks by default).
+        """
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(coroutine_factory())
-            return
         except RuntimeError:
             loop = None
         if loop is not None:
+            task = loop.create_task(coroutine_factory())
+            # Keep a strong reference until completion so the task is not
+            # garbage-collected mid-flight.
+            self._alert_tasks.add(task)
+            task.add_done_callback(self._alert_tasks.discard)
             return
 
         def _runner() -> None:
@@ -901,7 +952,8 @@ class CircuitBreaker:
 
         Args:
             action: Type of trading action
-            size: Position size (for limit checks)
+            size: Position size in contracts (enforced against the configured
+                max_position_size after the state multiplier is applied).
 
         Returns:
             Tuple of (allowed, reason)
@@ -915,9 +967,20 @@ class CircuitBreaker:
                 return False, f"Trading restricted - {action.value} not allowed, only hedging/liquidation"
 
         if self.state == CircuitState.WARNING:
-            # Reduced sizing
-            if action == TradeAction.NEW_POSITION and size > 0:
+            # Reduced sizing: enforce the position limit multiplier on
+            # NEW_POSITION requests so a Warning state actually constrains
+            # growth instead of just annotating it. The check is skipped
+            # when no absolute size cap is configured (max_position_size<=0).
+            if action == TradeAction.NEW_POSITION and size > 0 and self.config.max_position_size > 0:
+                effective_limit = self.config.max_position_size * self.get_position_limit_multiplier()
+                if size > effective_limit:
+                    return (
+                        False,
+                        f"Position size {size:.2f} exceeds warning-state limit {effective_limit:.2f}",
+                    )
                 return True, "Warning state - reduced position sizing recommended"
+            # Always surface the warning, even when no size cap is configured.
+            return True, "Warning state - trading allowed with reduced sizing"
 
         return True, "Trading allowed"
 

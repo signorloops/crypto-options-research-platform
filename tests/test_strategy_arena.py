@@ -370,7 +370,7 @@ def test_run_tournament_with_mocked_engine(monkeypatch):
     import research.backtest.arena as arena_module
 
     class _FakeEngine:
-        def __init__(self, strategy, initial_crypto_balance, transaction_cost_bps):
+        def __init__(self, strategy, initial_crypto_balance, transaction_cost_bps, random_seed=None):
             self.strategy = strategy
 
         def run(self, market_data):
@@ -392,7 +392,7 @@ def test_run_tournament_with_mocked_engine(monkeypatch):
 
 def test_run_single_strategy_returns_result_and_scorecard(monkeypatch):
     class _FakeEngine:
-        def __init__(self, strategy, initial_crypto_balance, transaction_cost_bps):
+        def __init__(self, strategy, initial_crypto_balance, transaction_cost_bps, random_seed=None):
             self.strategy = strategy
 
         def run(self, market_data):

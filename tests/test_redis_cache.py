@@ -295,6 +295,10 @@ class TestRedisCache:
     async def test_subscribe(self, redis_cache, mock_redis):
         """Test pub/sub subscription."""
         pubsub_mock = AsyncMock()
+        # Ensure aclose is not set on the AsyncMock so the fallback close()
+        # path is exercised.
+        if hasattr(pubsub_mock, "aclose"):
+            del pubsub_mock.aclose
         mock_redis.pubsub = MagicMock(return_value=pubsub_mock)
 
         async with redis_cache.subscribe('trades:deribit', 'trades:okx') as pubsub:
@@ -435,6 +439,10 @@ class TestRedisCacheContextManager:
     @pytest.mark.asyncio
     async def test_async_context_manager(self, mock_redis):
         """Test async context manager."""
+        # Ensure the mock does not expose aclose so the legacy close() path
+        # is exercised (aclose is the preferred redis-py 5.x API).
+        if hasattr(mock_redis, "aclose"):
+            del mock_redis.aclose
         with patch('data.redis_cache.redis.Redis', return_value=mock_redis):
             async with RedisCache() as cache:
                 assert cache._pool is not None

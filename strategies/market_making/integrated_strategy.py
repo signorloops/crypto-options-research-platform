@@ -104,7 +104,9 @@ class IntegratedMarketMakingStrategy(MarketMakingStrategy):
         self.hedger = AdaptiveDeltaHedger(self.config.adaptive_hedger)
 
         # State tracking
-        self._returns_history: List[float] = []
+        # Use deque with maxlen so the returns buffer cannot grow unbounded
+        # on long-running sessions; only the calibration window is needed.
+        self._returns_history: Deque[float] = deque(maxlen=self.config.calibration_window)
         self._pnl_history: Deque[Tuple[datetime, float]] = deque(maxlen=self.config.max_pnl_history)
         self._metrics_history: List[StrategyMetrics] = []
         self._current_greeks: Optional[Greeks] = None
@@ -130,7 +132,7 @@ class IntegratedMarketMakingStrategy(MarketMakingStrategy):
         self._trade_intensity_history.append(intensity)
 
         if len(self._returns_history) >= 5:
-            sigma_raw = float(np.std(self._returns_history[-self.config.calibration_window:], ddof=1)) * np.sqrt(365.25 * 24 * 3600)
+            sigma_raw = float(np.std(list(self._returns_history)[-self.config.calibration_window:], ddof=1)) * np.sqrt(365.25 * 24 * 3600)
             if np.isfinite(sigma_raw):
                 self._effective_sigma = float(np.clip(sigma_raw, self.config.min_sigma, self.config.max_sigma))
 
@@ -334,7 +336,8 @@ class IntegratedMarketMakingStrategy(MarketMakingStrategy):
 
         asset_returns = pd.DataFrame()
         if self._returns_history:
-            tail = self._returns_history[-self.config.max_pnl_history:]
+            # deque does not support slicing; materialize the tail.
+            tail = list(self._returns_history)[-self.config.max_pnl_history:]
             asset_returns = pd.DataFrame({state.instrument: tail})
 
         return PortfolioState(

@@ -1,6 +1,8 @@
 """Health check server with liveness/readiness/metrics endpoints."""
 
 import asyncio
+import ctypes
+import ctypes.util
 import inspect
 import logging
 import os
@@ -8,7 +10,7 @@ import resource
 import sys
 import time
 from contextlib import suppress
-from typing import Awaitable, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Awaitable, Callable, Dict, Optional, Tuple, Union
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, status
@@ -16,6 +18,10 @@ from fastapi.responses import JSONResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
 logger = logging.getLogger(__name__)
+
+# uvicorn's uvicorn.config.STARTUP_FAILURE exit code; vendored here so the
+# done-callback can recognise bind failures without importing uvicorn eagerly.
+_UVICORN_STARTUP_FAILURE = 3
 
 CheckFunc = Callable[[], Union[bool, Awaitable[bool]]]
 
@@ -63,12 +69,106 @@ async def _run_check(check_func: CheckFunc) -> bool:
     return bool(result)
 
 
+class _MachTaskBasicInfo(ctypes.Structure):
+    """Subset of ``mach_task_basic_info`` used to read the resident size."""
+
+    _fields_ = [
+        ("virtual_size", ctypes.c_uint64),
+        ("resident_size", ctypes.c_uint64),
+        ("resident_size_max", ctypes.c_uint64),
+        ("suspend_count", ctypes.c_int32),
+        ("policy", ctypes.c_int32),
+        ("deprecated", ctypes.c_int32),
+        ("user_time", ctypes.c_uint32),
+        ("system_time", ctypes.c_uint32),
+    ]
+
+
+_MACH_TASK_BASIC_INFO = 20
+_MACH_TASK_BASIC_INFO_COUNT = ctypes.sizeof(_MachTaskBasicInfo) // 4
+_mach_libc: Optional["ctypes.CDLL"] = None
+
+
+def _load_mach_libc() -> Optional["ctypes.CDLL"]:
+    """Load and configure libc for the Mach ``task_info`` call (macOS only)."""
+    global _mach_libc
+    if _mach_libc is not None:
+        return _mach_libc
+    if sys.platform != "darwin":
+        return None
+    try:
+        name = ctypes.util.find_library("c") or "libc.dylib"
+        libc = ctypes.CDLL(name)
+        libc.mach_task_self.restype = ctypes.c_uint32
+        libc.task_info.argtypes = [
+            ctypes.c_uint32,  # target task port
+            ctypes.c_uint32,  # flavor
+            ctypes.POINTER(_MachTaskBasicInfo),
+            ctypes.POINTER(ctypes.c_uint32),  # in/out count (natural_t items)
+        ]
+        libc.task_info.restype = ctypes.c_int
+    except (OSError, ValueError, AttributeError):
+        return None
+    _mach_libc = libc
+    return libc
+
+
+def _read_mach_task_rss_bytes() -> Optional[int]:
+    """Read current resident size via Mach ``task_info`` (macOS)."""
+    libc = _load_mach_libc()
+    if libc is None:
+        return None
+    info = _MachTaskBasicInfo()
+    count = ctypes.c_uint32(_MACH_TASK_BASIC_INFO_COUNT)
+    try:
+        result = libc.task_info(
+            libc.mach_task_self(),
+            ctypes.c_uint32(_MACH_TASK_BASIC_INFO),
+            ctypes.byref(info),
+            ctypes.byref(count),
+        )
+    except (OSError, ValueError, AttributeError):
+        return None
+    if result != 0:  # KERN_SUCCESS
+        return None
+    return int(info.resident_size)
+
+
+def _read_proc_status_rss_kb() -> Optional[float]:
+    """Read current RSS (``VmRSS``) in kB from ``/proc/self/status`` (Linux)."""
+    try:
+        with open("/proc/self/status", "r", encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith("VmRSS:"):
+                    return float(line.split()[1])
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
 def _memory_usage_mb() -> float:
-    """Get process RSS in MB across Linux/macOS."""
+    """Get the process's *current* RSS in MB across Linux/macOS.
+
+    Peak RSS (``ru_maxrss``) must not drive the health check: a single
+    transient memory spike would otherwise mark the service unhealthy forever,
+    even after the memory has been released back to the OS. Current RSS is
+    therefore read from ``/proc/self/status`` on Linux and from the Mach
+    ``task_info`` call on macOS. ``ru_maxrss`` remains only as a last-resort
+    fallback for platforms without either source, with the caveat that macOS
+    reports it in bytes (peak) while Linux reports it in kilobytes.
+    """
+    rss_kb = _read_proc_status_rss_kb()
+    if rss_kb is not None:
+        return rss_kb / 1024.0
+
+    rss_bytes = _read_mach_task_rss_bytes()
+    if rss_bytes is not None:
+        return rss_bytes / (1024.0 * 1024.0)
+
     usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     if sys.platform == "darwin":
-        return usage / (1024 * 1024)
-    return usage / 1024
+        return usage / (1024.0 * 1024.0)
+    return usage / 1024.0
 
 
 def _memory_limit_mb() -> float:
@@ -255,10 +355,63 @@ class HealthServer:
         self.service_name = service_name
         self.app = create_health_app(service_name=self.service_name)
         self._server: Optional[asyncio.Task] = None
+        self._uvicorn_server: Optional[Any] = None
         self._shutdown_event = asyncio.Event()
+        self._startup_event = asyncio.Event()
+        self._startup_error: Optional[BaseException] = None
+
+    def _log_task_exception(self, task: "asyncio.Task") -> None:
+        """Surface exceptions escaping the server task (they are otherwise never retrieved)."""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is None:
+            return
+        if isinstance(exc, SystemExit) and exc.code == _UVICORN_STARTUP_FAILURE:
+            logger.error(
+                "Health server failed to start on %s:%s (uvicorn startup failure, "
+                "port may already be in use)",
+                self.host,
+                self.port,
+            )
+        else:
+            logger.error("Health server task crashed: %r", exc, exc_info=exc)
 
     async def start(self) -> None:
-        """Start the health server."""
+        """Start the health server and wait until the port is actually bound.
+
+        ``_startup_and_supervise`` runs uvicorn's ``startup()`` (which binds the
+        socket) before entering the serve loop, so a bind failure — for example
+        an already-taken port — raises ``SystemExit`` inside that coroutine,
+        where it is converted into a ``RuntimeError`` instead of killing the
+        process. ``start()`` blocks on ``_startup_event`` and only returns once
+        binding succeeded; the done-callback makes any later crash visible.
+        """
+        self._startup_event.clear()
+        self._startup_error = None
+        self._server = asyncio.create_task(self._startup_and_supervise())
+        self._server.add_done_callback(self._log_task_exception)
+
+        await self._startup_event.wait()
+        # Explicit annotation: the supervisor coroutine (or its done-callback)
+        # reassigns ``self._startup_error`` while we wait, which mypy cannot see.
+        startup_error: Optional[BaseException] = self._startup_error
+        if startup_error is not None:
+            with suppress(BaseException):
+                await self._server
+            raise startup_error
+
+        SERVICE_UP.labels(service=self.service_name).set(1)
+        logger.info(f"Health server started on {self.host}:{self.port}")
+
+    async def _startup_and_supervise(self) -> None:
+        """Bind the port first, then supervise uvicorn's main loop.
+
+        Mirrors uvicorn's ``Server._serve`` preamble (config load + lifespan
+        creation) and then calls ``startup()`` directly, so a bind failure
+        surfaces as an exception in this coroutine rather than as a silent
+        ``SystemExit`` inside an unsupervised task.
+        """
         import uvicorn
 
         config = uvicorn.Config(
@@ -269,19 +422,63 @@ class HealthServer:
             access_log=False,
         )
         server = uvicorn.Server(config)
+        self._uvicorn_server = server
 
-        self._server = asyncio.create_task(server.serve())
-        SERVICE_UP.labels(service=self.service_name).set(1)
-        logger.info(f"Health server started on {self.host}:{self.port}")
+        try:
+            if not config.loaded:
+                config.load()
+            server.lifespan = config.lifespan_class(config)
+            try:
+                # Binds the socket. On failure uvicorn logs the error, shuts
+                # the lifespan down and raises SystemExit(STARTUP_FAILURE).
+                await server.startup()
+            except (SystemExit, OSError) as exc:
+                raise RuntimeError(
+                    f"Health server failed to start on {self.host}:{self.port} "
+                    f"(port may already be in use): {exc!r}"
+                ) from exc
+
+            if server.should_exit or not server.started:
+                with suppress(Exception):
+                    await server.lifespan.shutdown()
+                raise RuntimeError(
+                    f"Health server failed to start on {self.host}:{self.port}: "
+                    "uvicorn exited during startup"
+                )
+        except Exception as exc:
+            self._startup_error = (
+                exc
+                if isinstance(exc, RuntimeError)
+                else RuntimeError(f"Health server failed: {exc!r}")
+            )
+            self._startup_event.set()
+            raise
+
+        self._startup_event.set()
+
+        try:
+            await server.main_loop()
+        finally:
+            with suppress(Exception):
+                await server.shutdown()
 
     async def stop(self) -> None:
         """Stop the health server."""
         if self._server:
-            self._server.cancel()
+            server = self._uvicorn_server
+            if server is not None:
+                # Graceful exit: let uvicorn close connections and the socket.
+                server.should_exit = True
             try:
-                await self._server
-            except asyncio.CancelledError:
+                await asyncio.wait_for(self._server, timeout=5.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                self._server.cancel()
+                with suppress(asyncio.CancelledError):
+                    await self._server
+            except Exception:
+                # Shutdown errors are already logged by the done-callback.
                 pass
+        self._uvicorn_server = None
         SERVICE_UP.labels(service=self.service_name).set(0)
         logger.info("Health server stopped")
 
@@ -289,7 +486,7 @@ class HealthServer:
         await self.start()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         await self.stop()
 
 

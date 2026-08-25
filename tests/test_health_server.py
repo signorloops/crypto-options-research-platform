@@ -151,6 +151,44 @@ def test_memory_healthy_respects_threshold(monkeypatch):
     assert health_server._memory_healthy() is True
 
 
+def test_memory_usage_reads_proc_status_before_mach(monkeypatch):
+    """Current RSS should come from /proc/self/status (VmRSS, kB) when available."""
+    monkeypatch.setattr(health_server, "_read_proc_status_rss_kb", lambda: 2048.0, raising=True)
+    monkeypatch.setattr(health_server, "_read_mach_task_rss_bytes", lambda: 999 * 1024 * 1024)
+    assert health_server._memory_usage_mb() == 2.0
+
+
+def test_memory_usage_reads_mach_task_info_when_proc_missing(monkeypatch):
+    """Without /proc, macOS Mach task_info resident size (bytes) should be used."""
+    monkeypatch.setattr(health_server, "_read_proc_status_rss_kb", lambda: None)
+    monkeypatch.setattr(health_server, "_read_mach_task_rss_bytes", lambda: 5 * 1024 * 1024)
+    assert health_server._memory_usage_mb() == 5.0
+
+
+def test_memory_usage_reports_current_rss_not_historic_peak(monkeypatch):
+    """A transient spike must not keep the check unhealthy after memory is freed.
+
+    ru_maxrss is peak RSS on macOS/maximum on Linux; the health check must use
+    current RSS instead so a one-time spike does not permanently degrade the
+    service.
+    """
+    monkeypatch.setattr(health_server, "_read_proc_status_rss_kb", lambda: None)
+    monkeypatch.setattr(health_server, "_read_mach_task_rss_bytes", lambda: 512 * 1024 * 1024)
+
+    class _Rusage:
+        ru_maxrss = 4 * 1024 * 1024 * 1024  # historic 4GiB peak, in bytes
+
+    monkeypatch.setattr(health_server.resource, "getrusage", lambda *_args, **_kwargs: _Rusage())
+
+    monkeypatch.setenv("MEMORY_LIMIT_MB", "1024")
+    monkeypatch.delenv("MEMORY_HEALTH_THRESHOLD", raising=False)
+
+    # Current RSS (512MB) is well under the limit even though the historic
+    # peak (4GiB) would have exceeded it.
+    assert health_server._memory_usage_mb() == 512.0
+    assert health_server._memory_healthy() is True
+
+
 @pytest.mark.asyncio
 async def test_tcp_connectivity_check_success_and_failure():
     """TCP connectivity helper should return True on open port and False otherwise."""
@@ -183,13 +221,32 @@ async def test_health_server_start_and_stop_with_uvicorn_stub(monkeypatch):
             self.port = port
             self.log_level = log_level
             self.access_log = access_log
+            self.loaded = True
+            self.lifespan_class = lambda config: _FakeLifespan()
+
+    class _FakeLifespan:
+        async def startup(self):
+            return None
+
+        async def shutdown(self):
+            return None
 
     class _FakeServer:
         def __init__(self, config):
             self.config = config
+            self.started = False
+            self.should_exit = False
+            self.lifespan = _FakeLifespan()
 
-        async def serve(self):
-            await asyncio.sleep(3600)
+        async def startup(self):
+            self.started = True
+
+        async def shutdown(self):
+            return None
+
+        async def main_loop(self):
+            while not self.should_exit:
+                await asyncio.sleep(0.01)
 
     monkeypatch.setitem(
         sys.modules, "uvicorn", SimpleNamespace(Config=_FakeConfig, Server=_FakeServer)
@@ -202,6 +259,99 @@ async def test_health_server_start_and_stop_with_uvicorn_stub(monkeypatch):
 
     await server.stop()
     assert server._server.done()
+
+
+@pytest.mark.asyncio
+async def test_health_server_start_raises_when_port_taken(monkeypatch):
+    """start() must raise when uvicorn cannot bind instead of reporting success."""
+
+    class _FakeConfig:
+        def __init__(self, app, host, port, log_level, access_log):
+            self.loaded = True
+            self.lifespan_class = lambda config: _FakeLifespan()
+
+    class _FakeLifespan:
+        async def startup(self):
+            return None
+
+        async def shutdown(self):
+            return None
+
+    class _TakenPortServer:
+        def __init__(self, config):
+            self.config = config
+            self.started = False
+            self.should_exit = False
+            self.lifespan = _FakeLifespan()
+
+        async def startup(self):
+            # Mirror uvicorn's behaviour on bind failure.
+            raise SystemExit(3)
+
+        async def shutdown(self):
+            return None
+
+        async def main_loop(self):
+            await asyncio.sleep(3600)
+
+    monkeypatch.setitem(
+        sys.modules, "uvicorn", SimpleNamespace(Config=_FakeConfig, Server=_TakenPortServer)
+    )
+
+    server = health_server.HealthServer(host="127.0.0.1", port=9998, service_name="svc")
+    with pytest.raises(RuntimeError, match="failed to start"):
+        await server.start()
+
+    # SERVICE_UP must not claim the service is up after a failed start.
+    assert server._server.done()
+
+
+@pytest.mark.asyncio
+async def test_health_server_task_exceptions_are_logged(monkeypatch, caplog):
+    """Crashes in the serve loop should be logged by the done-callback."""
+
+    class _CrashingServer:
+        def __init__(self, config):
+            self.started = False
+            self.should_exit = False
+            self.lifespan = _FakeLifespanStub()
+
+        async def startup(self):
+            self.started = True
+
+        async def shutdown(self):
+            return None
+
+        async def main_loop(self):
+            await asyncio.sleep(0)
+            raise RuntimeError("boom in serve loop")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "uvicorn",
+        SimpleNamespace(
+            Config=lambda *a, **k: SimpleNamespace(
+                loaded=True, lifespan_class=lambda cfg: _FakeLifespanStub()
+            ),
+            Server=_CrashingServer,
+        ),
+    )
+
+    server = health_server.HealthServer(host="127.0.0.1", port=9997, service_name="svc")
+    with caplog.at_level("ERROR", logger="core.health_server"):
+        await server.start()
+        with pytest.raises(RuntimeError, match="boom in serve loop"):
+            await server._server
+
+    assert any("crashed" in rec.message for rec in caplog.records)
+
+
+class _FakeLifespanStub:
+    async def startup(self):
+        return None
+
+    async def shutdown(self):
+        return None
 
 
 @pytest.mark.asyncio

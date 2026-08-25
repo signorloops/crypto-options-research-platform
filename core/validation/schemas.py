@@ -159,7 +159,7 @@ class BacktestConfig(BaseModel):
 
 class DownloadRequest(BaseModel):
     """Validated data download request."""
-    exchange: Literal["deribit", "binance"]
+    exchange: Literal["deribit", "binance", "okx"]
     data_type: Literal["trades", "orderbook", "ticks", "ohlcv"]
     instrument: str = Field(..., min_length=1, max_length=50)
     start: datetime

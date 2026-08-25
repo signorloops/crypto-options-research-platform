@@ -169,7 +169,10 @@ def _rolling_vpin_values(
 
     w = num_buckets
     half_w = max(1, w // 2)
-    vpin_values = np.full(n, 0.5)
+    # Warm-up buckets must be NaN, not 0.5: the "high toxicity" threshold
+    # used downstream is 0.4, so 0.5 incorrectly flags every series start
+    # as a high-toxicity period regardless of actual flow.
+    vpin_values = np.full(n, np.nan)
     idx = np.arange(n)
     starts = np.maximum(0, idx - w + 1)
     window_lengths = idx - starts + 1

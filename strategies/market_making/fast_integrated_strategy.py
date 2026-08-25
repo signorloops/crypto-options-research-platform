@@ -479,8 +479,11 @@ class FastIntegratedMarketMakingStrategy(MarketMakingStrategy):
         self._last_can_trade = True
         self._last_halt_reason = "ok"
 
-        if hasattr(self.circuit_breaker, "reset"):
-            self.circuit_breaker.reset()
+        if hasattr(self.circuit_breaker, "manual_reset"):
+            # CircuitBreaker exposes manual_reset(reason); the previous
+            # hasattr(self.circuit_breaker, "reset") check was always False
+            # and silently kept the breaker in its halted/restricted state.
+            self.circuit_breaker.manual_reset("Strategy reset")
         self.regime_detector.reset()
         if hasattr(self.hedger, "reset"):
             self.hedger.reset()

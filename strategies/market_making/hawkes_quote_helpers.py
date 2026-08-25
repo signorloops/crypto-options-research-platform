@@ -1,8 +1,27 @@
 from __future__ import annotations
 from typing import Dict, Optional
 
+import numpy as np
+import pandas as pd
+
+
 def timestamp_seconds(timestamp: object) -> float:
-    return timestamp.timestamp() if hasattr(timestamp, "timestamp") else 0.0
+    """Convert a timestamp to epoch seconds.
+
+    Accepts datetime, pandas.Timestamp, numpy.datetime64, int/float epoch
+    seconds. Returns 0.0 only for unrecognized types.
+    """
+    if timestamp is None:
+        return 0.0
+    if isinstance(timestamp, (int, float, np.integer, np.floating)):
+        return float(timestamp)
+    if isinstance(timestamp, np.datetime64):
+        return float(pd.Timestamp(timestamp).timestamp())
+    if isinstance(timestamp, pd.Timestamp):
+        return float(timestamp.timestamp())
+    if hasattr(timestamp, "timestamp"):
+        return float(timestamp.timestamp())
+    return 0.0
 
 def price_change_ratio(mid: float, last_price: Optional[float]) -> float:
     if last_price is None or last_price <= 0:

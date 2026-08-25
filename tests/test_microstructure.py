@@ -101,9 +101,11 @@ class TestVPINCalculator:
 
         assert isinstance(result, VPINResult)
         assert len(result.vpin_values) > 0
-        # VPIN should be between 0 and 1
-        assert result.vpin_values.min() >= 0
-        assert result.vpin_values.max() <= 1
+        # VPIN should be between 0 and 1; warm-up buckets are NaN by design.
+        populated = result.vpin_values[np.isfinite(result.vpin_values)]
+        assert len(populated) > 0
+        assert populated.min() >= 0
+        assert populated.max() <= 1
 
     def test_vpin_toxicity_detection(self):
         """Test VPIN detects toxic flow."""
@@ -121,10 +123,12 @@ class TestVPINCalculator:
 
         result = calc.calculate(trades)
 
-        # VPIN should be elevated during informed trading
-        assert len(result.vpin_values) > 0
+        # VPIN should be elevated during informed trading; warm-up buckets
+        # are NaN by design and do not participate.
+        populated = result.vpin_values[np.isfinite(result.vpin_values)]
+        assert len(populated) > 0
         # Some VPIN values should be > 0
-        assert result.vpin_values.max() > 0
+        assert populated.max() > 0
 
     def test_insufficient_data(self):
         """Test behavior with insufficient data."""
@@ -144,8 +148,11 @@ class TestVPINCalculator:
         # VPIN is calculated per bucket, not per trade
         # Each trade has volume 50000, bucket_size=100, so each trade creates ~500 buckets
         assert len(result.vpin_values) > 0
-        assert result.vpin_values.max() <= 1.0
-        assert result.vpin_values.min() >= 0.0
+        # Warm-up buckets are NaN by design; only evaluate the populated tail.
+        populated = result.vpin_values[np.isfinite(result.vpin_values)]
+        if len(populated) > 0:
+            assert populated.max() <= 1.0
+            assert populated.min() >= 0.0
 
     def test_vpin_reaches_one_under_all_one_sided_flow(self):
         """All-buy buckets should produce VPIN close to 1.0, not compressed to 0.5."""
