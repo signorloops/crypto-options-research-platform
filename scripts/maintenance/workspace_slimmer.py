@@ -54,9 +54,30 @@ def _format_bytes(value: int) -> str:
     return f"{size:.2f} PB"
 
 
+def _resolve_inside_root(root: Path, name: str) -> Path | None:
+    """Resolve ``root / name`` but refuse symlink escapes.
+
+    ``artifacts``/``logs``/``.venv`` are occasionally symlinks to a shared or
+    system directory. ``shutil.rmtree`` on the resolved target would then
+    delete data OUTSIDE the workspace (empirically: an ``artifacts`` symlink
+    to a sibling dir caused that dir to be wiped). Resolve strictly and drop
+    any target that does not stay under ``root``.
+    """
+    resolved_root = root.resolve()
+    target = (root / name).resolve()
+    if target != resolved_root and resolved_root not in target.parents:
+        return None
+    return target
+
+
 def _list_untracked_results(repo_root: Path) -> list[Path]:
+    # Include --ignored: the heavy hitters under results/ (backtest_*.json,
+    # *_report*.md, backtest_full_history/, ...) are exactly the files
+    # .gitignore marks as generated. Without --ignored the flag silently
+    # under-cleans — the planned reclaimable size excludes the bulk of the
+    # results directory.
     completed = subprocess.run(
-        ["git", "ls-files", "--others", "--exclude-standard", "results"],
+        ["git", "ls-files", "--others", "--ignored", "--exclude-standard", "results"],
         cwd=repo_root,
         text=True,
         capture_output=True,
@@ -132,8 +153,8 @@ def _build_cleanup_plan(
 
     for root in roots:
         for name in SAFE_DIR_TARGETS:
-            target = (root / name).resolve()
-            if target.exists():
+            target = _resolve_inside_root(root, name)
+            if target is not None and target.exists():
                 plan.append(CleanupItem(path=str(target), kind="dir", bytes=_path_size(target)))
 
         for pattern in SAFE_FILE_GLOB_TARGETS:
@@ -162,8 +183,8 @@ def _build_cleanup_plan(
 
         if include_venv:
             for name in VENV_DIR_TARGETS:
-                target = (root / name).resolve()
-                if target.exists():
+                target = _resolve_inside_root(root, name)
+                if target is not None and target.exists():
                     plan.append(
                         CleanupItem(path=str(target), kind="dir", bytes=_path_size(target))
                     )
@@ -183,12 +204,21 @@ def _build_cleanup_plan(
     return [{"path": row.path, "kind": row.kind, "bytes": row.bytes} for row in rows]
 
 
-def _execute_cleanup(plan: list[dict[str, Any]]) -> int:
+def _execute_cleanup(
+    plan: list[dict[str, Any]], *, allowed_roots: list[Path] | None = None
+) -> int:
     removed = 0
     for item in plan:
         path = Path(item["path"]).resolve()
         if not path.exists():
             continue
+        if allowed_roots is not None:
+            # Defense in depth: never delete anything outside the scanned
+            # roots, even if a plan entry slipped through (e.g. a symlinked
+            # artifacts/ dir resolved to a sibling directory).
+            resolved_roots = [root.resolve() for root in allowed_roots]
+            if not any(path == root or root in path.parents for root in resolved_roots):
+                continue
         if path.is_dir():
             shutil.rmtree(path)
         else:
@@ -229,6 +259,9 @@ def main() -> int:
         include_venv=args.include_venv,
         include_all_worktrees=args.all_worktrees,
     )
+    roots_for_cleanup = (
+        _list_worktree_roots(root) if args.all_worktrees else [root]
+    )
 
     total_bytes = sum(int(item["bytes"]) for item in plan)
     print(f"Workspace slim plan items: {len(plan)}")
@@ -240,7 +273,7 @@ def main() -> int:
         print("Dry-run only. Re-run with --apply to execute cleanup.")
         return 0
 
-    removed = _execute_cleanup(plan)
+    removed = _execute_cleanup(plan, allowed_roots=roots_for_cleanup)
     print(f"Cleanup applied. Removed {removed} item(s).")
     return 0
 

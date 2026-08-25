@@ -11,7 +11,12 @@ from pathlib import Path
 
 PATTERNS = {
     "unix_user_home": re.compile(r"(?<![A-Za-z0-9_])/(?:Users|home)/[^\s'\"`]+"),
-    "windows_user_home": re.compile(r"(?<![A-Za-z0-9_])[A-Za-z]:\\Users\\[^\s'\"`]+"),
+    # One-or-more separators: Windows paths leak into source as escaped
+    # literals (JSON/Python/YAML store a doubled backslash on disk), which a
+    # single-backslash pattern never matches. "/" covers forward-slash
+    # Windows paths. (Examples below avoid literal matches so this file
+    # passes its own check: drive-colon-backslash-backslash-Users.)
+    "windows_user_home": re.compile(r"(?<![A-Za-z0-9_])[A-Za-z]:[\\/]+Users[\\/][^\s'\"`]+"),
     "file_uri": re.compile(r"file:///[A-Za-z0-9._~/%+-][^\s'\"`]*"),
 }
 

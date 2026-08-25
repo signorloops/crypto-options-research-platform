@@ -106,6 +106,96 @@ def test_build_cleanup_plan_includes_safe_files_and_skips_git_metadata(tmp_path)
     assert str((tmp_path / ".git" / ".DS_Store").resolve()) not in plan_paths
 
 
+def test_build_cleanup_plan_skips_symlinked_targets_escaping_root(tmp_path):
+    """A symlinked artifacts/ dir pointing outside the workspace must not be cleaned.
+
+    Previously the plan resolved the symlink and ``--apply`` ran rmtree on the
+    resolved target, deleting data outside the repository.
+    """
+    module = _load_module()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    _touch(outside / "precious.txt")
+    (repo / "artifacts").symlink_to(outside, target_is_directory=True)
+
+    plan = module._build_cleanup_plan(
+        repo_root=repo,
+        include_results=False,
+        include_venv=False,
+        include_all_worktrees=False,
+    )
+    plan_paths = {item["path"] for item in plan}
+
+    assert str(outside.resolve()) not in plan_paths
+    assert (outside / "precious.txt").exists()
+
+
+def test_build_cleanup_plan_keeps_symlinked_targets_inside_root(tmp_path):
+    """A symlink that stays inside the workspace is still safe to clean."""
+    module = _load_module()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    real = repo / "shared_cache"
+    real.mkdir()
+    _touch(real / "data.bin")
+    (repo / "artifacts").symlink_to(real, target_is_directory=True)
+
+    plan = module._build_cleanup_plan(
+        repo_root=repo,
+        include_results=False,
+        include_venv=False,
+        include_all_worktrees=False,
+    )
+    plan_paths = {item["path"] for item in plan}
+
+    assert str(real.resolve()) in plan_paths
+
+
+def test_execute_cleanup_refuses_symlink_escape_even_if_plan_slipped_through(tmp_path):
+    """Defense in depth: _execute_cleanup re-checks containment before deleting."""
+    module = _load_module()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    _touch(outside / "precious.txt")
+
+    # A hand-crafted plan entry outside any root must be dropped, not deleted.
+    plan = [{"path": str(outside.resolve()), "kind": "dir", "bytes": 1}]
+    removed = module._execute_cleanup(plan, allowed_roots=[repo.resolve()])
+
+    assert removed == 0
+    assert (outside / "precious.txt").exists()
+
+
+def test_list_untracked_results_includes_gitignored_generated_files(tmp_path, monkeypatch):
+    """--include-results must surface gitignored generated files.
+
+    The heavy results artifacts (results/backtest_*.json, *_report*.md, ...)
+    are exactly what .gitignore marks as generated; without --ignored the
+    cleanup silently skipped them.
+    """
+    module = _load_module()
+
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=0,
+            stdout="results/backtest_run.json\nresults/manual_notes.txt\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    module._list_untracked_results(tmp_path)
+
+    assert "--ignored" in captured["cmd"]
+
+
 def test_list_worktree_roots_parses_porcelain_output(tmp_path, monkeypatch):
     module = _load_module()
     main_root = (tmp_path / "repo").resolve()

@@ -26,7 +26,10 @@ def _iter_markdown_files(paths: list[Path]) -> Iterable[Path]:
 def _normalize_target(raw: str) -> str:
     target = raw.strip()
     if target.startswith("<") and target.endswith(">"):
-        target = target[1:-1].strip()
+        # Angle-bracket form exists precisely to allow spaces in the path;
+        # keep it whole so `[x](<docs/my file.md>)` is not truncated to
+        # `docs/my` by the title-splitting heuristic below.
+        return target[1:-1].strip()
     # Strip optional markdown title: path "title"
     if " " in target and not target.startswith("#"):
         target = target.split(" ", 1)[0].strip()
@@ -75,8 +78,11 @@ def main() -> int:
 
     markdown_files = list(_iter_markdown_files(input_paths))
     if not markdown_files:
-        print("No markdown files found for link checking.")
-        return 0
+        # A vacuous pass here hides a moved/renamed docs tree or a typo'd
+        # --paths in CI (the gate would go silently green with zero files
+        # checked). Treat it as an error.
+        print("ERROR: no markdown files found for link checking; refusing to pass vacuously.")
+        return 2
 
     all_errors: list[str] = []
     for md_file in markdown_files:
