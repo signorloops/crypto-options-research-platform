@@ -6,9 +6,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
-SCRIPT_PATH = (
-    Path(__file__).resolve().parents[1] / "scripts" / "docs" / "check_markdown_links.py"
-)
+SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "docs" / "check_markdown_links.py"
 
 
 def _load_module():

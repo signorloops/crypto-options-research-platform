@@ -5,9 +5,8 @@ from __future__ import annotations
 
 import argparse
 import re
-import sys
 from pathlib import Path
-from typing import Iterable
+from collections.abc import Iterable
 
 _LINK_RE = re.compile(r"(?<!!)\[[^\]]*\]\(([^)]+)\)")
 _SKIP_PREFIXES = ("http://", "https://", "mailto:", "tel:", "data:")

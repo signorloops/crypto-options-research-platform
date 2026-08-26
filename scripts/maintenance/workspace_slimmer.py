@@ -145,11 +145,7 @@ def _build_cleanup_plan(
     include_all_worktrees: bool,
 ) -> list[dict[str, Any]]:
     plan: list[CleanupItem] = []
-    roots = (
-        _list_worktree_roots(repo_root)
-        if include_all_worktrees
-        else [repo_root.resolve()]
-    )
+    roots = _list_worktree_roots(repo_root) if include_all_worktrees else [repo_root.resolve()]
 
     for root in roots:
         for name in SAFE_DIR_TARGETS:
@@ -185,15 +181,15 @@ def _build_cleanup_plan(
             for name in VENV_DIR_TARGETS:
                 target = _resolve_inside_root(root, name)
                 if target is not None and target.exists():
-                    plan.append(
-                        CleanupItem(path=str(target), kind="dir", bytes=_path_size(target))
-                    )
+                    plan.append(CleanupItem(path=str(target), kind="dir", bytes=_path_size(target)))
 
         if include_results:
             for file_path in _list_untracked_results(root):
                 if file_path.is_file():
                     plan.append(
-                        CleanupItem(path=str(file_path), kind="file", bytes=file_path.stat().st_size)
+                        CleanupItem(
+                            path=str(file_path), kind="file", bytes=file_path.stat().st_size
+                        )
                     )
 
     dedup: dict[str, CleanupItem] = {}
@@ -204,9 +200,7 @@ def _build_cleanup_plan(
     return [{"path": row.path, "kind": row.kind, "bytes": row.bytes} for row in rows]
 
 
-def _execute_cleanup(
-    plan: list[dict[str, Any]], *, allowed_roots: list[Path] | None = None
-) -> int:
+def _execute_cleanup(plan: list[dict[str, Any]], *, allowed_roots: list[Path] | None = None) -> int:
     removed = 0
     for item in plan:
         path = Path(item["path"]).resolve()
@@ -259,9 +253,7 @@ def main() -> int:
         include_venv=args.include_venv,
         include_all_worktrees=args.all_worktrees,
     )
-    roots_for_cleanup = (
-        _list_worktree_roots(root) if args.all_worktrees else [root]
-    )
+    roots_for_cleanup = _list_worktree_roots(root) if args.all_worktrees else [root]
 
     total_bytes = sum(int(item["bytes"]) for item in plan)
     print(f"Workspace slim plan items: {len(plan)}")
